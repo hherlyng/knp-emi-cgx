@@ -1,0 +1,19 @@
+[project]
+name = "KNP-EMI-CGx"
+version = "0.0.1"
+requires-python = ">=3.8"
+
+# Path to README.md
+readme = "README.md"
+
+# Path to license file
+license = {file = "LICENSE"}
+
+# Direct dependencies
+dependencies = [
+    'pandas',
+    'scipy',
+    'numpy',
+    'sympy',
+    'multiphenicsx@git+https://github.com/multiphenics/multiphenicsx.git@dolfinx-v0.7.1'
+]

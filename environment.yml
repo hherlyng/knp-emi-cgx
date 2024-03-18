@@ -1,0 +1,17 @@
+name: KNP-EMI-CGx
+channels:
+  - conda-forge
+dependencies:
+  - fenics-dolfinx
+  - python=3.10
+  - pandas
+  - scipy
+  - numpy
+  - sympy
+  - git
+  - mpich
+  - conda-ecosystem-user-package-isolation
+  - pip:
+      - "multiphenicsx@git+https://github.com/multiphenics/multiphenicsx.git@dolfinx-v0.7.1"
+
+
