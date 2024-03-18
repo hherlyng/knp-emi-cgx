@@ -35,3 +35,8 @@ jobs:
       - name: install package
         run: |
           python -m pip install .
+
+      - name: install package
+        run: |
+          python3 ./src/KNPEMI/generate_square_mesh.py -N 20
+          python3 ./src/KNPEMI/main.py --input=./geometries/square20.xdmf
