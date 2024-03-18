@@ -9,13 +9,15 @@ from parsers import CustomParser
 
 def main(argv=None):
 	parser = argparse.ArgumentParser(formatter_class=CustomParser)
-	parser.add_argument("-i", "--intra" ,default=1, type=int, help="Intracellular tag")
-	parser.add_argument("-e", "--extra" ,default=2, type=int, help="Extracellular tag")
-	parser.add_argument("-b", "--boundary" ,default=3, type=int, help="Boundary tag")
-	parser.add_argument("-m", "--membrane" ,default=4, type=int, help="Membrane tag")
-	parser.add_argument("--dt", default=5e-5, type=float, help="Time step")
-	parser.add_argument("--time_steps", default=50, type=int, help="Number of time steps")
 	parser.add_argument("--input", dest="input_file", default='geometries/square.xdmf', type=Path, help="Input file")
+	marker_opts = parser.add_argument_group("Domain markers", "Tags for the different domains")
+	marker_opts.add_argument("-i", "--intra" ,default=1, type=int, help="Intracellular tag")
+	marker_opts.add_argument("-e", "--extra" ,default=2, type=int, help="Extracellular tag")
+	marker_opts.add_argument("-b", "--boundary" ,default=3, type=int, help="Boundary tag")
+	marker_opts.add_argument("-m", "--membrane" ,default=4, type=int, help="Membrane tag")
+	temporal_opts = parser.add_argument_group("Temporal options", "Options for the temporal discretization")
+	temporal_opts.add_argument("--dt", default=5e-5, type=float, help="Time step")
+	temporal_opts.add_argument("--time_steps", default=50, type=int, help="Number of time steps")
 	args = parser.parse_args(argv)
 	tags = {'intra' : args.intra, 'extra' : args.extra, 'boundary' : args.boundary, 'membrane' : args.membrane}
 
