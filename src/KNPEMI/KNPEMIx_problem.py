@@ -723,13 +723,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             self.errors = [L2_err_Na_i, L2_err_Na_e, L2_err_K_i, L2_err_K_e, L2_err_Cl_i, L2_err_Cl_e, L2_err_phi_i, L2_err_phi_e]        
 
     ### class variables ###
-    
-    # physical parameters
-    C_M = 0.02                       # capacitance (F)
-    T   = 300                        # temperature (K)
-    F   = 96485                      # Faraday's constant (C/mol)
-    R   = 8.314                      # Gas constant (J/(K*mol))
-    psi = R*T/F                      # recurring variable
     g_Na_bar  = 1200                 # Na max conductivity (S/m**2)
     g_K_bar   = 360                  # K max conductivity (S/m**2)    
     g_Na_leak = 2.0*0.5              # Na leak conductivity (S/m**2) (Constant)
@@ -786,6 +779,3 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     
     # test flag
     MMS_test        = False
-
-    # BC (only on phi)
-    dirichlet_bcs   = False

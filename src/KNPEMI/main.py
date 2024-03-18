@@ -1,3 +1,4 @@
+import yaml
 import argparse
 from pathlib import Path
 
@@ -33,9 +34,30 @@ def main(argv=None):
 	solver = SolverKNPEMI(problem, args.time_steps)
 	solver.solve()
 
+def main_yaml(yaml_file="config.yaml"):
+
+	if MPI.COMM_WORLD.rank==0: print("Reading configuration from file: ", yaml_file)
+
+	with open(yaml_file, 'r') as file:
+		cfg = yaml.safe_load(file)
+	
+	problem = ProblemKNPEMI(cfg)
+
+	HH = HH_model(problem)
+	ionic_models = [HH]
+
+	problem.init_ionic_model(ionic_models)
+
+	# Create solver and solve
+	solver = SolverKNPEMI(problem)
+	solver.solve()
+	
+
+	from IPython import embed;embed()
+
 if __name__=='__main__':
 
-	main()
+	main_yaml()
 	# # astrocyte
 	# input_file = 'geometries/astrocyte_mesh_full.xdmf'
 	# tags = {'intra' : 3, 'extra' : 1, 'boundary' : 4, 'membrane' : 5}

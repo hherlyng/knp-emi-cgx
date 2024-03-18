@@ -32,13 +32,11 @@ class MixedDimensionalProblem(ABC):
 
     ghost_mode = dfx.mesh.GhostMode.shared_facet
 
-    def __init__(self, input_file, tags, dt):
+    def __init__(self, config: dict):
         
         tic = time.perf_counter()
 
-        self.comm = MPI.COMM_WORLD
-
-        if MPI.COMM_WORLD.rank==0: print("Reading input data: ", input_file)
+        self.comm = MPI.COMM_WORLD # MPI Communicator
 
         # Options for the fenicsx form compiler optimization
         cache_dir       = '.cache'
@@ -47,13 +45,32 @@ class MixedDimensionalProblem(ABC):
                                 "cache_dir"               : cache_dir,
                                 "cffi_libraries"          : ["m"]}
 
-        # assign input argument
-        self.input_file = input_file
+        # Assign mesh input file file
+        self.input_file = config['mesh_file']
 
-        # parse tags
+        # Parse cell tags and facet tags
+        tags = {'intra'    : config['ics_tags'], # Intracellular space cell tags
+                'extra'    : config['ecs_tags'], # Extracellular space cell tags
+                'membrane' : config['mem_tags'], # Membrane (interface) facet tags
+                'boundary' : config['bdry_tags']} # Boundary facet tags
         self.parse_tags(tags)
 
-        # in case some problem dependent init is needed
+        # Physical parameters
+        self.C_M = config['C_m']                     # Capacitance (F)
+        self.T   = config['physical_constants']['T'] # Temperature (K)
+        self.F   = config['physical_constants']['F'] # Faraday constant (C/mol)
+        self.R   = config['physical_constants']['R'] # Gas constant (J/(K*mol))
+        self.psi = self.R*self.T/self.F              # Constant used in variational form
+
+        # Boundary conditions
+        bcs = config['boundary_conditions']
+        if len(bcs)==0:
+            # No Dirichlet boundary conditions -> pure Neumann problem
+            self.dirichlet_bcs = False
+        else:
+            self.dirichlet_bcs = True
+
+        # In case some problem dependent init is needed
         self.init()
 
         # setup FEM
@@ -61,8 +78,10 @@ class MixedDimensionalProblem(ABC):
         self.setup_spaces()
         self.setup_boundary_conditions()
 
-        # init time step
+        # Temporal variables
         self.t  = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(0.0))
+        self.T  = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(config['T']))
+        dt = 5e-5
         self.dt = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(dt))
 
         # init empty ionic model
