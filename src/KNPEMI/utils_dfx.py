@@ -6,6 +6,7 @@ import collections.abc
 import numpy   as np
 import sympy   as sp
 import dolfinx as dfx
+import warnings
 
 from abc                      import ABC, abstractmethod
 from scipy                    import sparse
@@ -669,9 +670,9 @@ def mark_boundaries_square(mesh: dfx.mesh.Mesh) -> dfx.mesh.MeshTags:
 
     right_facets = dfx.mesh.locate_entities(mesh, facet_dim, right)
     facet_marker[right_facets] = GAMMA
-
     facet_tags = dfx.mesh.meshtags(mesh, facet_dim, np.arange(num_facets, dtype = np.int32), facet_marker)
-
+    if len(facet_tags.find(GAMMA)) == 0:
+        warnings.warn("No facets are marked with {GAMMA}")
     return facet_tags
 
 def mark_boundaries_square_MMS(mesh: dfx.mesh.Mesh) -> dfx.mesh.MeshTags:

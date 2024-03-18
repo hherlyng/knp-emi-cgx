@@ -1,22 +1,39 @@
-from sys                 import argv
-from mpi4py              import MPI
-from KNPEMIx_solver      import SolverKNPEMI
-from KNPEMIx_problem     import ProblemKNPEMI
+import argparse
+from pathlib import Path
+
 from KNPEMIx_ionic_model import *
+from KNPEMIx_problem import ProblemKNPEMI
+from KNPEMIx_solver import SolverKNPEMI
+from parsers import CustomParser
+
+
+def main(argv=None):
+	parser = argparse.ArgumentParser(formatter_class=CustomParser)
+	parser.add_argument("-i", "--intra" ,default=1, type=int, help="Intracellular tag")
+	parser.add_argument("-e", "--extra" ,default=2, type=int, help="Extracellular tag")
+	parser.add_argument("-b", "--boundary" ,default=3, type=int, help="Boundary tag")
+	parser.add_argument("-m", "--membrane" ,default=4, type=int, help="Membrane tag")
+	parser.add_argument("--dt", default=5e-5, type=float, help="Time step")
+	parser.add_argument("--time_steps", default=50, type=int, help="Number of time steps")
+	parser.add_argument("--input", dest="input_file", default='geometries/square.xdmf', type=Path, help="Input file")
+	args = parser.parse_args(argv)
+	tags = {'intra' : args.intra, 'extra' : args.extra, 'boundary' : args.boundary, 'membrane' : args.membrane}
+
+	# Create problem
+	problem = ProblemKNPEMI(args.input_file, tags, args.dt)
+	# Set ionic models
+	HH = HH_model(problem)
+	ionic_models = [HH]
+
+	problem.init_ionic_model(ionic_models)
+
+	# Create solver and solve
+	solver = SolverKNPEMI(problem, args.time_steps)
+	solver.solve()
 
 if __name__=='__main__':
 
-	comm = MPI.COMM_WORLD # MPI communicator
-	
-	# global time step (s) and number of timesteps
-	dt = 5e-5
-	time_steps = 50
-
-	# square
-	N = int(argv[1]) # Number of mesh cells
-	input_file = f'geometries/square{N}.xdmf'	
-	tags = {'intra' : 1, 'extra' : 2, 'boundary' : 3, 'membrane' : 4}
-
+	main()
 	# # astrocyte
 	# input_file = 'geometries/astrocyte_mesh_full.xdmf'
 	# tags = {'intra' : 3, 'extra' : 1, 'boundary' : 4, 'membrane' : 5}
@@ -28,15 +45,4 @@ if __name__=='__main__':
 	# GC
 	# input_file = '../../../data/GC/'
 
-	# Create problem
-	problem = ProblemKNPEMI(input_file, tags, dt)
 
-	# Set ionic models
-	HH = HH_model(problem)
-	ionic_models = [HH]
-
-	problem.init_ionic_model(ionic_models)
-
-	# Create solver and solve
-	solver = SolverKNPEMI(problem, time_steps)
-	solver.solve()
