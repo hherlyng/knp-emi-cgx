@@ -1,0 +1,32 @@
+name: Test KNP-EMI CGx code via docker
+on:
+  workflow_dispatch:
+  workflow_call:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["**"]
+
+env:
+  DEB_PYTHON_INSTALL_LAYOUT: deb_system
+
+defaults:
+  run:
+    shell: bash -el {0}
+
+jobs:
+  test_scripts:
+    runs-on: ubuntu-latest
+    container: ghcr.io/fenics/dolfinx/dolfinx:stable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install package
+        run: |
+          python3 -m pip install .
+
+      - name: install package
+        run: |
+          python3 ./src/KNPEMI/generate_square_mesh.py -N 20
+          python3 ./src/KNPEMI/main.py --input=./geometries/square20.xdmf
