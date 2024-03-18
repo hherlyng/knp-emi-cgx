@@ -5,6 +5,7 @@ dependencies:
   - fenics-dolfinx
   - python=3.10
   - pandas
+  - matplotlib
   - scipy
   - numpy
   - sympy
