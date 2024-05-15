@@ -43,7 +43,7 @@ class SolverKNPEMI(object):
             self.A = multiphenicsx.fem.petsc.assemble_matrix_block(p.a, bcs=p.bcs, restriction=(p.restriction, p.restriction)) # Assemble matrix
             self.b = multiphenicsx.fem.petsc.assemble_vector_block(p.L, p.a, bcs=p.bcs, restriction=p.restriction)
         else:
-            # clear system matrix and RHS vector values
+            # clear system matrix and RHS vector values to avoid accumulation
             self.A.zeroEntries()
             self.b.array[:] = 0
 
