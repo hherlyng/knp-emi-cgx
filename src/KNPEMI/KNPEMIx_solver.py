@@ -578,11 +578,11 @@ class SolverKNPEMI(object):
         return
 
     # direct solver parameters
-    direct_solver      = False
+    direct_solver      = True
     ds_solver_type     = 'mumps'
     
     # iterative solver parameters
-    ksp_rtol           = 1e-6
+    ksp_rtol           = 1e-10
     ksp_max_it         = 1000	
     ksp_type           = 'gmres'
     pc_type            = 'hypre'

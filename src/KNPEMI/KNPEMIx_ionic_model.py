@@ -250,7 +250,7 @@ class HH_model(IonicModel):
         
         # Set membrane potential
         with phi_M_prev.vector.localForm() as loc_phi_M_prev:
-            V_M = 1000*(loc_phi_M_prev[:] - self.problem.V_rest) # convert phi_M to mV	
+            V_M = 1000*(loc_phi_M_prev[:] - self.problem.V_rest)*1e-12 # convert phi_M to mV	
         
         alpha_n = 0.01e3 * (10.-V_M) / (np.exp((10. - V_M)/10.) - 1.)
         beta_n  = 0.125e3 * np.exp(-V_M/80.)

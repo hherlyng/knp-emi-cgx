@@ -16,7 +16,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         """ Constructor. """
 
         # set scaling factor
-        self.m_conversion_factor = 1e-6
+        self.m_conversion_factor = 1
 
         # sources
         self.f_i = 0
@@ -725,22 +725,22 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     ### class variables ###
     
     # physical parameters
-    C_M = 0.02                       # capacitance (F)
+    C_M = 0.02*1e-12                       # capacitance (F_scaled)
     T   = 300                        # temperature (K)
     F   = 96485                      # Faraday's constant (C/mol)
-    R   = 8.314                      # Gas constant (J/(K*mol))
-    psi = R*T/F                      # recurring variable
-    g_Na_bar  = 1200                 # Na max conductivity (S/m**2)
-    g_K_bar   = 360                  # K max conductivity (S/m**2)    
-    g_Na_leak = 2.0*0.5              # Na leak conductivity (S/m**2) (Constant)
-    g_K_leak  = 8.0*0.5              # K leak conductivity (S/m**2)
-    g_Cl_leak = 0.0                  # Cl leak conductivity (S/m**2) (Constant)
+    R   = 8.314*1e12                      # Gas constant (J_scaled/(K*mol))
+    psi = R*T/F*1e12                      # recurring variable
+    g_Na_bar  = 1200*1e-12                 # Na max conductivity (S/microm**2)
+    g_K_bar   = 360*1e-12                  # K max conductivity (S/microm**2)    
+    g_Na_leak = 2.0*0.5*1e-12              # Na leak conductivity (S/microm**2) (Constant)
+    g_K_leak  = 8.0*0.5*1e-12              # K leak conductivity (S/microm**2)
+    g_Cl_leak = 0.0                  # Cl leak conductivity (S/microm**2) (Constant)
     a_syn     = 0.002                # synaptic time constant (s)
-    g_syn_bar = 40                   # synaptic conductivity (S/m**2)
-    D_Na = 1.33e-9                   # diffusion coefficients Na (m/s^2) (Constant)
-    D_K  = 1.96e-9                   # diffusion coefficients K (m/s^2) (Constant)
-    D_Cl = 2.03e-9                   # diffusion coefficients Cl (m/s^2) (Constant)
-    V_rest  = -0.065                 # resting membrane potential (V)
+    g_syn_bar = 40*1e-12                   # synaptic conductivity (S/m**2)
+    D_Na = 1.33e-9*1e12                   # diffusion coefficients Na (microm^2/s) (Constant)
+    D_K  = 1.96e-9*1e12                   # diffusion coefficients K (microm^2/s) (Constant)
+    D_Cl = 2.03e-9*1e12                   # diffusion coefficients Cl (microm^2/s) (Constant)
+    V_rest  = -0.065*1e12                 # resting membrane potential (V)
 
     # potassium buffering params
     rho_pump = 1.115e-6			     # maximum pump rate (mol/m**2 s)
@@ -750,14 +750,14 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
     # initial conditions
     phi_e_init = 0         # external potential (V) (Constant)
-    phi_i_init = -0.06774  # internal potential (V) just for visualization (Constant)
-    phi_M_init = -0.06774  # membrane potential (V)	 (Constant)
-    Na_i_init  = 12        # intracellular Na concentration (mol/m^3) (Constant)
-    Na_e_init  = 100       # extracellular Na concentration (mol/m^3) (Constant)
-    K_i_init   = 125       # intracellular K  concentration (mol/m^3) (Constant)
-    K_e_init   = 4         # extracellular K  concentration (mol/m^3) (Constant)
-    Cl_i_init  = 137       # intracellular Cl concentration (mol/m^3) (Constant)
-    Cl_e_init  = 104       # extracellular Cl concentration (mol/m^3) (Constant)
+    phi_i_init = -0.06774*1e12  # internal potential (V) just for visualization (Constant)
+    phi_M_init = -0.06774*1e12  # membrane potential (V)	 (Constant)
+    Na_i_init  = 121*1e-18        # intracellular Na concentration (mol/microm^3) (Constant)
+    Na_e_init  = 100*1e-18       # extracellular Na concentration (mol/microm^3) (Constant)
+    K_i_init   = 125*1e-18       # intracellular K  concentration (mol/microm^3) (Constant)
+    K_e_init   = 4*1e-18         # extracellular K  concentration (mol/microm^3) (Constant)
+    Cl_i_init  = 137*1e-18       # intracellular Cl concentration (mol/microm^3) (Constant)
+    Cl_e_init  = 104*1e-18       # extracellular Cl concentration (mol/microm^3) (Constant)
 
     # Initial values of gating variables
     n_init_val = 0.27622914792
