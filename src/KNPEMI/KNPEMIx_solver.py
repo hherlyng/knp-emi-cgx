@@ -312,30 +312,12 @@ class SolverKNPEMI(object):
                     with component.vector.localForm() as component_local:
                         component_local[:] = ui_ue_wrapper_local
 
-            # Update previous membrane potentials
-            phi_i = wh[0].sub(p.N_ions).collapse()
-            phi_e = wh[1].sub(p.N_ions).collapse()
-
-            with phi_i.vector.localForm() as loc_i, \
-                 phi_e.vector.localForm() as loc_e, \
-                 phi_i_p.vector.localForm() as _phi_i_p, \
-                 phi_e_p.vector.localForm() as _phi_e_p:
-
-                 _phi_i_p[:] = loc_i
-                 _phi_e_p[:] = loc_e
-            
-            # Update previous timestep solution functions u_p and the membrane potential v_p
-            with p.u_p[0].vector.localForm() as ui_p, \
-                 p.u_p[1].vector.localForm() as ue_p, \
-                 wh[0].vector.localForm() as ui_h, \
-                 wh[1].vector.localForm() as ue_h, \
-                 phi_i_p.vector.localForm() as _phi_i_p, \
-                 phi_e_p.vector.localForm() as _phi_e_p, \
-                 p.phi_M_prev.vector.localForm() as v_p:
-
-                ui_p[:] = ui_h[:]
-                ue_p[:] = ue_h[:]
-                v_p[:]  = _phi_i_p[:] - _phi_e_p[:]          
+            # Update previous timestep values
+            phi_i_p.x.array[:] = wh[0].sub(p.N_ions).collapse().x.array.copy()
+            phi_e_p.x.array[:] = wh[1].sub(p.N_ions).collapse().x.array.copy()
+            p.u_p[0].x.array[:] = wh[0].x.array.copy()
+            p.u_p[1].x.array[:] = wh[1].x.array.copy()
+            p.phi_M_prev.x.array[:] = phi_i_p.x.array.copy() - phi_e_p.x.array.copy()        
 
             # Write output to file and save png
             if self.save_xdmfs and (i % self.save_interval == 0) : self.save_xdmf()
