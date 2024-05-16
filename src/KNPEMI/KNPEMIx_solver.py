@@ -269,32 +269,6 @@ class SolverKNPEMI(object):
                         self.A.setNearNullSpace(nullspace)
                         nullspace.remove(self.b)
 
-                    # Get the dofs for the extracellular potential in the restricted vector
-                    res_i = p.restriction[0] # Intracellular restriction
-                    offset = res_i.index_map.size_local # Number of dofs in intracellular restriction
-                    _, phi_i_dofs = p.W[0].sub(p.N_ions).collapse()
-                    u2r_i = res_i.unrestricted_to_restricted
-                    res_dofs_i = [u2r_i[dof] for dof in phi_i_dofs if dof in u2r_i]
-
-                    _, phi_e_dofs = p.W[1].sub(p.N_ions).collapse() # Get phi_e dofs in unrestricted space
-                    res_e = p.restriction[1] # Extracellular restriction
-                    u2r_e = res_e.unrestricted_to_restricted # Dof mapping from unrestricted to restricted
-                    res_dofs_e = [u2r_e[dof] + offset for dof in phi_e_dofs if dof in u2r_e] # Get the phi_e dofs in restricted space
-
-                    # Set the phi dofs of the nullspace vector equal to a constant
-                    with ns_vec.localForm() as ns_vec_loc:
-                        ns_vec_loc[res_dofs_i] = np.array([1.0] * len(res_dofs_i))
-                        ns_vec_loc[res_dofs_e] = np.array([1.0] * len(res_dofs_e))
-                    
-                    # Assemble vector and orthonormalize
-                    ns_vec.assemble()
-                    ns_vec.normalize()
-                    assert np.isclose(ns_vec.norm(), 1.0)
-
-                    # Create the PETSc nullspace vector and check that it is a valid nullspace of A
-                    nullspace = PETSc.NullSpace().create(vectors=[ns_vec], comm=self.comm)
-                    assert nullspace.test(self.A) # Check that the nullspace is created correctly
-
                     # Set the nullspace
                     if self.direct_solver:
                         self.A.setNullSpace(nullspace)
