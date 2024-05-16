@@ -269,15 +269,6 @@ class SolverKNPEMI(object):
                         self.A.setNearNullSpace(nullspace)
                         nullspace.remove(self.b)
 
-                    # Set the nullspace
-                    if self.direct_solver:
-                        self.A.setNullSpace(nullspace)
-                        nullspace.remove(self.b)
-                    else:
-                        self.A.setNullSpace(nullspace)
-                        self.A.setNearNullSpace(nullspace)
-                        nullspace.remove(self.b)
-
                 # Finalize configuration of PETSc structures
                 if self.direct_solver: 
                     self.ksp.setOperators(self.A)
