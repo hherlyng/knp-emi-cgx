@@ -1,8 +1,6 @@
-
+from CGx.KNPEMI.KNPEMIx_solver 	 	import SolverKNPEMI
+from CGx.KNPEMI.KNPEMIx_problem 	import ProblemKNPEMI
 from CGx.KNPEMI.KNPEMIx_ionic_model import *
-from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
-from CGx.KNPEMI.KNPEMIx_solver import SolverKNPEMI
-
 
 def test_L2_norm_of_potentials():
 		""" Solve the KNP-EMI problem on a unit square and assert that the calculated
@@ -37,9 +35,9 @@ def test_L2_norm_of_potentials():
 		phi_e_L2_local  = dfx.fem.assemble_scalar(dfx.fem.form(ufl.inner(phi_e, phi_e) * problem_square.dx(tags['extra'])))
 		phi_e_L2_global = solver_square.comm.allreduce(phi_e_L2_local, op=MPI.SUM)
 		phi_e_L2_global = np.sqrt(phi_e_L2_global)
-		
 
-		# Calculate the percentage errors and assert that they're smaller than 1%
+		# Calculate the percentage errors and assert that they're smaller than 1%, when
+		# comparing the calculated L2 norms of the potentials with previously saved values.
 		saved_L2_phi_i = 1.5403605575577102e-08
 		saved_L2_phi_e = 8.924158982124452e-09
 
