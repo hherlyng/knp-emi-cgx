@@ -44,7 +44,7 @@ def test_L2_norm_of_potentials():
 		percentage_error_i = abs(phi_i_L2_global - saved_L2_phi_i)/saved_L2_phi_i*100
 		percentage_error_e = abs(phi_e_L2_global - saved_L2_phi_e)/saved_L2_phi_e*100
 		
-		assert False#all([percentage_error_i < 1, percentage_error_e < 1])
+		assert all([percentage_error_i < 1, percentage_error_e < 1])
 
 if __name__=='__main__':
     test_L2_norm_of_potentials()
