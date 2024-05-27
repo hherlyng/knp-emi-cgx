@@ -38,5 +38,5 @@ jobs:
 
       - name: install package
         run: |
-          python3 ./src/KNPEMI/generate_square_mesh.py -N 32
-          python3 ./src/KNPEMI/tests/test_L2_norm_potentials.py
+          python3 ./src/CGx/KNPEMI/generate_square_mesh.py -N 32 -o './'
+          python3 ./tests/test_L2_norm_potentials.py
