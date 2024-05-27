@@ -1,5 +1,5 @@
 import time
-import KNPEMIx_problem
+from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
 import multiphenicsx.fem
 import multiphenicsx.fem.petsc
 
@@ -9,14 +9,15 @@ import matplotlib.pyplot as plt
 
 from mpi4py    import MPI
 from petsc4py  import PETSc
-from utils_dfx import dump
+from CGx.KNPEMI.utils_dfx import dump
 
 class SolverKNPEMI(object):
 
-    def __init__(self, problem: KNPEMIx_problem.ProblemKNPEMI, time_steps: int):
+    def __init__(self, problem: ProblemKNPEMI, time_steps: int, direct: bool):
         self.problem    = problem
         self.comm       = problem.comm
         self.time_steps = time_steps
+        self.direct_solver = direct
 
         # Initialize varational form
         self.problem.setup_variational_form()
@@ -525,7 +526,7 @@ class SolverKNPEMI(object):
         return
 
     # direct solver parameters
-    direct_solver      = False
+    direct_solver      = True
     ds_solver_type     = 'mumps'
     
     # iterative solver parameters

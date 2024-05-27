@@ -27,7 +27,7 @@ jobs:
         with:
           miniforge-variant: Mambaforge
           miniforge-version: latest
-          activate-environment: EMIx
+          activate-environment: CGx
           python-version: "3.10"
           use-mamba: true
           environment-file: environment.yml
@@ -38,5 +38,5 @@ jobs:
 
       - name: install package
         run: |
-          python3 ./src/KNPEMI/generate_square_mesh.py -N 20
-          python3 ./src/KNPEMI/main.py --input=./geometries/square20.xdmf
+          python3 ./src/KNPEMI/generate_square_mesh.py -N 32
+          python3 ./src/KNPEMI/test_L2_norm_potentials.py

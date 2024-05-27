@@ -8,7 +8,7 @@ import dolfinx as dfx
 from ufl       import grad, inner, dot
 from mpi4py    import MPI
 from petsc4py  import PETSc
-from utils_dfx import SetupMMS, MixedDimensionalProblem, mark_MMS_boundaries
+from CGx.KNPEMI.utils_dfx import SetupMMS, MixedDimensionalProblem, mark_MMS_boundaries
 
 class ProblemKNPEMI(MixedDimensionalProblem):
 

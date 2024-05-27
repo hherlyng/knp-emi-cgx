@@ -1,4 +1,4 @@
-name: KNP-EMI-CGx
+name: CGx
 channels:
   - conda-forge
 dependencies:
