@@ -5,30 +5,24 @@ import multiphenicsx.fem.petsc
 import numpy   as np
 import dolfinx as dfx
 
-from ufl       import grad, inner, dot
-from mpi4py    import MPI
-from petsc4py  import PETSc
-from CGx.KNPEMI.utils_dfx import SetupMMS, MixedDimensionalProblem, mark_MMS_boundaries
+from ufl      import grad, inner, dot
+from mpi4py   import MPI
+from petsc4py import PETSc
+from CGx.utils.setup_mms         import SetupMMS, mark_MMS_boundaries
+from CGx.utils.mixed_dim_problem import MixedDimensionalProblem
+
+print = PETSc.Sys.Print
 
 class ProblemKNPEMI(MixedDimensionalProblem):
 
     def init(self):
         """ Constructor. """
 
-        # set scaling factor
-        self.m_conversion_factor = 1e-6
-
-        # sources
-        self.f_i = 0
-        self.f_e = 0
-
-        # for validation test
-        if self.MMS_test:
-            self.setup_MMS_params()
+        if self.MMS_test: self.setup_MMS_params() # Perform numerical verification
         
     def setup_spaces(self):
 
-        if self.comm.rank == 0: print("Setting up function spaces ...")
+        print("Setting up function spaces ...")
 
         # Define elements
         P = ufl.FiniteElement("Lagrange", self.mesh.ufl_cell(), self.fem_order)
@@ -53,7 +47,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         self.u_p[0].name = "intra"
         self.u_p[1].name = "extra"
 
-        if self.comm.rank==0: print("Creating mesh restrictions ...")
+        print("Creating mesh restrictions ...")
 
         ### Restrictions
         
@@ -159,7 +153,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             else:
                 self.phi_M_prev.x.array[:] = self.phi_M_init
         
-        if self.comm.rank == 0: print("Setting up variational form ...")
+        print("Setting up variational form ...")
 
         # Define integral measures
         dxi = self.dx(self.intra_tags)
@@ -379,8 +373,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             J_phi_e += z*Je
 
             # Source terms
-            L0 += inner(ion['f_i']*self.f_i, vki) * dxi
-            L1 += inner(ion['f_e']*self.f_e, vke) * dxe
+            L0 += inner(ion['f_i'], vki) * dxi
+            L1 += inner(ion['f_e'], vke) * dxe
             
             if self.MMS_test:
                 # Define outward normal on exterior boundary (\partial\Omega)
@@ -530,7 +524,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
         self.MMS_test            = True
         self.dirichlet_bcs       = True
-        self.m_conversion_factor = 1
+        self.mesh_conversion_factor = 1
 
         # ionic model
         self.HH_model = False
@@ -620,10 +614,10 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         K_tot  = dfx.fem.assemble_scalar(dfx.fem.form(K_i *dxi + K_e *dxe, jit_options=self.jit_parameters))
         Cl_tot = dfx.fem.assemble_scalar(dfx.fem.form(Cl_i*dxi + Cl_e*dxe, jit_options=self.jit_parameters))
 
-        if self.comm.rank==0:
-            print("Total Na+ concentration: ", self.comm.allreduce(Na_tot, op=MPI.SUM))
-            print("Total K+  concentration: ", self.comm.allreduce(K_tot,  op=MPI.SUM))
-            print("Total Cl- concentration: ", self.comm.allreduce(Cl_tot, op=MPI.SUM))
+        
+        print("Total Na+ concentration: ", self.comm.allreduce(Na_tot, op=MPI.SUM))
+        print("Total K+  concentration: ", self.comm.allreduce(K_tot,  op=MPI.SUM))
+        print("Total Cl- concentration: ", self.comm.allreduce(Cl_tot, op=MPI.SUM))
 
     def print_info(self):
 
@@ -646,19 +640,18 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         Na_tot = self.comm.allreduce(Na_tot, op=MPI.SUM)
         K_tot  = self.comm.allreduce(K_tot,  op=MPI.SUM)
         Cl_tot = self.comm.allreduce(Cl_tot, op=MPI.SUM)
-
-        if self.comm.rank == 0:
-            print("Na tot:", Na_tot)
-            print("K  tot:",  K_tot)
-            print("Cl tot:", Cl_tot)
+        
+        print("Na tot:", Na_tot)
+        print("K  tot:",  K_tot)
+        print("Cl tot:", Cl_tot)
 
     def print_errors(self):
         
         # Get the exact solutions
         if self.dim == 2:
-            src_terms, exact_sols, init_conds, bndry_terms = self.M.get_MMS_terms_KNPEMI_2D(self.t.value)
+            _, exact_sols, _, _ = self.M.get_MMS_terms_KNPEMI_2D(self.t.value)
         elif self.dim == 3:
-            src_terms, exact_sols, init_conds, bndry_terms = self.M.get_MMS_terms_KNPEMI_3D(self.t.value)
+            _, exact_sols, _, _ = self.M.get_MMS_terms_KNPEMI_3D(self.t.value)
 
         # Define integral measures
         dxi = self.dx(self.intra_tags)
@@ -708,23 +701,22 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         L2_err_phi_e = np.sqrt(comm.allreduce(L2_err_phi_e,  op=MPI.SUM))
 
         # Print the errors
-        if comm.rank == 0:
-            print('#-------------- ERRORS --------------#')
-            print(f"Hello from rank = {self.comm.rank}")
-            print('L2 Na_i  error:', L2_err_Na_i)
-            print('L2 Na_e  error:', L2_err_Na_e)
-            print('L2 K_i   error:', L2_err_K_i)
-            print('L2 K_e   error:', L2_err_K_e)
-            print('L2 Cl_i  error:', L2_err_Cl_i)
-            print('L2 Cl_e  error:', L2_err_Cl_e)
-            print('L2 phi_i error:', L2_err_phi_i)
-            print('L2 phi_e error:', L2_err_phi_e)
+        print('#-------------- ERRORS --------------#')
+        print(f"Hello from rank = {self.comm.rank}")
+        print('L2 Na_i  error:', L2_err_Na_i)
+        print('L2 Na_e  error:', L2_err_Na_e)
+        print('L2 K_i   error:', L2_err_K_i)
+        print('L2 K_e   error:', L2_err_K_e)
+        print('L2 Cl_i  error:', L2_err_Cl_i)
+        print('L2 Cl_e  error:', L2_err_Cl_e)
+        print('L2 phi_i error:', L2_err_phi_i)
+        print('L2 phi_e error:', L2_err_phi_e)
 
-            self.errors = [L2_err_Na_i, L2_err_Na_e, L2_err_K_i, L2_err_K_e, L2_err_Cl_i, L2_err_Cl_e, L2_err_phi_i, L2_err_phi_e]        
+        self.errors = [L2_err_Na_i, L2_err_Na_e, L2_err_K_i, L2_err_K_e, L2_err_Cl_i, L2_err_Cl_e, L2_err_phi_i, L2_err_phi_e]        
 
-    ### class variables ###
+    ### Default class variables ###
     
-    # physical parameters
+    # Physical parameters
     C_M = 0.02                       # capacitance (F)
     T   = 300                        # temperature (K)
     F   = 96485                      # Faraday's constant (C/mol)
@@ -742,13 +734,13 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     D_Cl = 2.03e-9                   # diffusion coefficients Cl (m/s^2) (Constant)
     V_rest  = -0.065                 # resting membrane potential (V)
 
-    # potassium buffering params
+    # Potassium buffering params
     rho_pump = 1.115e-6			     # maximum pump rate (mol/m**2 s)
     P_Nai = 10                       # [Na+]i threshold for Na+/K+ pump (mol/m^3)
     P_Ke  = 1.5                      # [K+]e  threshold for Na+/K+ pump (mol/m^3)
     k_dec = 2.9e-8				     # Decay factor for [K+]e (m/s)
 
-    # initial conditions
+    # Initial conditions
     phi_e_init = 0         # external potential (V) (Constant)
     phi_i_init = -0.06774  # internal potential (V) just for visualization (Constant)
     phi_M_init = -0.06774  # membrane potential (V)	 (Constant)
@@ -764,7 +756,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     m_init_val = 0.03791834627
     h_init_val = 0.68848921811
 
-    # sources
+    # Source terms
     Na_e_f = 0.0
     Na_i_f = 0.0
     K_e_f  = 0.0
@@ -772,20 +764,21 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     Cl_e_f = 0.0
     Cl_i_f = 0.0
 
-    # create ions (Na conductivity is set below for each model)
+    # Ion dictionaries and list
     Na = {'g_leak':g_Na_leak, 'Di':D_Na, 'De':D_Na, 'ki_init':Na_i_init, 'ke_init':Na_e_init, 'z':1.0,  'f_e': Na_e_f, 'f_i':Na_i_f, 'name':'Na', 'rho_p': 3*rho_pump}
     K  = {'g_leak':g_K_leak,  'Di':D_K,  'De':D_K,  'ki_init':K_i_init,  'ke_init':K_e_init,  'z':1.0,  'f_e': K_e_f,  'f_i':K_i_f,  'name':'K' , 'rho_p':-2*rho_pump}
     Cl = {'g_leak':g_Cl_leak, 'Di':D_Cl, 'De':D_Cl, 'ki_init':Cl_i_init, 'ke_init':Cl_e_init, 'z':-1.0, 'f_e': Cl_e_f, 'f_i':Cl_i_f, 'name':'Cl', 'rho_p':0.0}
-
-    # create ion list
     ion_list = [Na, K, Cl]
     N_ions   = len(ion_list) 
 
-    # finite element polynomial order 
+    # Mesh unit conversion factor
+    mesh_conversion_factor = 1
+
+    # Finite element polynomial order 
     fem_order = 1
     
-    # test flag
+    # Verification flag
     MMS_test        = False
 
-    # BC (only on phi)
+    # Boundary condition type (only on phi, the electric potential)
     dirichlet_bcs   = False
