@@ -257,6 +257,7 @@ class SolverKNPEMI(object):
                                 with data_vector.localForm() as data_vector_local:
                                     C_dd_component_local[:] = data_vector_local
                     ns_vec.normalize()
+                    
                     # Create the PETSc nullspace vector and check that it is a valid nullspace of A
                     nullspace = PETSc.NullSpace().create(vectors=[ns_vec], comm=self.comm)
                     assert nullspace.test(self.A) # Check that the nullspace is created correctly
