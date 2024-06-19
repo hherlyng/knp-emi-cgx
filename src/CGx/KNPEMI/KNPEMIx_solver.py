@@ -13,18 +13,19 @@ from CGx.KNPEMI.utils_dfx import dump
 
 class SolverKNPEMI(object):
 
-    def __init__(self, problem: ProblemKNPEMI, time_steps: int, direct: bool):
+    def __init__(self, problem: ProblemKNPEMI, save_xdmfs: bool=False, save_pngs: bool=False):
         self.problem    = problem
         self.comm       = problem.comm
-        self.time_steps = time_steps
-        self.direct_solver = direct
+        self.time_steps = problem.time_steps
+        self.save_xdmfs = save_xdmfs
+        self.save_pngs  = save_pngs
 
         # Initialize varational form
         self.problem.setup_variational_form()
 
         # Output files
-        if self.save_xdmfs : self.init_xdmf_savefile()
-        if self.save_pngs  : self.init_png_savefile()
+        if save_xdmfs : self.init_xdmf_savefile()
+        if save_pngs  : self.init_png_savefile()
 
         # Perform a single timestep when saving MATLAB data
         if self.save_mat: self.time_steps = 1
@@ -363,7 +364,7 @@ class SolverKNPEMI(object):
             # Print stuff
             print("\n#------------ PROBLEM -------------#\n")
             print("MPI Size = ", self.comm.size)
-            print("Input mesh = ", p.input_file)
+            print("Input mesh = ", p.input_files['mesh_file'])
             print("Global # mesh cells = ", num_cells)
             print("Global # dofs = ", num_dofs)
             print("FEM order = ", p.fem_order)
@@ -545,8 +546,6 @@ class SolverKNPEMI(object):
     # output parameters
     out_file_prefix   = 'output/'
     save_interval     = 1 # save every nth timestep
-    save_xdmfs        = True
-    save_pngs         = True
     save_mat          = False
 
     # iteration counter and time variables

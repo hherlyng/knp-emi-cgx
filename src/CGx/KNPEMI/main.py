@@ -1,12 +1,11 @@
-import yaml
 import argparse
-from pathlib import Path
-
-from KNPEMIx_ionic_model import *
-from KNPEMIx_problem import ProblemKNPEMI
-from KNPEMIx_solver import SolverKNPEMI
-from parsers import CustomParser
 import petsc4py.PETSc
+
+from pathlib import Path
+from CGx.KNPEMI.KNPEMIx_ionic_model import *
+from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
+from CGx.KNPEMI.KNPEMIx_solver import SolverKNPEMI
+from CGx.KNPEMI.parsers import CustomParser
 
 print = petsc4py.PETSc.Sys.Print
 
@@ -58,13 +57,8 @@ def main(argv=None):
 	print(f"L2 norm phi_e = {phi_e_L2_global}")
 
 def main_yaml(yaml_file="config.yaml"):
-
-	if MPI.COMM_WORLD.rank==0: print("Reading configuration from file: ", yaml_file)
-
-	with open(yaml_file, 'r') as file:
-		cfg = yaml.safe_load(file)
 	
-	problem = ProblemKNPEMI(cfg)
+	problem = ProblemKNPEMI(yaml_file)
 
 	HH = HH_model(problem)
 	ionic_models = [HH]
@@ -75,21 +69,8 @@ def main_yaml(yaml_file="config.yaml"):
 	solver = SolverKNPEMI(problem)
 	solver.solve()
 
-	from IPython import embed;embed()
-
-
 if __name__=='__main__':
 
 	main_yaml()
-	# # astrocyte
-	# input_file = 'geometries/astrocyte_mesh_full.xdmf'
-	# tags = {'intra' : 3, 'extra' : 1, 'boundary' : 4, 'membrane' : 5}
-
-	# # dendrite
-	# input_file = '../../../data/dendrite/dfx_mesh.xdmf'
-	# tags = {'intra' : (2, 3, 4) , 'extra' : 1, 'boundary' : 1, 'membrane' : (2, 3, 4)}
-
-	# GC
-	# input_file = '../../../data/GC/'
 
 
