@@ -67,7 +67,7 @@ class MixedDimensionalProblem(ABC):
         
         if 'output_dir' in config:
             self.output_dir = config['output_dir']
-            if not os.path.exists(self.output_dir):
+            if not os.path.isdir(self.output_dir):
                 raise ValueError('Output directory ' + self.output_dir + ' does not exist.')
         else:
             # Set output directory to current directory

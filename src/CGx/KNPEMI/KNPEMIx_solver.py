@@ -19,6 +19,7 @@ class SolverKNPEMI(object):
         self.time_steps = problem.time_steps
         self.save_xdmfs = save_xdmfs
         self.save_pngs  = save_pngs
+        self.out_file_prefix = problem.output_dir
 
         # Initialize varational form
         self.problem.setup_variational_form()
@@ -544,7 +545,6 @@ class SolverKNPEMI(object):
     nonzero_init_guess = True
 
     # output parameters
-    out_file_prefix   = 'output/'
     save_interval     = 1 # save every nth timestep
     save_mat          = False
 
