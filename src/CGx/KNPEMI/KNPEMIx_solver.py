@@ -1,5 +1,4 @@
 import time
-from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
 import multiphenicsx.fem
 import multiphenicsx.fem.petsc
 
@@ -7,9 +6,10 @@ import numpy             as np
 import dolfinx           as dfx
 import matplotlib.pyplot as plt
 
-from mpi4py    import MPI
-from petsc4py  import PETSc
-from CGx.KNPEMI.utils_dfx import dump
+from mpi4py         import MPI
+from petsc4py       import PETSc
+from CGx.utils.misc import dump
+from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
 
 class SolverKNPEMI(object):
 
