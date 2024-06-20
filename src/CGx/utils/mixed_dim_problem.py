@@ -1,3 +1,4 @@
+import os
 import ufl
 import time
 import yaml
@@ -62,7 +63,15 @@ class MixedDimensionalProblem(ABC):
             input_dir = config['input_dir']
         else:
             # input directory is here
-            input_dir = ''
+            input_dir = './'
+        
+        if 'output_dir' in config:
+            self.output_dir = config['output_dir']
+            if not os.path.exists(self.output_dir):
+                raise ValueError('Output directory ' + self.output_dir + ' does not exist.')
+        else:
+            # Set output directory to current directory
+            self.output_dir = './'
         
         if 'cell_tag_file' in config and 'facet_tag_file' in config:
 
@@ -77,26 +86,26 @@ class MixedDimensionalProblem(ABC):
             self.input_files['mesh_file']  = mesh_file
             self.input_files['facet_file'] = facet_file
         else:
-            print('Provide cell_tag_file and facet_tag_file fields in input file.'); exit()
+            raise RuntimeError('Provide cell_tag_file and facet_tag_file fields in input file.')
 
         if 'dt' in config:
             self.dt = config['dt']
         else:
-            print('Provide dt (timestep size) field in input file.'); exit()
+            raise RuntimeError('Provide dt (timestep size) field in input file.')
         
         if 'time_steps' in config:
             self.time_steps = config['time_steps']
         elif 'T' in config:
             self.time_steps = int(config['T'] / config['dt'])
         else:
-            print('Provide final time T or time_steps field in input file.'); exit()
+            raise RuntimeError('Provide final time T or time_steps field in input file.')
 
         # Set mesh tags
         tags = dict()
         if 'ics_tags' in config:
             tags['intra'] = config['ics_tags']            
         else:
-            print('Provide ics_tags (intracellular space tags) field in input file.'); exit()
+            raise RuntimeError('Provide ics_tags (intracellular space tags) field in input file.')
         
         if 'ecs_tags'      in config: tags['extra']    = config['ecs_tags']
         if 'boundary_tags' in config: tags['boundary'] = config['boundary_tags']
@@ -143,11 +152,11 @@ class MixedDimensionalProblem(ABC):
 
                 # Perform sanity checks
                 if 'valence' not in ion_params:
-                    print('Valence of ' + ion + 'must be provided.'); exit()
+                    raise RuntimeError('Valence of ' + ion + ' must be provided.')
                 if 'diffusivity' not in ion_params:
-                    print('Diffusivity of ' + ion + 'must be provided.'); exit()
+                    raise RuntimeError('Diffusivity of ' + ion + ' must be provided.')
                 if 'initial' not in ion_params:
-                    print('Initial condition of ' + ion + 'must be provided.'); exit()
+                    raise RuntimeError('Initial condition of ' + ion + ' must be provided.')
 
                 # Fill in ion dictionary
                 ion_dict['z']  = ion_params['valence']
@@ -160,7 +169,7 @@ class MixedDimensionalProblem(ABC):
                     ion_dict['f_i'] = ion_params['source']['ics']
                     ion_dict['f_e'] = ion_params['source']['ecs']
                 else:
-                    print('Source terms for ' + ion + 'set to zero, as none were provided in the input file.')
+                    print('Source terms for ' + ion + ' set to zero, as none were provided in the input file.')
                     ion_dict['f_i'] = 0
                     ion_dict['f_e'] = 0
                 
