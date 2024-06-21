@@ -12,8 +12,8 @@ dependencies:
   - git
   - mpich
   - conda-ecosystem-user-package-isolation
-  - yaml
   - pip:
       - "multiphenicsx@git+https://github.com/multiphenics/multiphenicsx.git@dolfinx-v0.7.1"
+      - yaml
 
 
