@@ -1,7 +1,6 @@
 # Input and output directories
 output_dir : './output'
 
-
 # Numerical parameters 
 dt : 0.00005 # Timestep size 
 time_steps : 10 # Number of timesteps

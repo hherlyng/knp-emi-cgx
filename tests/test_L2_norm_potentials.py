@@ -38,8 +38,8 @@ def test_L2_norm_of_potentials():
 
 		# Calculate the percentage errors and assert that they're smaller than 1%, when
 		# comparing the calculated L2 norms of the potentials with previously saved values.
-		saved_L2_phi_i = 1.5403605575577102e-08
-		saved_L2_phi_e = 8.924158982124452e-09
+		saved_L2_phi_i = 0.015551359556518578 #mesh_conversion_factor=1e-6 : 1.5403605575577102e-08
+		saved_L2_phi_e = 0.009009757241662388 #mesh_conversion_factor=1e-6 : 8.924158982124452e-09
 
 		percentage_error_i = abs(phi_i_L2_global - saved_L2_phi_i)/saved_L2_phi_i*100
 		percentage_error_e = abs(phi_e_L2_global - saved_L2_phi_e)/saved_L2_phi_e*100

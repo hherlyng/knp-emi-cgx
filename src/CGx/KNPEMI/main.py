@@ -69,6 +69,23 @@ def main_yaml(yaml_file="config.yaml"):
 	solver = SolverKNPEMI(problem)
 	solver.solve()
 
+	tags = {'intra' : 1, 'extra' : 2, 'boundary' : 3, 'membrane' : 4}
+
+	phi_i = solver.problem.wh[0].sub(problem.N_ions)
+	phi_e = solver.problem.wh[1].sub(problem.N_ions)
+	dx = solver.problem.dx
+
+	phi_i_L2_local = dfx.fem.assemble_scalar(dfx.fem.form(ufl.inner(phi_i, phi_i) * dx(tags['intra'])))
+	phi_i_L2_global = solver.comm.allreduce(phi_i_L2_local, op=MPI.SUM)
+	phi_i_L2_global = np.sqrt(phi_i_L2_global)
+	
+	phi_e_L2_local = dfx.fem.assemble_scalar(dfx.fem.form(ufl.inner(phi_e, phi_e) * dx(tags['extra'])))
+	phi_e_L2_global = solver.comm.allreduce(phi_e_L2_local, op=MPI.SUM)
+	phi_e_L2_global = np.sqrt(phi_e_L2_global)
+	
+	print(f"L2 norm phi_i = {phi_i_L2_global}")
+	print(f"L2 norm phi_e = {phi_e_L2_global}")
+
 if __name__=='__main__':
 
 	main_yaml()
