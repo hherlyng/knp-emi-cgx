@@ -63,6 +63,7 @@ class MixedDimensionalProblem(ABC):
             input_dir = config['input_dir']
         else:
             # input directory is here
+
             input_dir = './'
         
         if 'output_dir' in config:
@@ -252,7 +253,6 @@ class MixedDimensionalProblem(ABC):
 
         # Rename file for readability
         mesh_file = self.input_files['mesh_file']
-
 
         if not self.MMS_test:
             # Load mesh files with meshtags

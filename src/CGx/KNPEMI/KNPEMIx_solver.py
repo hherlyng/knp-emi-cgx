@@ -39,9 +39,6 @@ class SolverKNPEMI(object):
         if self.save_mat: self.time_steps = 1
 
     def assemble(self):
-        """ Assemble the system matrix and the right-hand side vector. """
-
-        p = self.problem # For ease of notation
 
         print("Assembling linear system ...")
         
@@ -219,7 +216,6 @@ class SolverKNPEMI(object):
             self.A.setNearNullSpace(nullspace)
             nullspace.remove(self.b)
 
-
     def solve(self):
 
         # perform setup
@@ -286,7 +282,6 @@ class SolverKNPEMI(object):
                         self.ksp.getPC().setFactorSetUpSolverType()
                         self.ksp.getPC().getFactorMatrix().setMumpsIcntl(icntl=24, ival=1)  # Option to support solving a singular matrix
                         self.ksp.getPC().getFactorMatrix().setMumpsIcntl(icntl=25, ival=0)  # Option to support solving a singular matrix
-
                 else: 
                     # Set operators of iterative solver
                     self.ksp.setOperators(self.A, self.P_) if self.use_P_mat else self.ksp.setOperators(self.A)
@@ -323,7 +318,7 @@ class SolverKNPEMI(object):
             p.u_p[1].x.array[:] = wh[1].x.array.copy() # Extracellular ions and potential
             phi_i_p.x.array[:]  = wh[0].sub(p.N_ions).collapse().x.array.copy() # Intracellular potential
             phi_e_p.x.array[:]  = wh[1].sub(p.N_ions).collapse().x.array.copy() # Extracellular potential
-            p.phi_M_prev.x.array[:] = phi_i_p.x.array.copy() - phi_e_p.x.array.copy() # Membrane potential        
+            p.phi_M_prev.x.array[:] = phi_i_p.x.array.copy() - phi_e_p.x.array.copy() # Membrane potential      
 
             # Write output to file and save png
             if self.save_xdmfs and (i % self.save_interval == 0) : self.save_xdmf()
@@ -407,7 +402,7 @@ class SolverKNPEMI(object):
         p = self.problem # For ease of notation
 
         phi_M_space = p.phi_M_prev.function_space # Membrane electric potential
-
+        
         # Get indices of the membrane (gamma) facets   
         if len(p.gamma_tags) > 1:
             list_of_indices = [p.boundaries.find(tag) for tag in p.gamma_tags]

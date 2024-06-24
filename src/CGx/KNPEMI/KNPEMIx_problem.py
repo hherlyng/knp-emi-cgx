@@ -722,7 +722,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     F   = 96485                      # Faraday's constant (C/mol)
     R   = 8.314                      # Gas constant (J/(K*mol))
     psi = R*T/F                      # recurring variable
-
+    
     g_Na_bar  = 1200                 # Na max conductivity (S/m**2)
     g_K_bar   = 360                  # K max conductivity (S/m**2)    
     g_Na_leak = 2.0*0.5              # Na leak conductivity (S/m**2) (Constant)
