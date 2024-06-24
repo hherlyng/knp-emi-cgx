@@ -39,10 +39,9 @@ class SolverKNPEMI(object):
         if self.save_mat: self.time_steps = 1
 
     def assemble(self):
-
-	p = self.problem # For ease of notation
-
+	
         print("Assembling linear system ...")
+	p = self.problem # For ease of notation
         
         # Clear system matrix and RHS vector values to avoid accumulation
         self.A.zeroEntries()
