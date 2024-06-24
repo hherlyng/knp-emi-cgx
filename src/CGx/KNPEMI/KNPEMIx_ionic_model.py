@@ -4,8 +4,9 @@ import time
 import numpy   as np
 import dolfinx as dfx
 
-from abc    import ABC, abstractmethod
-from mpi4py import MPI
+from abc      import ABC, abstractmethod
+from mpi4py   import MPI
+from petsc4py import PETSc
 
 # Stimulus
 def g_syn(g_syn_bar, a_syn, t: float) -> float:
@@ -302,4 +303,4 @@ class HH_model(IonicModel):
 
         toc = time.perf_counter()
         ODE_step_time = MPI.COMM_WORLD.allreduce(toc-tic, op=MPI.MAX)
-        if MPI.COMM_WORLD.rank == 0: print(f"ODE step in {ODE_step_time:0.4f} seconds")   	
+        PETSc.Sys.Print(f"ODE step in {ODE_step_time:0.4f} seconds")   	

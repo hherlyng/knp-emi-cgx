@@ -1,9 +1,9 @@
 import argparse
-from pathlib import Path
-from mpi4py import MPI
 import dolfinx as dfx
 
-from CGx.utils.misc import mark_subdomains_square, mark_boundaries_square
+from mpi4py  import MPI
+from pathlib import Path
+from CGx.utils.misc     import mark_subdomains_square, mark_boundaries_square
 from CGx.KNPEMI.parsers import CustomParser
 description = """
 Create a unit square mesh where a sub-square [0.25,0.25]x[0.75,0.75] is tagged as subdomain 1 and the rest as subdomain 2.

@@ -2,10 +2,10 @@ import argparse
 import petsc4py.PETSc
 
 from pathlib import Path
-from CGx.KNPEMI.KNPEMIx_ionic_model import *
-from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
-from CGx.KNPEMI.KNPEMIx_solver import SolverKNPEMI
 from CGx.KNPEMI.parsers import CustomParser
+from CGx.KNPEMI.KNPEMIx_solver  import SolverKNPEMI
+from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
+from CGx.KNPEMI.KNPEMIx_ionic_model import *
 
 print = petsc4py.PETSc.Sys.Print
 
