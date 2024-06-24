@@ -302,7 +302,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                     I_ch[gamma_tag] += ion['I_ch'][gamma_tag]
             
         if np.isclose(t.value, 0.0):
-
+            # First timestep
             # Set phi_e and phi_i just for visualization
             if self.MMS_test:
                 ui_p.sub(self.N_ions).interpolate(self.phi_i_init)
