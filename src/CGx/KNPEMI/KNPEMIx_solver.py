@@ -40,6 +40,8 @@ class SolverKNPEMI(object):
 
     def assemble(self):
 
+	p = self.problem # For ease of notation
+
         print("Assembling linear system ...")
         
         # Clear system matrix and RHS vector values to avoid accumulation
