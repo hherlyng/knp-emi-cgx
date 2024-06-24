@@ -1,5 +1,4 @@
 import time
-from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
 import multiphenicsx.fem
 import multiphenicsx.fem.petsc
 
@@ -7,54 +6,55 @@ import numpy             as np
 import dolfinx           as dfx
 import matplotlib.pyplot as plt
 
-from mpi4py    import MPI
-from petsc4py  import PETSc
-from CGx.KNPEMI.utils_dfx import dump
+from mpi4py         import MPI
+from petsc4py       import PETSc
+from CGx.utils.misc import dump
+from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
+
+print = PETSc.Sys.Print # Enables printing only on rank 0 when running in parallel
 
 class SolverKNPEMI(object):
 
-    def __init__(self, problem: ProblemKNPEMI, time_steps: int, direct: bool):
-        self.problem    = problem
-        self.comm       = problem.comm
-        self.time_steps = time_steps
-        self.direct_solver = direct
+    def __init__(self, problem: ProblemKNPEMI, use_direct_solver: bool=True,
+                 save_xdmfs: bool=False, save_pngs: bool=False, save_mat: bool=False):
+        """ Constructor. """
+
+        self.problem    = problem                 # The KNP-EMI problem
+        self.comm       = problem.comm            # MPI communicator
+        self.time_steps = problem.time_steps      # Number of timesteps
+        self.direct_solver = use_direct_solver    # Set direct solver/iterative solver option
+        self.save_xdmfs = save_xdmfs              # Option to save .xdmf output 
+        self.save_pngs  = save_pngs               # Option to save .png  output
+        self.save_mat   = save_mat                # Option to save the system matrix
+        self.out_file_prefix = problem.output_dir # The output file directory
 
         # Initialize varational form
         self.problem.setup_variational_form()
 
-        # Output files
-        if self.save_xdmfs : self.init_xdmf_savefile()
-        if self.save_pngs  : self.init_png_savefile()
+        # Initialize output files
+        if save_xdmfs : self.init_xdmf_savefile()
+        if save_pngs  : self.init_png_savefile()
 
-        # Perform a single timestep when saving MATLAB data
+        # Perform only a single timestep when saving system matrix
         if self.save_mat: self.time_steps = 1
 
-        if self.problem.MMS_test: self.problem.print_errors()
-
-    def assemble(self, init: bool=True):
-        """ Assemble the system matrix and the right-hand side vector. """
-
+    def assemble(self):
+	
+        print("Assembling linear system ...")
         p = self.problem # For ease of notation
-
-        if self.comm.rank == 0: print("Assembling linear system ...")
         
-        # Assemble matrix and RHS vector
-        if init:
-            # Initial assembly
-            self.A = multiphenicsx.fem.petsc.assemble_matrix_block(p.a, bcs=p.bcs, restriction=(p.restriction, p.restriction)) # Assemble matrix
-            self.b = multiphenicsx.fem.petsc.assemble_vector_block(p.L, p.a, bcs=p.bcs, restriction=p.restriction)
-        else:
-            # clear system matrix and RHS vector values to avoid accumulation
-            self.A.zeroEntries()
-            self.b.array[:] = 0
+        # Clear system matrix and RHS vector values to avoid accumulation
+        self.A.zeroEntries()
+        self.b.array[:] = 0
 
-            # Assemble system
-            multiphenicsx.fem.petsc.assemble_matrix_block(self.A, p.a, bcs=p.bcs, restriction=(p.restriction, p.restriction)) # Assemble matrix
-            multiphenicsx.fem.petsc.assemble_vector_block(self.b, p.L, p.a, bcs=p.bcs, restriction=p.restriction)
-        self.A.assemble()
+        # Assemble system
+        multiphenicsx.fem.petsc.assemble_matrix_block(self.A, p.a, bcs=p.bcs, restriction=(p.restriction, p.restriction)) # Assemble DOLFINx matrix
+        multiphenicsx.fem.petsc.assemble_vector_block(self.b, p.L, p.a, bcs=p.bcs, restriction=p.restriction) # Assemble RHS vector
+        self.A.assemble() # Assemble PETSc matrix
 
 
     def assemble_preconditioner(self):
+        """ Assemble the preconditioner matrix. """
         
         p = self.problem # For ease of notation
 
@@ -92,7 +92,7 @@ class SolverKNPEMI(object):
             if self.comm.rank == 0: print("Using direct solver ...")
             self.ksp.setType("preonly")
             self.ksp.getPC().setType("lu")
-            self.ksp.getPC().setFactorSolverType(self.ds_solver_type)
+            self.ksp.getPC().setFactorSolverType('mumps')
             opts.setValue('pc_factor_zeropivot', 1e-22)
 
         else:
@@ -178,6 +178,44 @@ class SolverKNPEMI(object):
         self.solve_time    = []
         self.assembly_time = []
 
+    def create_and_set_nullspace(self):
+        """ Create null space for the electric potential in the case that the potentials are 
+        only determined up to a constant for the pure Neumann boundary conditions case. """
+        p = self.problem # For ease of notation
+
+        ns_vec = multiphenicsx.fem.petsc.create_vector_block(p.L, restriction=p.restriction)
+
+        # Get potential subspaces
+        _, Vi_dofs = p.W[0].sub(p.N_ions).collapse()
+        _, Ve_dofs = p.W[1].sub(p.N_ions).collapse()
+        ci = dfx.fem.Function(p.V)
+        ce = dfx.fem.Function(p.V)
+        ci.x.array[Vi_dofs] = 1.0
+        ce.x.array[Ve_dofs] = 1.0
+
+        Ci = ci.vector
+        Ce = ce.vector 
+
+        with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(
+            ns_vec, [p.W[0].dofmap, p.W[1].dofmap], p.restriction) as C_dd_wrapper:
+            for C_dd_component_local, data_vector in zip(C_dd_wrapper, (Ci, Ce)):
+                if data_vector is not None:  # skip third block
+                    with data_vector.localForm() as data_vector_local:
+                        C_dd_component_local[:] = data_vector_local
+        ns_vec.normalize()
+        
+        # Create the PETSc nullspace vector and check that it is a valid nullspace of A
+        nullspace = PETSc.NullSpace().create(vectors=[ns_vec], comm=self.comm)
+        assert nullspace.test(self.A) # Check that the nullspace is created correctly
+        
+        # Set the nullspace
+        if self.direct_solver:
+            self.A.setNullSpace(nullspace)
+            nullspace.remove(self.b)
+        else:
+            self.A.setNullSpace(nullspace)
+            self.A.setNearNullSpace(nullspace)
+            nullspace.remove(self.b)
 
     def solve(self):
 
@@ -196,7 +234,7 @@ class SolverKNPEMI(object):
         phi_i_p = dfx.fem.Function(V)
         phi_e_p = dfx.fem.Function(V)
 
-        # Assemble preconditioner if needed
+        # Assemble preconditioner if enabled
         if not self.direct_solver and self.use_P_mat:
             p.setup_preconditioner(self.use_block_Jacobi)
             self.assemble_preconditioner()
@@ -209,67 +247,34 @@ class SolverKNPEMI(object):
             # Update current time
             p.t.value += float(dt.value)
 
-            # Print some infos
-            if self.comm.rank == 0:
-                print('\nTime step ', i + 1)
-                print('t (ms) = ', 1000 * float(t.value))               
+            # Print timestep and time
+            print('\nTime step ', i + 1)
+            print('t (ms) = ', 1000 * float(t.value))               
 
+            # Set up the variational form
             tic = time.perf_counter()
             p.setup_variational_form()
             setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
 
-            # Assemble
+            # Assemble system matrix and RHS vector
             tic = time.perf_counter()
-            self.assemble(init=(i==0))
+            self.assemble()
 
             # Time the assembly
             assembly_time     = time.perf_counter() - tic
             max_assembly_time = self.comm.allreduce(assembly_time, op=MPI.MAX)
-            if self.comm.rank == 0:
-                print(f"Time dependent assembly in {max_assembly_time:0.4f} seconds")
-                self.tot_assembly_time += max_assembly_time
+            self.tot_assembly_time += max_assembly_time
             self.assembly_time.append(max_assembly_time)
+            print(f"Time dependent assembly in {max_assembly_time:0.4f} seconds")
 
             # Perform initial timestep setup
             if i==0:
                 tic = time.perf_counter()
 
                 if not p.dirichlet_bcs:
-                    # Create null space for pressure, since the the extracellular potential is 
-                    # only determined up to a constant for this model formulation
-                    ns_vec = multiphenicsx.fem.petsc.create_vector_block(p.L, restriction=p.restriction)
-
-                    # Get potential subspaces
-                    _, Vi_dofs = p.W[0].sub(p.N_ions).collapse()
-                    _, Ve_dofs = p.W[1].sub(p.N_ions).collapse()
-                    ci = dfx.fem.Function(p.V)
-                    ce = dfx.fem.Function(p.V)
-                    ci.x.array[Vi_dofs] = 1.0
-                    ce.x.array[Ve_dofs] = 1.0
-
-                    Ci = ci.vector
-                    Ce = ce.vector 
-
-                    with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(
-                        ns_vec, [p.W[0].dofmap, p.W[1].dofmap], p.restriction) as C_dd_wrapper:
-                        for C_dd_component_local, data_vector in zip(C_dd_wrapper, (Ci, Ce)):
-                            if data_vector is not None:  # skip third block
-                                with data_vector.localForm() as data_vector_local:
-                                    C_dd_component_local[:] = data_vector_local
-                    ns_vec.normalize()
-                    
-                    # Create the PETSc nullspace vector and check that it is a valid nullspace of A
-                    nullspace = PETSc.NullSpace().create(vectors=[ns_vec], comm=self.comm)
-                    assert nullspace.test(self.A) # Check that the nullspace is created correctly
-                    
-                    # Set the nullspace
-                    if self.direct_solver:
-                        self.A.setNullSpace(nullspace)
-                        nullspace.remove(self.b)
-                    else:
-                        self.A.setNullSpace(nullspace)
-                        self.A.setNearNullSpace(nullspace)
-                        nullspace.remove(self.b)
+                    # Handle the nullspace of the electric potentials in the case of 
+                    # pure Neumann boundary conditions
+                    self.create_and_set_nullspace()
 
                 # Finalize configuration of PETSc structures
                 if self.direct_solver: 
@@ -278,9 +283,11 @@ class SolverKNPEMI(object):
                         self.ksp.getPC().setFactorSetUpSolverType()
                         self.ksp.getPC().getFactorMatrix().setMumpsIcntl(icntl=24, ival=1)  # Option to support solving a singular matrix
                         self.ksp.getPC().getFactorMatrix().setMumpsIcntl(icntl=25, ival=0)  # Option to support solving a singular matrix
+                else: 
+                    # Set operators of iterative solver
+                    self.ksp.setOperators(self.A, self.P_) if self.use_P_mat else self.ksp.setOperators(self.A)
 
-                else: self.ksp.setOperators(self.A, self.P_) if self.use_P_mat else self.ksp.setOperators(self.A)
-
+                # Add contribution to setup time
                 setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
 
             # Solve
@@ -291,12 +298,14 @@ class SolverKNPEMI(object):
             # Update ghost values
             x.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
 
+            # Time the linear solve
             solver_time     = time.perf_counter() - tic
             max_solver_time = self.comm.allreduce(solver_time, op=MPI.MAX)
-            if self.comm.rank == 0:
-                print(f"Solved in {max_solver_time:0.4f} seconds")
-                self.tot_solver_time += max_solver_time
+            self.tot_solver_time += max_solver_time
             self.solve_time.append(max_solver_time)
+            print(f"Solved in {max_solver_time:0.4f} seconds")
+
+            # Store number of iterations in solve if using an iterative solver
             if not self.direct_solver: self.iterations.append(self.ksp.getIterationNumber())
             
             # Extract sub-components of solution and store them in the solution functions wh
@@ -306,94 +315,95 @@ class SolverKNPEMI(object):
                         component_local[:] = ui_ue_wrapper_local
 
             # Update previous timestep values
-            phi_i_p.x.array[:] = wh[0].sub(p.N_ions).collapse().x.array.copy()
-            phi_e_p.x.array[:] = wh[1].sub(p.N_ions).collapse().x.array.copy()
-            p.u_p[0].x.array[:] = wh[0].x.array.copy()
-            p.u_p[1].x.array[:] = wh[1].x.array.copy()
-            p.phi_M_prev.x.array[:] = phi_i_p.x.array.copy() - phi_e_p.x.array.copy()        
+            p.u_p[0].x.array[:] = wh[0].x.array.copy() # Intracellular ions and potential
+            p.u_p[1].x.array[:] = wh[1].x.array.copy() # Extracellular ions and potential
+            phi_i_p.x.array[:]  = wh[0].sub(p.N_ions).collapse().x.array.copy() # Intracellular potential
+            phi_e_p.x.array[:]  = wh[1].sub(p.N_ions).collapse().x.array.copy() # Extracellular potential
+            p.phi_M_prev.x.array[:] = phi_i_p.x.array.copy() - phi_e_p.x.array.copy() # Membrane potential      
 
             # Write output to file and save png
             if self.save_xdmfs and (i % self.save_interval == 0) : self.save_xdmf()
             if self.save_pngs: self.save_png()
 
             if i == self.time_steps - 1:
-
+                # Last timestep, consolidate output files
                 if self.save_pngs:
                     self.print_figures()
-                    if self.comm.rank == 0: print("\nPNG output saved in ", self.out_file_prefix)
+                    print("\nPNG output saved in ", self.out_file_prefix)
 
                 if self.save_xdmfs:
                     self.close_xdmf()
-                    if self.comm.rank == 0: print("\nXDMF output saved in ", self.out_file_prefix)
+                    print("\nXDMF output saved in ", self.out_file_prefix)
 
-                if self.comm.rank == 0: 
-                    print("\nTotal setup time:", setup_timer)
-                    print("Total assemble time:", sum(self.assembly_time))
-                    print("Total solve time:",    sum(self.solve_time))
+                print("\nTotal setup time:", setup_timer)
+                print("Total assembly time:", sum(self.assembly_time))
+                print("Total solve time:",    sum(self.solve_time))
 
-                # print solver info and problem info
+                # Print solver info and problem info
                 self.print_info()
                       
             if self.save_mat:
-
                 if self.problem.MMS_test:
                     print("Saving Amat_MMS ...")
                     dump(self.A, 'output/Amat_MMS')
-
                 else:
                     print("Saving Amat ...")
                     dump(self.A, 'output/Amat')
 
     def print_info(self):
-        """ Print info about the solver. """
+        """ Print info about the problem and the solver. """
 
-        # alias
-        p = self.problem
+        p = self.problem # For ease of notation
 
         # Get number of dofs local to each processor and sum to rank 0
         num_dofs = p.interior.index_map.size_local + p.exterior.index_map.size_local
         num_dofs = self.comm.allreduce(num_dofs, op=MPI.SUM)
 
         # Get number of mesh cells local to each processor and sum to rank 0
+        # Important to subtract shared dofs on the interfaces (cellular membrane, gamma)
         num_cells = p.mesh.geometry.dofmap.__len__() - p.mesh.topology.interprocess_facets().__len__()
         num_cells = self.comm.allreduce(num_cells, op=MPI.SUM)
+
+        # Print problem and solver information
+        print("\n#------------ PROBLEM -------------#\n")
+        print("MPI Size = ", self.comm.size)
+        print("Input mesh = ", p.input_files['mesh_file'])
+        print("Global # mesh cells = ", num_cells)
+        print("Global # dofs = ", num_dofs)
+        print("FEM order = ", p.fem_order)
+
+        if not self.direct_solver: print("System size = ", self.A.size[0])
+        print("# Time steps = ", self.time_steps)
+        print("dt = ", float(p.dt.value))
+
+        if p.dirichlet_bcs:
+            print("Using Dirichlet BCs.")
+        else:
+            print("Using Neumann BCs.")
         
-        if self.comm.rank == 0:
-
-            # Print stuff
-            print("\n#------------ PROBLEM -------------#\n")
-            print("MPI Size = ", self.comm.size)
-            print("Input mesh = ", p.input_file)
-            print("Global # mesh cells = ", num_cells)
-            print("Global # dofs = ", num_dofs)
-            print("FEM order = ", p.fem_order)
-
-            if not self.direct_solver: print("System size = ", self.A.size[0])
-            print("# Time steps = ", self.time_steps)
-            print("dt = ", float(p.dt.value))
-
-            if p.dirichlet_bcs:
-                print("Using Dirichlet BCs.")
-            else:
-                print("Using Neumann BCs.")
+        print("\n#------------ SOLVER -------------#\n")
+        if self.direct_solver:
+            print("Using direct solver mumps.")
+        else:
+            print("Solver type: [" + self.ksp_type + "+" + self.pc_type + "]")
+            print(f"Tolerance: {self.ksp_rtol:.2e}")
             
-            print("\n#------------ SOLVER -------------#\n")
-            if self.direct_solver:
-                print("Using direct solver mumps.")
-            else:
-                print("Solver type: [" + self.ksp_type + "+" + self.pc_type + "]")
-                print(f"Tolerance: {self.ksp_rtol:.2e}")
-                
-                if self.use_P_mat: print("Preconditioning enabled.")
-                
-                print('Average iterations: ' + str(sum(self.iterations)/len(self.iterations)))
+            if self.use_P_mat: print("Preconditioning enabled.")
+            
+            print('Average iterations: ' + str(sum(self.iterations)/len(self.iterations)))
 
 
     def init_png_savefile(self):
+        """ Initialize output .png file. Find a unique dof that lies on a cellular membrane (gamma) at the interface
+        between an intracellular and extracellular space, and use this dof as a point for plotting the membrane potential.
+        
+        If gating variables are a part of the problem, the gating variables are also plotted.
+        """
 
         p = self.problem # For ease of notation
 
-        phi_M_space = p.phi_M_prev.function_space
+        phi_M_space = p.phi_M_prev.function_space # Membrane electric potential
+        
         # Get indices of the membrane (gamma) facets   
         if len(p.gamma_tags) > 1:
             list_of_indices = [p.boundaries.find(tag) for tag in p.gamma_tags]
@@ -402,15 +412,16 @@ class SolverKNPEMI(object):
                 gamma_indices = np.concatenate((gamma_indices, l))
         else:
             gamma_indices = p.boundaries.values==p.gamma_tags[0]
-        facets_gamma = p.boundaries.indices[gamma_indices]
-        dofs_gamma   = dfx.fem.locate_dofs_topological(phi_M_space, p.mesh.topology.dim-1, facets_gamma)
-        self.point_to_plot = dofs_gamma[0]
+        facets_gamma = p.boundaries.indices[gamma_indices] # The facets that lie on gamma
+        dofs_gamma   = dfx.fem.locate_dofs_topological(phi_M_space, p.mesh.topology.dim-1, facets_gamma) # The dofs of the gamma facets
+        self.point_to_plot = dofs_gamma[0] # Choose one of the dofs as the point for plotting the membrane potential 
 
         self.v_t = []
         self.v_t.append(1000 * p.phi_M_prev.x.array[self.point_to_plot]) # Converted to mV
         self.out_v_string = self.out_file_prefix + 'v.png'
 
         if hasattr(p, 'n'):
+            # Gating variables are a part of the problem
             self.n_t = []
             self.m_t = []
             self.h_t = []
@@ -426,6 +437,8 @@ class SolverKNPEMI(object):
             self.out_gate_string = self.out_file_prefix + 'gating.png'
             
     def save_png(self):
+        """ Save data for the .png output of the membrane electric potential, and the gating variables if 
+        these are a part of the problem. """
 
         p = self.problem
 
@@ -438,6 +451,15 @@ class SolverKNPEMI(object):
                 self.h_t.append(local_h[self.point_to_plot])
 
     def print_figures(self):
+        """ Output .png plot of:
+        - the membrane potential
+        - the runtime of the solver
+
+        Further problem-dependent output:
+        - the gating variables (if present in the ionic models)
+        - the number of solver iterations at each timestep (if using an iterative solver)
+
+        """
 
         # Aliases
         dt = float(self.problem.dt.value)
@@ -446,8 +468,8 @@ class SolverKNPEMI(object):
         # Save plot of membrane potential
         plt.figure(0)        
         plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.v_t)
-        plt.xlabel('time (ms)')
-        plt.ylabel('membrane potential (mV)')
+        plt.xlabel('Time (ms)')
+        plt.ylabel('Membrane potential (mV)')
         plt.savefig(self.out_v_string)
 
 		# save plot of gating variables
@@ -457,15 +479,15 @@ class SolverKNPEMI(object):
             plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.m_t, label='m')
             plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.h_t, label='h')
             plt.legend()
-            plt.xlabel('time (ms)')
+            plt.xlabel('Time (ms)')
             plt.savefig(self.out_gate_string)
 
         # Save iteration history
         if not self.direct_solver:
             plt.figure(2)
             plt.plot(self.iterations)
-            plt.xlabel('time step')
-            plt.ylabel('number of iterations')
+            plt.xlabel('Time step')
+            plt.ylabel('Number of iterations')
             plt.savefig(self.out_file_prefix + 'iterations.png')
 
         # save runtime data
@@ -473,15 +495,16 @@ class SolverKNPEMI(object):
         plt.plot(self.assembly_time, label='assembly')
         plt.plot(self.solve_time, label='solve')
         plt.legend()
-        plt.xlabel('time step')
+        plt.xlabel('Time step')
         plt.ylabel('Time (s)')
         plt.savefig(self.out_file_prefix + 'timings.png')
 
     def init_xdmf_savefile(self):
-        """ Initialize .xdmf files for writing output. """
+        """ Initialize .xdmf files for writing output. The mesh with meshtags is written to file,
+        and an output file for the solution functions (ion concentrations and electric potentials)
+        is initialized. """
 
-        # alias
-        p = self.problem
+        p = self.problem # For ease of notation
 
         # Write tag data
         filename = self.out_file_prefix + 'subdomains.xdmf'
@@ -490,32 +513,24 @@ class SolverKNPEMI(object):
         xdmf_file.write_meshtags(p.subdomains, p.mesh.geometry)
         xdmf_file.close()
 
-        # Write solution
-        ui_p = p.u_p[0]
-        ue_p = p.u_p[1]
-
+        # Create solution file and write mesh to file
         filename = self.out_file_prefix + 'solution.xdmf'
-
         self.xdmf_file = dfx.io.XDMFFile(self.comm, filename, "w")
-
         self.xdmf_file.write_mesh(p.mesh)
+
+        # Write solution functions to file
         for idx in range(p.N_ions+1):
-            
-            self.xdmf_file.write_function(ui_p.sub(idx), float(p.t.value))
-            self.xdmf_file.write_function(ue_p.sub(idx), float(p.t.value))
+            self.xdmf_file.write_function(p.u_p[0].sub(idx), float(p.t.value))
+            self.xdmf_file.write_function(p.u_p[1].sub(idx), float(p.t.value))
         
         return
 
     def save_xdmf(self):
-        
-        # aliases
-        ui_p = self.problem.u_p[0]
-        ue_p = self.problem.u_p[1]
+        """ Write solution functions (ion concentrations and electric potentials) to file. """
 
-        # Save results to xdmf files
         for idx in range(self.problem.N_ions+1):
-            self.xdmf_file.write_function(ui_p.sub(idx), float(self.problem.t.value))
-            self.xdmf_file.write_function(ue_p.sub(idx), float(self.problem.t.value))
+            self.xdmf_file.write_function(self.problem.u_p[0].sub(idx), float(self.problem.t.value))
+            self.xdmf_file.write_function(self.problem.u_p[1].sub(idx), float(self.problem.t.value))
 
         return
 
@@ -525,12 +540,8 @@ class SolverKNPEMI(object):
         self.xdmf_file.close()
 
         return
-
-    # direct solver parameters
-    direct_solver      = True
-    ds_solver_type     = 'mumps'
     
-    # iterative solver parameters
+    # Default iterative solver parameters
     ksp_rtol           = 1e-6
     ksp_max_it         = 1000	
     ksp_type           = 'gmres'
@@ -542,14 +553,10 @@ class SolverKNPEMI(object):
     use_block_Jacobi   = True
     nonzero_init_guess = True
 
-    # output parameters
-    out_file_prefix   = 'output/'
+    # Default output save interval
     save_interval     = 1 # save every nth timestep
-    save_xdmfs        = True
-    save_pngs         = True
-    save_mat          = False
 
-    # iteration counter and time variables
+    # Iteration counter and time variables
     tot_its           = 0
     tot_assembly_time = 0
     tot_solver_time   = 0

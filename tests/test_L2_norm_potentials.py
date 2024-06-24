@@ -14,13 +14,13 @@ def test_L2_norm_of_potentials():
 		"""
 		# Create problem and initialize ionic models
 		tags = {'intra': 1, 'extra': 2, 'boundary': 3, 'membrane': 4}
-		problem_square = ProblemKNPEMI(input_file='./square32.xdmf', tags=tags, dt=5e-5)
+		problem_square = ProblemKNPEMI(config_file='./tests/test_config.yml')
 		HH = HH_model(problem_square)
 		ionic_models = [HH]
 		problem_square.init_ionic_model(ionic_models)
 
 		# Create solver
-		solver_square = SolverKNPEMI(problem_square, time_steps=10, direct=True)
+		solver_square = SolverKNPEMI(problem_square)
 		solver_square.solve()
 
 		# Extract the solutions of the potentials
@@ -38,8 +38,8 @@ def test_L2_norm_of_potentials():
 
 		# Calculate the percentage errors and assert that they're smaller than 1%, when
 		# comparing the calculated L2 norms of the potentials with previously saved values.
-		saved_L2_phi_i = 1.5403605575577102e-08
-		saved_L2_phi_e = 8.924158982124452e-09
+		saved_L2_phi_i = 0.015551359556518578 #mesh_conversion_factor=1e-6 : 1.5403605575577102e-08
+		saved_L2_phi_e = 0.009009757241662388 #mesh_conversion_factor=1e-6 : 8.924158982124452e-09
 
 		percentage_error_i = abs(phi_i_L2_global - saved_L2_phi_i)/saved_L2_phi_i*100
 		percentage_error_e = abs(phi_e_L2_global - saved_L2_phi_e)/saved_L2_phi_e*100

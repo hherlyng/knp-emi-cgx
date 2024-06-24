@@ -1,11 +1,11 @@
 import argparse
-from pathlib import Path
-
-from KNPEMIx_ionic_model import *
-from KNPEMIx_problem import ProblemKNPEMI
-from KNPEMIx_solver import SolverKNPEMI
-from parsers import CustomParser
 import petsc4py.PETSc
+
+from pathlib import Path
+from CGx.KNPEMI.KNPEMIx_ionic_model import *
+from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
+from CGx.KNPEMI.KNPEMIx_solver import SolverKNPEMI
+from CGx.KNPEMI.parsers import CustomParser
 
 print = petsc4py.PETSc.Sys.Print
 
@@ -56,19 +56,38 @@ def main(argv=None):
 	print(f"L2 norm phi_i = {phi_i_L2_global}")
 	print(f"L2 norm phi_e = {phi_e_L2_global}")
 
+def main_yaml(yaml_file="config.yaml"):
+	
+	problem = ProblemKNPEMI(yaml_file)
+
+	HH = HH_model(problem)
+	ionic_models = [HH]
+
+	problem.init_ionic_model(ionic_models)
+
+	# Create solver and solve
+	solver = SolverKNPEMI(problem)
+	solver.solve()
+
+	tags = {'intra' : 1, 'extra' : 2, 'boundary' : 3, 'membrane' : 4}
+
+	phi_i = solver.problem.wh[0].sub(problem.N_ions)
+	phi_e = solver.problem.wh[1].sub(problem.N_ions)
+	dx = solver.problem.dx
+
+	phi_i_L2_local = dfx.fem.assemble_scalar(dfx.fem.form(ufl.inner(phi_i, phi_i) * dx(tags['intra'])))
+	phi_i_L2_global = solver.comm.allreduce(phi_i_L2_local, op=MPI.SUM)
+	phi_i_L2_global = np.sqrt(phi_i_L2_global)
+	
+	phi_e_L2_local = dfx.fem.assemble_scalar(dfx.fem.form(ufl.inner(phi_e, phi_e) * dx(tags['extra'])))
+	phi_e_L2_global = solver.comm.allreduce(phi_e_L2_local, op=MPI.SUM)
+	phi_e_L2_global = np.sqrt(phi_e_L2_global)
+	
+	print(f"L2 norm phi_i = {phi_i_L2_global}")
+	print(f"L2 norm phi_e = {phi_e_L2_global}")
 
 if __name__=='__main__':
 
-	main()
-	# # astrocyte
-	# input_file = 'geometries/astrocyte_mesh_full.xdmf'
-	# tags = {'intra' : 3, 'extra' : 1, 'boundary' : 4, 'membrane' : 5}
-
-	# # dendrite
-	# input_file = '../../../data/dendrite/dfx_mesh.xdmf'
-	# tags = {'intra' : (2, 3, 4) , 'extra' : 1, 'boundary' : 1, 'membrane' : (2, 3, 4)}
-
-	# GC
-	# input_file = '../../../data/GC/'
+	main_yaml()
 
 

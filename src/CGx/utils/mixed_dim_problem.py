@@ -1,3 +1,4 @@
+import os
 import ufl
 import time
 import yaml
@@ -16,40 +17,34 @@ class MixedDimensionalProblem(ABC):
 
     ghost_mode = dfx.mesh.GhostMode.shared_facet
 
-    def __init__(self, input_file, tags, dt):
+    def __init__(self, config_file: yaml.__file__):
         
         tic = time.perf_counter()
 
         self.comm = MPI.COMM_WORLD
+        print("Reading input data from " + config_file)
 
-        print("Reading input data: ", input_file)
-
-        # Options for the fenicsx form compiler optimization
+        # Options for the ffcx optimization
         cache_dir       = '.cache'
         compile_options = ["-Ofast", "-march=native"]
         self.jit_parameters  = {"cffi_extra_compile_args" : compile_options,
                                 "cache_dir"               : cache_dir,
                                 "cffi_libraries"          : ["m"]}
 
-        # assign input argument
-        self.input_file = input_file
-
-        # parse tags
-        self.parse_tags(tags)
-
-        # in case some problem dependent init is needed
+        # Read configuration file and initialize
+        self.read_config_file(config_file=config_file)
         self.init()
 
-        # setup FEM
+        # Perform FEM setup
         self.setup_domain()
         self.setup_spaces()
         self.setup_boundary_conditions()
 
-        # init time step
+        # Initialize time
         self.t  = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(0.0))
-        self.dt = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(dt))
+        self.dt = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(self.dt))
 
-        # init empty ionic model
+        # Initialize empty ionic models list
         self.ionic_models = []
 
         print(f"Problem setup in {time.perf_counter() - tic:0.4f} seconds.\n")
@@ -68,7 +63,16 @@ class MixedDimensionalProblem(ABC):
             input_dir = config['input_dir']
         else:
             # input directory is here
-            input_dir = ''
+
+            input_dir = './'
+        
+        if 'output_dir' in config:
+            self.output_dir = config['output_dir']
+            if not os.path.isdir(self.output_dir):
+                raise ValueError('Output directory ' + self.output_dir + ' does not exist.')
+        else:
+            # Set output directory to current directory
+            self.output_dir = './'
         
         if 'cell_tag_file' in config and 'facet_tag_file' in config:
 
@@ -83,26 +87,26 @@ class MixedDimensionalProblem(ABC):
             self.input_files['mesh_file']  = mesh_file
             self.input_files['facet_file'] = facet_file
         else:
-            print('Provide cell_tag_file and facet_tag_file fields in input file.'); exit()
+            raise RuntimeError('Provide cell_tag_file and facet_tag_file fields in input file.')
 
         if 'dt' in config:
             self.dt = config['dt']
         else:
-            print('Provide dt (timestep size) field in input file.'); exit()
+            raise RuntimeError('Provide dt (timestep size) field in input file.')
         
         if 'time_steps' in config:
             self.time_steps = config['time_steps']
         elif 'T' in config:
             self.time_steps = int(config['T'] / config['dt'])
         else:
-            print('Provide final time T or time_steps field in input file.'); exit()
+            raise RuntimeError('Provide final time T or time_steps field in input file.')
 
         # Set mesh tags
         tags = dict()
         if 'ics_tags' in config:
             tags['intra'] = config['ics_tags']            
         else:
-            print('Provide ics_tags (intracellular space tags) field in input file.'); exit()
+            raise RuntimeError('Provide ics_tags (intracellular space tags) field in input file.')
         
         if 'ecs_tags'      in config: tags['extra']    = config['ecs_tags']
         if 'boundary_tags' in config: tags['boundary'] = config['boundary_tags']
@@ -149,11 +153,11 @@ class MixedDimensionalProblem(ABC):
 
                 # Perform sanity checks
                 if 'valence' not in ion_params:
-                    print('Valence of ' + ion + 'must be provided.'); exit()
+                    raise RuntimeError('Valence of ' + ion + ' must be provided.')
                 if 'diffusivity' not in ion_params:
-                    print('Diffusivity of ' + ion + 'must be provided.'); exit()
+                    raise RuntimeError('Diffusivity of ' + ion + ' must be provided.')
                 if 'initial' not in ion_params:
-                    print('Initial condition of ' + ion + 'must be provided.'); exit()
+                    raise RuntimeError('Initial condition of ' + ion + ' must be provided.')
 
                 # Fill in ion dictionary
                 ion_dict['z']  = ion_params['valence']
@@ -166,7 +170,7 @@ class MixedDimensionalProblem(ABC):
                     ion_dict['f_i'] = ion_params['source']['ics']
                     ion_dict['f_e'] = ion_params['source']['ecs']
                 else:
-                    print('Source terms for ' + ion + 'set to zero, as none were provided in the input file.')
+                    print('Source terms for ' + ion + ' set to zero, as none were provided in the input file.')
                     ion_dict['f_i'] = 0
                     ion_dict['f_e'] = 0
                 
@@ -215,9 +219,11 @@ class MixedDimensionalProblem(ABC):
         else:
             print('Setting default: boundary tag = 1.')
 
-        # Transform ints to tuples if needed
-        if isinstance(self.intra_tags, int): self.intra_tags = (self.intra_tags,)
-        if isinstance(self.gamma_tags, int): self.gamma_tags = (self.gamma_tags,)
+        # Transform ints or lists to tuples
+        if isinstance(self.intra_tags, int) or isinstance(self.intra_tags, list): self.intra_tags = tuple(self.intra_tags,)
+        if isinstance(self.extra_tag, int) or isinstance(self.extra_tag, list): self.extra_tag = tuple(self.extra_tag,)
+        if isinstance(self.boundary_tag, int) or isinstance(self.boundary_tag, list): self.boundary_tag = tuple(self.boundary_tag,)
+        if isinstance(self.gamma_tags, int) or isinstance(self.gamma_tags, list): self.gamma_tags = tuple(self.gamma_tags,)
 
     def init_ionic_model(self, ionic_models):
 
@@ -246,8 +252,7 @@ class MixedDimensionalProblem(ABC):
         print("Reading mesh from XDMF file...")
 
         # Rename file for readability
-        mesh_file = self.input_file
-
+        mesh_file = self.input_files['mesh_file']
 
         if not self.MMS_test:
             # Load mesh files with meshtags

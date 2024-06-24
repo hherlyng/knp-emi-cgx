@@ -1,6 +1,3 @@
-import sys
-
-import numpy   as np
 import dolfinx as dfx
 
 from mpi4py import MPI
