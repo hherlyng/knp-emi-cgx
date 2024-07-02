@@ -5,8 +5,8 @@ Software for simulations of ionic electrodiffusion based on the KNP-EMI equation
 ## Conda
 Clone this repository and navigate into its root directory `knp-emi-cgx`. <br>
 Set up a conda environment and activate it (will automatically be named CGx) by running <br> 
-```conda env create -f environment.yml
-conda activate CGx``` <br>
+```conda env create -f environment.yml```
+```conda activate CGx ``` <br>
 Install the `CGx` Python module by (when in the root directory) running <br>
 `pip install -e .` 
 
