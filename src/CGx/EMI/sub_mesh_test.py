@@ -294,13 +294,16 @@ dx = ufl.Measure("dx", domain=mesh, subdomain_data=ct) # Cell integrals
 dS = ufl.Measure("dS", domain=mesh, subdomain_data=[(GAMMA, gamma_entities)]) # Facet integrals
 dS = dS(GAMMA) # Restrict facet integrals to gamma interface
 
+# Define restrictions
+i_res = '+'
+e_res = '-'
 # First row of block bilinear form
-a11 = dt * inner(sigma_i * grad(ui), grad(vi)) * dx(INTRA) + C_M * inner(ui('+'), vi('+')) * dS # ui terms
-a12 = - C_M * inner(ue('-'), vi('+')) * dS # ue terms
+a11 = dt * inner(sigma_i * grad(ui), grad(vi)) * dx(INTRA) + C_M * inner(ui(i_res), vi(i_res)) * dS # ui terms
+a12 = - C_M * inner(ue(e_res), vi(i_res)) * dS # ue terms
 
 # Second row of block bilinear form
-a21 = - C_M * inner(ui('+'), ve('-')) * dS # ui terms
-a22 = dt * inner(sigma_e * grad(ue), grad(ve)) * dx(EXTRA) + C_M * inner(ue('-'), ve('-')) * dS # ue terms
+a21 = - C_M * inner(ui(i_res), ve(e_res)) * dS # ui terms
+a22 = dt * inner(sigma_e * grad(ue), grad(ve)) * dx(EXTRA) + C_M * inner(ue(e_res), ve(e_res)) * dS # ue terms
 
 # Define boundary conditions
 zero = dfx.fem.Constant(mesh, dfx.default_scalar_type(0.0)) # Grounded exterior boundary BC
