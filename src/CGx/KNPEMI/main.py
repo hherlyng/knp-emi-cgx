@@ -88,6 +88,7 @@ def main_yaml(yaml_file="config.yaml"):
 
 if __name__=='__main__':
 
-	main_yaml()
-
-
+	parser = argparse.ArgumentParser(formatter_class=CustomParser)
+	parser.add_argument("--config", dest="config_file", default='./test_setup_config.yaml', type=Path, help="Configuration file")
+	args = parser.parse_args(None)
+	main_yaml(yaml_file=str(args.config_file))
