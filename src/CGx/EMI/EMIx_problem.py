@@ -8,6 +8,7 @@ import dolfinx as dfx
 from ufl      import grad, inner
 from mpi4py   import MPI
 from petsc4py import PETSc
+from CGx.EMI.EMIx_ionic_model    import g_syn_none, HH_model, Passive_model, IonicModel
 from CGx.utils.setup_mms         import SetupMMS, mark_MMS_boundaries
 from CGx.utils.mixed_dim_problem import MixedDimensionalProblem
 
@@ -19,14 +20,24 @@ class ProblemEMI(MixedDimensionalProblem):
         """ Constructor. """
 
         if self.MMS_test: self.setup_MMS_params() # Perform numerical verification
+
+    def add_ionic_model(self, model: IonicModel, tags: int | tuple | dict=None, stim_fun=g_syn_none):
+        model = model[0]
+        if model.__str__()=='Hodgkin-Huxley':
+            model = HH_model(self, tags, stim_fun)
+        elif model.__str__()=='Passive':
+            model = Passive_model(self, tags)
+        else:
+            raise RuntimeError(f'Model type {model.__str__()} not supported. Choose either "HH" or "Passive".')
+
+        self.ionic_models.append(model)
         
     def setup_spaces(self):
 
         print("Setting up function spaces ...")
 
         # Create a function space with continuous Lagrange elements
-        P      = ufl.FiniteElement("Lagrange", self.mesh.ufl_cell(), self.fem_order)
-        self.V = dfx.fem.FunctionSpace(self.mesh, P)
+        self.V = dfx.fem.functionspace(self.mesh, ("Lagrange", self.fem_order))
 
         # Define block function space
         self.W = [self.V.clone(), self.V.clone()]
@@ -38,8 +49,10 @@ class ProblemEMI(MixedDimensionalProblem):
         self.u_p = [dfx.fem.Function(self.W[0]), dfx.fem.Function(self.W[1])]
 
         # Rename for more readable output
-        self.u_p[0].name = "intra"
-        self.u_p[1].name = "extra"
+        self.wh[0].name  = "phi_i"
+        self.wh[1].name  = "phi_e"
+        self.u_p[0].name = "phi_i"
+        self.u_p[1].name = "phi_e"
 
         print("Creating mesh restrictions ...")
 
@@ -94,9 +107,9 @@ class ProblemEMI(MixedDimensionalProblem):
 
         self.bcs = bce
             
-    def setup_variational_form(self):
+    def setup_bilinear_form(self):
         
-        print("Setting up variational form ...")
+        print("Setting up bilinear form ...")
 
         # sanity check
         if len(self.ionic_models)==0 and self.comm.rank==0:
@@ -106,7 +119,9 @@ class ProblemEMI(MixedDimensionalProblem):
         t   = self.t
         dt  = self.dt
         C_M = self.C_M
-        phi_space, _ = self.V
+        sigma_i = self.sigma_i
+        sigma_e = self.sigma_e
+        phi_space = self.V
 
         # Set initial membrane potential
         if np.isclose(t.value, 0.0):
@@ -140,15 +155,11 @@ class ProblemEMI(MixedDimensionalProblem):
                 src_terms, exact_sols, init_conds, bndry_terms = self.M.get_MMS_terms_KNPEMI_2D(t.value)
             elif self.dim == 3:
                 src_terms, exact_sols, init_conds, bndry_terms = self.M.get_MMS_terms_KNPEMI_3D(t.value)
-
-        # init ionic models
-        for model in self.ionic_models:
-            model._init()
         
         # Trial and test functions
-        (ui, vi) = ufl.TrialFunctions(self.W[0]), ufl.TestFunctions(self.W[0])
-        (ue, ve) = ufl.TrialFunctions(self.W[1]), ufl.TestFunctions(self.W[1])
-
+        ui, vi = ufl.TrialFunction(self.W[0]), ufl.TestFunction(self.W[0])
+        ue, ve = ufl.TrialFunction(self.W[1]), ufl.TestFunction(self.W[1])
+        
         # Solutions at previous timestep
         ui_p = self.u_p[0]
         ue_p = self.u_p[1]     
@@ -156,63 +167,90 @@ class ProblemEMI(MixedDimensionalProblem):
         if np.isclose(t.value, 0.0):
             # First timestep
             # Set phi_e and phi_i just for visualization
-            ui_p.interpolate(self.phi_i_init)
-            ue_p.interpolate(self.phi_e_init)
-        
-        # Initialize variational form block entries
-        a00 = 0; a01 = 0; L0 = 0
-        a10 = 0; a11 = 0; L1 = 0
+            ui_p.x.array[:] = self.phi_M_init + self.phi_e_init
+            ue_p.x.array[:] = self.phi_e_init
         
         # Weak form - equation for phi_i
-        a00 += dt * inner(self.sigma_i * grad(ui), grad(vi)) * dxi + C_M * inner(ui('-'), vi('-')) * dS
-        a01 -= C_M * inner(ue('+'), vi('-')) * dS
+        a00 = dt * inner(sigma_i * grad(ui), grad(vi)) * dxi + C_M * inner(ui('-'), vi('-')) * dS
+        a01 = - C_M * inner(ue('+'), vi('-')) * dS
         
         # Weak form - equation for phi_e
-        a11 += dt * inner(self.sigma_e * grad(ue), grad(ve)) * dxe - C_M * inner(ue('+'), ve('+')) * dS
-        a10 -= C_M * inner(ui('-'), ve('+')) * dS 
-
-        # Linear form intracellular space
-        L0 += dt * inner(self.fi, vi) * dxi + C_M * inner(self.fg, vi('-')) * dS
-        
-        # Linear form extracellular space
-        L1 += dt * inner(self.fe, ve) * dxe + C_M * inner(self.fg, ve('+')) * dS
+        a11 = dt * inner(sigma_e * grad(ue), grad(ve)) * dxe + C_M * inner(ue('+'), ve('+')) * dS
+        a10 = - C_M * inner(ui('-'), ve('+')) * dS 
 
         # Store weak form in matrix and vector
         a = [[a00, a01],
              [a10, a11]]
 
-        L = [L0, L1]
-
-        # Convert to C++ forms
+        # Compile bilinear form
         self.a = dfx.fem.form(a, jit_options=self.jit_parameters)
+
+    def setup_linear_form(self):
+
+        print('Setting up linear form ...')
+
+        # Aliases
+        dt = self.dt
+        C_M = self.C_M
+        source_i = self.source_i
+        source_e = self.source_e
+        t = float(self.t.value)
+        
+        # If at the first timestep, check that membrane potential
+        # has been initialized with the bilinear form
+        if np.isclose(t, 0.0): assert self.phi_M_prev is not None
+
+        # Get integral measures
+        dxi = self.dx(self.intra_tags)
+        dxe = self.dx(self.extra_tag)
+        dS  = self.dS(self.gamma_tags)
+
+        # Test functions
+        vi = ufl.TestFunction(self.W[0])
+        ve = ufl.TestFunction(self.W[1])
+
+        # Define source terms
+        fi = inner(source_i, vi) * dxi
+        fe = inner(source_e, ve) * dxe
+
+        # Initialize dictionary for the ionic channels
+        I_ch = dict.fromkeys(self.gamma_tags, 0)
+
+        # Loop over ionic models and gamma tags and set the channel current
+        for model in self.ionic_models:
+            for gamma_tag in model.tags:
+                I_ch[gamma_tag] = model._eval()
+        
+        # Loop over the gamma tags and add the source term contributions
+        for gamma_tag in self.gamma_tags:
+            fg = C_M*self.phi_M_prev - dt*I_ch[gamma_tag]
+
+            fi += inner(fg, vi('-')) * dS(gamma_tag)
+            fe -= inner(fg, ve('+')) * dS(gamma_tag)         
+
+        L = [fi, fe]
+
+        # Compile form
         self.L = dfx.fem.form(L, jit_options=self.jit_parameters)
         
 
     def setup_preconditioner(self):
 
-        if self.comm.rank == 0: print('Setting up preconditioner ...')
+        print('Setting up preconditioner ...')
 
-        # Aliases
-        dt  = self.dt
-        C_M = self.C_M
 
         # Integral measures
         dxi = self.dx(self.intra_tags)
         dxe = self.dx(self.extra_tag)
-        dS  = self.dS(self.gamma_tags)
         
         # Trial and test functions
-        (ui, vi) = ufl.TrialFunctions(self.W[0]), ufl.TestFunctions(self.W[0])
-        (ue, ve) = ufl.TrialFunctions(self.W[1]), ufl.TestFunctions(self.W[1])
-
-        # Initialize variational form
-        p00 = 0
-        p11 = 0
+        ui, vi = ufl.TrialFunction(self.W[0]), ufl.TestFunction(self.W[0])
+        ue, ve = ufl.TrialFunction(self.W[1]), ufl.TestFunction(self.W[1])
 
         # Setup diagonal preconditioner
         # Add flux contributions to weak form equations
-        p00 += dt * inner(self.sigma_i * grad(ui), grad(vi)) * dxi - C_M * inner(ui('-'), vi('-')) * dS
-        p11 += dt * inner(self.sigma_e * grad(ue), grad(ve)) * dxe - C_M * inner(ue('+'), ve('+')) * dS        
+        p00 = inner(self.sigma_i * grad(ui), grad(vi)) * dxi + inner(ui, vi) * dxi
+        p11 = inner(self.sigma_e * grad(ue), grad(ve)) * dxe + inner(ue, ve) * dxe
 
         # Create block preconditioner matrix
         P = [[p00, None],
@@ -245,7 +283,6 @@ class ProblemEMI(MixedDimensionalProblem):
         
         # initial values
         self.phi_M_init = init_conds['phi_M']   # membrane potential (V)
-        self.phi_i_init = exact_sols['phi_i_e'] # internal potential (V) just for visualization
         self.phi_e_init = exact_sols['phi_e_e'] # external potential (V) just for visualization
 
     def print_errors(self):
@@ -290,17 +327,12 @@ class ProblemEMI(MixedDimensionalProblem):
     C_M = 0.1
     sigma_i = 1
     sigma_e = 1
-    V_rest  = -0.065                 # resting membrane potential (V)
+    source_i = 0.0
+    source_e = 0.0
 
     # Initial conditions
-    phi_e_init = 0         # external potential (V) (Constant)
-    phi_i_init = -0.06774  # internal potential (V) just for visualization (Constant)
-    phi_M_init = -0.06774  # membrane potential (V)	 (Constant)
-
-    # Initial values of gating variables
-    n_init_val = 0.27622914792
-    m_init_val = 0.03791834627
-    h_init_val = 0.68848921811
+    phi_e_init = 0         # extracellular potential (V) (Constant)
+    phi_M_init = -0.06774  # membrane      potential (V) (Constant)
 
     # Mesh unit conversion factor
     mesh_conversion_factor = 1
