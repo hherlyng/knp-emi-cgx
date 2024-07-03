@@ -75,7 +75,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
     def setup_boundary_conditions(self):
 
-        if self.comm.rank == 0: print('Setting up boundary conditions ...')
+        print('Setting up boundary conditions ...')
         
         We = self.W[1] # Ease notation
 
@@ -434,7 +434,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
     def setup_preconditioner(self, use_block_jacobi: bool):
 
-        if self.comm.rank == 0: print('Setting up preconditioner ...')
+        print('Setting up preconditioner ...')
 
         # Aliases
         dt  = self.dt
@@ -702,7 +702,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
         # Print the errors
         print('#-------------- ERRORS --------------#')
-        print(f"Hello from rank = {self.comm.rank}")
         print('L2 Na_i  error:', L2_err_Na_i)
         print('L2 Na_e  error:', L2_err_Na_e)
         print('L2 K_i   error:', L2_err_K_i)

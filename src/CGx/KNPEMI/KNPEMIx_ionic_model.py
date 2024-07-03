@@ -302,5 +302,5 @@ class HH_model(IonicModel):
                     loc_h[:] += alpha_h * (1 - loc_h[:]) - beta_h * loc_h[:]	
 
         toc = time.perf_counter()
-        ODE_step_time = MPI.COMM_WORLD.allreduce(toc-tic, op=MPI.MAX)
+        ODE_step_time = self.problem.mesh.comm.allreduce(toc-tic, op=MPI.MAX)
         PETSc.Sys.Print(f"ODE step in {ODE_step_time:0.4f} seconds")   	
