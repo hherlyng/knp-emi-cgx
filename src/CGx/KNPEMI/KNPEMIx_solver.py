@@ -89,14 +89,14 @@ class SolverKNPEMI(object):
         opts     = PETSc.Options()
 
         if self.direct_solver:
-            if self.comm.rank == 0: print("Using direct solver ...")
+            print("Using direct solver ...")
             self.ksp.setType("preonly")
             self.ksp.getPC().setType("lu")
             self.ksp.getPC().setFactorSolverType('mumps')
             opts.setValue('pc_factor_zeropivot', 1e-22)
 
         else:
-            if self.comm.rank == 0: print("Setting up iterative solver ...")
+            print("Setting up iterative solver ...")
 
             # set initial guess
             for idx, ion in enumerate(p.ion_list):
