@@ -233,7 +233,7 @@ class MixedDimensionalProblem(ABC):
         ionic_tags = []
     
         # Check that all intracellular space tags are present in some ionic model
-        for model in ionic_models:
+        for model in self.ionic_models:
             ionic_tags.append(model.tags)
         
         ionic_tags = sorted(flatten_list(ionic_tags))
@@ -245,7 +245,7 @@ class MixedDimensionalProblem(ABC):
         
         
         print('# Membrane tags = ', len(gamma_tags))
-        print('# Ionic models  = ', len(ionic_models), '\n')
+        print('# Ionic models  = ', len(self.ionic_models), '\n')
 
     def setup_domain(self):
 

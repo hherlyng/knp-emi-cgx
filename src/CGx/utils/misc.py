@@ -30,6 +30,64 @@ def check_if_file_exists(file_path):
         print(f"The file '{file_path}' does not exist.")
         exit()
 
+def calc_error_L2(u_h: dfx.fem.Function, u_exact: dfx.fem.Function, dX: ufl.Measure, degree_raise: int=3) -> float:
+    """ Calculate the L2 error for a solution approximated with finite elements.
+
+    Parameters
+    ----------
+    u_h : dolfinx.fem Function
+        The solution function approximated with finite elements.
+
+    u_exact : dolfinx.fem Function
+        The exact solution function.
+
+    degree_raise : int, optional
+        The amount of polynomial degrees that the approximated solution
+        is refined, by default 3
+
+    Returns
+    -------
+    error_global : float
+        The L2 error norm.
+    """
+    # Create higher-order function space for solution refinement
+    degree = u_h.function_space.ufl_element().degree()
+    family = u_h.function_space.ufl_element().family()
+    mesh   = u_h.function_space.mesh
+
+    if u_h.function_space.element.signature().startswith('Vector'):
+        # Create higher-order function space based on vector elements
+        W = dfx.fem.FunctionSpace(mesh, ufl.VectorElement(family=family, 
+                                    degree=(degree+degree_raise), cell=mesh.ufl_cell()))
+    else:
+        # Create higher-order funciton space based on finite elements
+        W = dfx.fem.FunctionSpace(mesh, (family, degree+degree_raise))
+
+    # Interpolate the approximate solution into the refined space
+    u_W = dfx.fem.Function(W)
+    u_W.interpolate(u_h)
+
+    # Interpolate exact solution, special handling if exact solution
+    # is a ufl expression
+    u_exact_W = dfx.fem.Function(W)
+
+    if isinstance(u_exact, ufl.core.expr.Expr):
+        u_expr = dfx.fem.Expression(u_exact, W.element.interpolation_points())
+        u_exact_W.interpolate(u_expr)
+    else:
+        u_exact_W.interpolate(u_exact)
+    
+    # Compute the error in the higher-order function space
+    e_W = dfx.fem.Function(W)
+    with e_W.vector.localForm() as e_W_loc, u_W.vector.localForm() as u_W_loc, u_exact_W.vector.localForm() as u_ex_W_loc:
+        e_W_loc[:] = u_W_loc[:] - u_ex_W_loc[:]
+
+    # Integrate the error
+    error        = dfx.fem.form(ufl.inner(e_W, e_W) * dX)
+    error_local  = dfx.fem.assemble_scalar(error)
+
+    return error_local
+
 
 # Meshing utility functions
 def mark_subdomains_square(mesh: dfx.mesh.Mesh) -> dfx.mesh.MeshTags:
