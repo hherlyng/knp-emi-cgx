@@ -1,4 +1,5 @@
-## CI Test Config File
+## CI Test Config File, KNP-EMI
+problem_type : "KNP-EMI"
 
 # Numerical parameters 
 dt : 0.00005 # Timestep size 

@@ -1,3 +1,6 @@
+# KNP-EMI Config File
+problem_type : "KNP-EMI"
+
 # Input and output directories
 output_dir : './output'
 
