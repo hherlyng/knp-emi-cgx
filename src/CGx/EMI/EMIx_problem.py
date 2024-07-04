@@ -45,14 +45,12 @@ class ProblemEMI(MixedDimensionalProblem):
         # Create functions for storing the solutions
         self.wh = [dfx.fem.Function(self.W[0]), dfx.fem.Function(self.W[1])]
 
-        # Create functions for solution at previous timestep
+        # Create previous timestep functions
         self.u_p = [dfx.fem.Function(self.W[0]), dfx.fem.Function(self.W[1])]
 
         # Rename for more readable output
-        self.wh[0].name  = "phi_i"
-        self.wh[1].name  = "phi_e"
-        self.u_p[0].name = "phi_i"
-        self.u_p[1].name = "phi_e"
+        self.u_p[0].name  = "phi_i"
+        self.u_p[1].name  = "phi_e"
 
         print("Creating mesh restrictions ...")
 
@@ -81,7 +79,7 @@ class ProblemEMI(MixedDimensionalProblem):
 
     def setup_boundary_conditions(self):
 
-        if self.comm.rank == 0: print('Setting up boundary conditions ...')
+        print('Setting up boundary conditions ...')
         
         We = self.W[1] # Ease notation
 
@@ -93,16 +91,15 @@ class ProblemEMI(MixedDimensionalProblem):
             facets_boundary = self.boundaries.indices[self.boundaries.values==self.boundary_tag]
 
             # Electric potential in extracellular space
-            W_phi, _ = We.sub(self.N_ions).collapse()
-            func = dfx.fem.Function(W_phi)
+            func = dfx.fem.Function(We)
 
             if self.MMS_test:
                 func.interpolate(self.phi_e_init)
             else:
                 func.x.array[:] = self.phi_e_init
 
-            dofs = dfx.fem.locate_dofs_topological((We.sub(self.N_ions), W_phi), self.boundaries.dim, facets_boundary)
-            bc   = dfx.fem.dirichletbc(func, dofs, We.sub(self.N_ions))
+            dofs = dfx.fem.locate_dofs_topological(We, self.boundaries.dim, facets_boundary)    
+            bc   = dfx.fem.dirichletbc(func, dofs)
             bce.append(bc)
 
         self.bcs = bce
@@ -116,7 +113,6 @@ class ProblemEMI(MixedDimensionalProblem):
             raise RuntimeError('\nNo ionic model(s) specified.\nCall init_ionic_model() to provide ionic models.\n')
 
         # Aliases
-        t   = self.t
         dt  = self.dt
         C_M = self.C_M
         sigma_i = self.sigma_i
@@ -124,51 +120,33 @@ class ProblemEMI(MixedDimensionalProblem):
         phi_space = self.V
 
         # Set initial membrane potential
-        if np.isclose(t.value, 0.0):
-            self.phi_M_prev = dfx.fem.Function(phi_space)
-            if self.MMS_test:
-                self.phi_M_prev.interpolate(self.phi_M_init)
-            else:
-                self.phi_M_prev.x.array[:] = self.phi_M_init
+        self.phi_M = dfx.fem.Function(phi_space)
+        if self.MMS_test:
+            self.phi_M.x.array[:] = self.phi_M_init.copy()
+        else:
+            self.phi_M.x.array[:] = self.phi_M_init
+
+        if self.MMS_test:
+            # Create new boundary tags for unit square/unit cube tests
+            self.boundaries = mark_MMS_boundaries(self.mesh)
+            self.dS = ufl.Measure("dS", domain=self.mesh, subdomain_data=self.boundaries)
+            if self.mesh.topology.dim==2:
+                # for Omega_i = [0.25, 0.75] x [0.25, 0.75]
+                self.gamma_tags = (1, 2, 3, 4)
+            elif self.mesh.topology.dim==3:
+                # for Omega_i = [0.25, 0.75] x [0.25, 0.75] x [0.25, 0.75]
+                self.gamma_tags = (1, 2, 3, 4, 5, 6)
+
+            self.ionic_models[0].tags = self.gamma_tags
 
         # Define integral measures
         dxi = self.dx(self.intra_tags)
         dxe = self.dx(self.extra_tag)
         dS  = self.dS(self.gamma_tags)
-
-        # For the MMS test various gamma faces get different tags
-        if self.MMS_test:
-            # Create new boundary tags
-            self.boundaries = mark_MMS_boundaries(self.mesh)
-            dS = ufl.Measure("dS", domain=self.mesh, subdomain_data=self.boundaries)
-            if self.mesh.topology.dim == 2:
-                # for Omega_i = [0.25, 0.75] x [0.25, 0.75]
-                dS = dS((1, 2, 3, 4))
-            elif self.mesh.topology.dim == 3:
-                # for Omega_i = [0.25, 0.75] x [0.25, 0.75] x [0.25, 0.75]
-                dS = dS((1, 2, 3, 4, 5, 6))
-
-            dsOuter = dS(self.boundary_tag)
-
-            # Update MMS expressions
-            if self.dim == 2:
-                src_terms, exact_sols, init_conds, bndry_terms = self.M.get_MMS_terms_KNPEMI_2D(t.value)
-            elif self.dim == 3:
-                src_terms, exact_sols, init_conds, bndry_terms = self.M.get_MMS_terms_KNPEMI_3D(t.value)
         
         # Trial and test functions
         ui, vi = ufl.TrialFunction(self.W[0]), ufl.TestFunction(self.W[0])
         ue, ve = ufl.TrialFunction(self.W[1]), ufl.TestFunction(self.W[1])
-        
-        # Solutions at previous timestep
-        ui_p = self.u_p[0]
-        ue_p = self.u_p[1]     
-
-        if np.isclose(t.value, 0.0):
-            # First timestep
-            # Set phi_e and phi_i just for visualization
-            ui_p.x.array[:] = self.phi_M_init + self.phi_e_init
-            ue_p.x.array[:] = self.phi_e_init
         
         # Weak form - equation for phi_i
         a00 = dt * inner(sigma_i * grad(ui), grad(vi)) * dxi + C_M * inner(ui('-'), vi('-')) * dS
@@ -190,15 +168,14 @@ class ProblemEMI(MixedDimensionalProblem):
         print('Setting up linear form ...')
 
         # Aliases
-        dt = self.dt
-        C_M = self.C_M
-        source_i = self.source_i
-        source_e = self.source_e
-        t = float(self.t.value)
+        t   = float(self.t.value) # Time
+        dt  = self.dt  # Timestep
+        C_M = self.C_M # Membrane capacitance
         
-        # If at the first timestep, check that membrane potential
-        # has been initialized with the bilinear form
-        if np.isclose(t, 0.0): assert self.phi_M_prev is not None
+        if np.isclose(t, 0.0):
+            # If at the first timestep, check that membrane potential
+            # has been initialized with the bilinear form
+            assert self.phi_M is not None
 
         # Get integral measures
         dxi = self.dx(self.intra_tags)
@@ -208,6 +185,18 @@ class ProblemEMI(MixedDimensionalProblem):
         # Test functions
         vi = ufl.TestFunction(self.W[0])
         ve = ufl.TestFunction(self.W[1])
+
+        # Define source terms
+        if self.MMS_test:
+            if np.isclose(t, 0.0):
+                source_i = self.source_i
+                source_e = self.source_e
+            else:
+                _, src_terms = self.M.get_MMS_terms_EMI_2D(t) if self.mesh.geometry.dim==2 else self.M.get_MMS_terms_EMI_3D(t)
+                source_i, source_e = src_terms['f_i'], src_terms['f_e']
+        else:
+            source_i = self.source_i
+            source_e = self.source_e
 
         # Define source terms
         fi = inner(source_i, vi) * dxi
@@ -223,10 +212,9 @@ class ProblemEMI(MixedDimensionalProblem):
         
         # Loop over the gamma tags and add the source term contributions
         for gamma_tag in self.gamma_tags:
-            fg = C_M*self.phi_M_prev - dt*I_ch[gamma_tag]
-
-            fi += inner(fg, vi('-')) * dS(gamma_tag)
-            fe -= inner(fg, ve('+')) * dS(gamma_tag)         
+            fg = C_M*self.phi_M - dt*I_ch[gamma_tag]
+            fi += dt * inner(fg, vi('-')) * dS(gamma_tag)
+            fe -= dt * inner(fg, ve('+')) * dS(gamma_tag)         
 
         L = [fi, fe]
 
@@ -261,37 +249,35 @@ class ProblemEMI(MixedDimensionalProblem):
 
     def setup_MMS_params(self):
 
-        self.MMS_test            = True
-        self.dirichlet_bcs       = True
+        self.MMS_test      = True
+        self.dirichlet_bcs = True
+        self.boundary_tag  = 8
         self.mesh_conversion_factor = 1
 
-        # ionic model
-        self.HH_model = False
-
-        self.C_M = 1
-        self.F   = 1
-        self.R   = 1
-        self.T   = 1   
-        self.psi = 1           
+        self.dt  = 1
+        self.C_M = 1  
 
         self.M = SetupMMS(self.mesh)
 
         if self.mesh.geometry.dim == 2:
-            src_terms, exact_sols, init_conds, bndry_terms = self.M.get_MMS_terms_KNPEMI_2D(0.0)
+            exact_sols, src_terms = self.M.get_MMS_terms_EMI_2D(0.0)
         elif self.mesh.geometry.dim == 3:
-            src_terms, exact_sols, init_conds, bndry_terms = self.M.get_MMS_terms_KNPEMI_3D(0.0)
+            exact_sols, src_terms = self.M.get_MMS_terms_EMI_3D(0.0)
         
         # initial values
-        self.phi_M_init = init_conds['phi_M']   # membrane potential (V)
-        self.phi_e_init = exact_sols['phi_e_e'] # external potential (V) just for visualization
+        self.phi_e_init = exact_sols['phi_e'] # external potential (V) just for visualization
+        self.phi_M_init = exact_sols['phi_i'].x.array - self.phi_e_init.x.array   # membrane potential (V)
+        self.source_i = src_terms['f_i'] # Intracellular source term
+        self.source_e = src_terms['f_e'] # Extracellular source term
 
     def print_errors(self):
+        """ Print error norms when performing MMS convergence test. """
         
         # Get the exact solutions
         if self.dim == 2:
-            _, exact_sols, _, _ = self.M.get_MMS_terms_KNPEMI_2D(self.t.value)
+            exact_sols, _ = self.M.get_MMS_terms_EMI_2D(self.t.value)
         elif self.dim == 3:
-            _, exact_sols, _, _ = self.M.get_MMS_terms_KNPEMI_3D(self.t.value)
+            exact_sols, _ = self.M.get_MMS_terms_EMI_3D(self.t.value)
 
         # Define integral measures
         dxi = self.dx(self.intra_tags)
@@ -300,8 +286,8 @@ class ProblemEMI(MixedDimensionalProblem):
         phi_i = self.wh[0]
         phi_e = self.wh[1]
         
-        err_phi_i = inner(phi_i - exact_sols['phi_i_e'], phi_i - exact_sols['phi_i_e']) * dxi
-        err_phi_e = inner(phi_e - exact_sols['phi_e_e'], phi_e - exact_sols['phi_e_e']) * dxe
+        err_phi_i = inner(phi_i - exact_sols['phi_i'], phi_i - exact_sols['phi_i']) * dxi
+        err_phi_e = inner(phi_e - exact_sols['phi_e'], phi_e - exact_sols['phi_e']) * dxe
 
         # calculate local L2 error norms
         L2_err_phi_i = dfx.fem.assemble_scalar(dfx.fem.form(err_phi_i))
@@ -310,38 +296,37 @@ class ProblemEMI(MixedDimensionalProblem):
         # Sum over processors and take square root to get global errors
         comm = self.comm # MPI communicator
         L2_err_phi_i = np.sqrt(comm.allreduce(L2_err_phi_i, op=MPI.SUM))
-        L2_err_phi_e = np.sqrt(comm.allreduce(L2_err_phi_e,  op=MPI.SUM))
+        L2_err_phi_e = np.sqrt(comm.allreduce(L2_err_phi_e, op=MPI.SUM))
 
         # Print the errors
         print('#-------------- ERRORS --------------#')
-        print(f"Hello from rank = {self.comm.rank}")
-        print('L2 phi_i error:', L2_err_phi_i)
-        print('L2 phi_e error:', L2_err_phi_e)
+        print(f'L2 phi_i error: {L2_err_phi_i:.2e}')
+        print(f'L2 phi_e error: {L2_err_phi_e:.2e}')
 
         self.errors = [L2_err_phi_i, L2_err_phi_e]        
 
-    ### Default class variables ###
-    
+    #---------------------------------------#
+    #        DEFAULT CLASS VARIABLES        #
+    #---------------------------------------#
     # Physical parameters
-    # Mesh constants
-    C_M = 0.1
-    sigma_i = 1
-    sigma_e = 1
-    source_i = 0.0
-    source_e = 0.0
+    C_M      = 0.1 # Membrane capacitance
+    sigma_i  = 1   # Intracellular electrical conductivity
+    sigma_e  = 1   # Extracellular electrical conductivity
+    source_i = 0.0 # Intracellular source/forcing term
+    source_e = 0.0 # Extracellular source/forcing term
 
     # Initial conditions
-    phi_e_init = 0         # extracellular potential (V) (Constant)
-    phi_M_init = -0.06774  # membrane      potential (V) (Constant)
+    phi_e_init = 0         # Extracellular potential (V) (Constant)
+    phi_M_init = -0.06774  # Membrane      potential (V) (Constant)
 
     # Mesh unit conversion factor
-    mesh_conversion_factor = 1
+    mesh_conversion_factor = 1 
 
     # Finite element polynomial order 
     fem_order = 1
     
     # Verification flag
-    MMS_test        = False
+    MMS_test = False
 
     # Boundary condition type
-    dirichlet_bcs   = False
+    dirichlet_bcs = False

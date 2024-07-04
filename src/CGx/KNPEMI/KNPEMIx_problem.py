@@ -30,7 +30,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         # Ion concentrations for each ion + electric potential
         element_list = [P] * (self.N_ions + 1)
 
-        self.V = dfx.fem.FunctionSpace(self.mesh, ufl.MixedElement(element_list))
+        self.V = dfx.fem.functionspace(self.mesh, ufl.MixedElement(element_list))
 
         # Define block function space
         V1 = self.V.clone()

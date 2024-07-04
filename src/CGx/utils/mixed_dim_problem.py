@@ -31,12 +31,12 @@ class MixedDimensionalProblem(ABC):
                                 "cache_dir"               : cache_dir,
                                 "cffi_libraries"          : ["m"]}
 
-        # Read configuration file and initialize
+        # Read configuration file and setup mesh
         self.read_config_file(config_file=config_file)
-        self.init()
+        self.setup_domain()
 
         # Perform FEM setup
-        self.setup_domain()
+        self.init()
         self.setup_spaces()
         self.setup_boundary_conditions()
 
@@ -71,8 +71,9 @@ class MixedDimensionalProblem(ABC):
             if not os.path.isdir(self.output_dir):
                 raise ValueError('Output directory ' + self.output_dir + ' does not exist.')
         else:
-            # Set output directory to current directory
-            self.output_dir = './'
+            # Set output directory to a new folder in current directory
+            if not os.path.isdir('./output'): os.mkdir('./output')
+            self.output_dir = './output/'
         
         if 'cell_tag_file' in config and 'facet_tag_file' in config:
 
@@ -134,6 +135,9 @@ class MixedDimensionalProblem(ABC):
         # Boundary condition type (default pure Neumann BCs)
         if 'dirichlet_bcs' in config: self.dirichlet_bcs = config['dirichlet_bcs']
 
+        # Verification test flag
+        if 'MMS_test' in config: self.MMS_test = config['MMS_test']
+
         # Initial membrane potential (default -0.06774 Volts)
         if 'phi_M_init' in config: self.phi_M_init = config['phi_M_init']
 
@@ -179,7 +183,8 @@ class MixedDimensionalProblem(ABC):
             self.N_ions = len(self.ion_list)
         
         else:
-            print('Using default ionic species: {Na, K, Cl}.')
+            if config['problem_type']=='KNP-EMI':
+                print('Using default ionic species: {Na, K, Cl}.')
 
     def parse_tags(self, tags: dict):
 
@@ -274,14 +279,15 @@ class MixedDimensionalProblem(ABC):
             self.mesh.geometry.x[:] *= self.mesh_conversion_factor
         
         else:
-            self.dim = 2
-            if self.dim == 2:
-                self.mesh = dfx.mesh.create_unit_square(comm=MPI.COMM_WORLD, nx = self.N_mesh, ny = self.N_mesh, ghost_mode=self.ghost_mode)
+            self.dim=2
+            self.N_mesh = 64
+            if self.dim==2:
+                self.mesh = dfx.mesh.create_unit_square(comm=MPI.COMM_WORLD, nx=self.N_mesh, ny=self.N_mesh, ghost_mode=self.ghost_mode)
                 self.subdomains = mark_subdomains_square(self.mesh)
                 self.boundaries = mark_boundaries_square_MMS(self.mesh)
             
-            elif self.dim == 3:
-                self.mesh = dfx.mesh.create_unit_cube(comm=MPI.COMM_WORLD, nx = self.N_mesh, ny = self.N_mesh, nz = self.N_mesh, ghost_mode=self.ghost_mode)
+            elif self.dim==3:
+                self.mesh = dfx.mesh.create_unit_cube(comm=MPI.COMM_WORLD, nx=self.N_mesh, ny=self.N_mesh, nz=self.N_mesh, ghost_mode=self.ghost_mode)
                 self.subdomains = mark_subdomains_cube(self.mesh)
                 self.boundaries = mark_boundaries_cube_MMS(self.mesh)
 

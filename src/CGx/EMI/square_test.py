@@ -110,8 +110,8 @@ P = 1
 
 # Time discretization parameters
 t          = 0.0
-T          = 0.1
-deltaT     = 0.1
+T          = 1
+deltaT     = 1
 time_steps = int(T / deltaT)
 
 # Physical parameters
@@ -123,7 +123,7 @@ conductivity_extracellular = 1.0
 write_mesh     = False
 save_output    = False    
 save_matrix    = False
-direct_solver  = False
+direct_solver  = True
 ksp_type       = 'cg'
 pc_type        = 'hypre'
 ds_solver_type = 'mumps'

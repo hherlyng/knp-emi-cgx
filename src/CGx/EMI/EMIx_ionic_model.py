@@ -54,8 +54,8 @@ class Passive_model(IonicModel):
 	def __str__(self):
 		return f'Passive'
 		
-	def _eval(self, ion_idx):	
-		I_ch = self.problem.phi_M_prev	
+	def _eval(self):	
+		I_ch = self.problem.phi_M
 		return I_ch
 
 # Hodgkin–Huxley + stimulus
@@ -127,9 +127,9 @@ class HH_model(IonicModel):
         g_Na += self.g_Na_stim(float(p.t.value)) 
 
         # ionic currents
-        I_ch_Na = g_Na * (p.phi_M_prev - self.E_Na)
-        I_ch_K  = g_K  * (p.phi_M_prev - self.E_K)
-        I_ch_Cl = g_Cl * (p.phi_M_prev - self.E_Cl)		
+        I_ch_Na = g_Na * (p.phi_M - self.E_Na)
+        I_ch_K  = g_K  * (p.phi_M - self.E_K)
+        I_ch_Cl = g_Cl * (p.phi_M - self.E_Cl)		
 
         # total current
         I_ch = I_ch_Na + I_ch_K + I_ch_Cl
@@ -144,12 +144,12 @@ class HH_model(IonicModel):
         n = self.problem.n
         m = self.problem.m
         h = self.problem.h
-        phi_M_prev = self.problem.phi_M_prev
+        phi_M = self.problem.phi_M
         dt_ode     = float(self.problem.dt.value) / self.time_steps_ODE
         
         # Set membrane potential
-        with phi_M_prev.vector.localForm() as loc_phi_M_prev:
-            V_M = 1000*(loc_phi_M_prev[:] - self.V_rest) # convert phi_M to mV	
+        with phi_M.vector.localForm() as loc_phi_M:
+            V_M = 1000*(loc_phi_M[:] - self.V_rest) # convert phi_M to mV	
         
         alpha_n = 0.01e3 * (10.-V_M) / (np.exp((10. - V_M)/10.) - 1.)
         beta_n  = 0.125e3 * np.exp(-V_M/80.)

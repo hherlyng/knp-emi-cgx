@@ -15,8 +15,11 @@ print = PETSc.Sys.Print # Enables printing only on rank 0 when running in parall
 
 class SolverEMI(object):
 
-    def __init__(self, problem: ProblemEMI, use_direct_solver: bool=True,
-                 save_xdmfs: bool=False, save_pngs: bool=False, save_mat: bool=False):
+    def __init__(self, problem: ProblemEMI,
+                       use_direct_solver: bool=True,
+                       save_xdmfs: bool=False,
+                       save_pngs: bool=False,
+                       save_mat: bool=False):
         """ Constructor. """
 
         self.problem    = problem                 # The KNP-EMI problem
@@ -41,19 +44,25 @@ class SolverEMI(object):
         # Perform only a single timestep when saving system matrix
         if self.save_mat: self.time_steps = 1
 
-    def assemble(self):
+    def assemble_system(self):
 	
         print("Assembling linear system ...")
-        p = self.problem # For ease of notation
-        
-        # Clear system matrix and RHS vector values to avoid accumulation
-        self.A.zeroEntries()
-        self.b.array[:] = 0
+        p = self.problem # For ease of notation        
 
         # Assemble system
         multiphenicsx.fem.petsc.assemble_matrix_block(self.A, p.a, bcs=p.bcs, restriction=(p.restriction, p.restriction)) # Assemble DOLFINx matrix
         multiphenicsx.fem.petsc.assemble_vector_block(self.b, p.L, p.a, bcs=p.bcs, restriction=p.restriction) # Assemble RHS vector
         self.A.assemble() # Assemble PETSc matrix
+
+    def assemble_rhs(self):
+
+        print("Assembling RHS vector ...")
+        p = self.problem
+
+        # Clear RHS vector to avoid accumulation
+        self.b.array[:] = 0
+        
+        multiphenicsx.fem.petsc.assemble_vector_block(self.b, p.L, p.a, bcs=p.bcs, restriction=p.restriction) # Assemble RHS vector
 
 
     def assemble_preconditioner(self):
@@ -209,6 +218,7 @@ class SolverEMI(object):
 
         # perform setup
         self.setup_solver()
+        self.assemble_system()
         
         # Aliases
         p  = self.problem
@@ -238,10 +248,10 @@ class SolverEMI(object):
             tic = time.perf_counter()
             p.setup_linear_form()
             setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
-
+            # from IPython import embed;embed()
             # Assemble system matrix and RHS vector
             tic = time.perf_counter()
-            self.assemble()
+            self.assemble_rhs()
 
             # Time the assembly
             assembly_time     = time.perf_counter() - tic
@@ -300,7 +310,7 @@ class SolverEMI(object):
             # Update previous timestep values
             p.u_p[0].x.array[:] = wh[0].x.array.copy() # Intracellular potential
             p.u_p[1].x.array[:] = wh[1].x.array.copy() # Extracellular potential
-            p.phi_M_prev.x.array[:] = p.u_p[0].x.array[:] - p.u_p[1].x.array[:] # Membrane potential      
+            p.phi_M.x.array[:] = p.u_p[0].x.array - p.u_p[1].x.array # Membrane potential      
 
             # Write output to file and save png
             if self.save_xdmfs and (i % self.save_interval == 0) : self.save_xdmf()
@@ -322,6 +332,9 @@ class SolverEMI(object):
 
                 # Print solver info and problem info
                 self.print_info()
+
+                # Print error norms if performing convergence test
+                if p.MMS_test: p.print_errors()
                       
             if self.save_mat:
                 if self.problem.MMS_test:
@@ -383,7 +396,7 @@ class SolverEMI(object):
 
         p = self.problem # For ease of notation
 
-        phi_M_space = p.phi_M_prev.function_space # Membrane electric potential
+        phi_M_space = p.phi_M.function_space # Membrane electric potential
         
         # Get indices of the membrane (gamma) facets   
         if len(p.gamma_tags) > 1:
@@ -398,7 +411,7 @@ class SolverEMI(object):
         self.point_to_plot = dofs_gamma[0] # Choose one of the dofs as the point for plotting the membrane potential 
 
         self.v_t = []
-        self.v_t.append(1000 * p.phi_M_prev.x.array[self.point_to_plot]) # Converted to mV
+        self.v_t.append(1000 * p.phi_M.x.array[self.point_to_plot]) # Converted to mV
         self.out_v_string = self.out_file_prefix + 'v.png'
 
         if hasattr(p, 'n'):
@@ -423,7 +436,7 @@ class SolverEMI(object):
 
         p = self.problem
 
-        self.v_t.append(1000 * p.phi_M_prev.x.array[self.point_to_plot]) # Converted to mV
+        self.v_t.append(1000 * p.phi_M.x.array[self.point_to_plot]) # Converted to mV
         
         if hasattr(p, 'n'):
             with p.n.vector.localForm() as local_n, p.m.vector.localForm() as local_m, p.h.vector.localForm() as local_h:

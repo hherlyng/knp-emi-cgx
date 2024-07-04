@@ -1,4 +1,5 @@
 import ufl
+import numpy.typing
 
 import numpy   as np
 import dolfinx as dfx
@@ -8,9 +9,9 @@ from CGx.utils.misc           import mark_boundaries_cube_MMS, mark_boundaries_s
 from sympy.utilities.lambdify import lambdify
 
 class SetupMMS:
-    """ Class for calculating source terms of the KNP-EMI system for given exact
+    """ Class for calculating source terms of the EMI or the KNP-EMI system for given exact
     solutions. """
-    def __init__(self, mesh):
+    def __init__(self, mesh: dfx.mesh.Mesh):
         self.mesh = mesh
         self.dim  = mesh.topology.dim
         # define symbolic variables
@@ -18,9 +19,69 @@ class SetupMMS:
             self.x, self.y, self.t = sp.symbols('x[0] x[1] t')
         elif self.dim==3:
             self.x, self.y, self.z, self.t = sp.symbols('x[0] x[1] x[2] t')
+    
+    def get_MMS_terms_EMI_2D(self, time):
+        """ Get exact solutions, source terms, boundary terms and initial
+            conditions for the method of manufactured solution (MMS) for the
+            EMI problem in two dimensions. """
 
-    def get_exact_solution(self):
-        """ define manufactured (exact) solutions """
+        # Forcing factor expressions
+        class IntracellularSource:
+            def __init__(self, t_0: float):
+                self.t = t_0 # Initial time
+
+            def __call__(self, x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.float64]:
+                return 8*np.pi**2 * np.sin(2*np.pi*x[0]) * np.sin(2*np.pi*x[1]) * (1.0 + np.exp(-self.t))
+
+        class ExtracellularSource:
+            def __init__(self): pass
+
+            def __call__(self, x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.float64]:
+                return 8*np.pi**2 * np.sin(2*np.pi*x[0]) * np.sin(2*np.pi*x[1])
+
+        # Exact solution expressions
+        class uiExact:
+            def __init__(self, t_0: float):
+                self.t = t_0
+
+            def __call__(self, x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.float64]:
+                return np.sin(2*np.pi*x[0]) * np.sin(2*np.pi*x[1]) * (1.0 + np.exp(-self.t))
+
+        class ueExact:
+            def __init__(self): pass
+
+            def __call__(self, x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.float64]:
+                return np.sin(2*np.pi*x[0]) * np.sin(2*np.pi*x[1])
+
+        # Create P1 space for all functions
+        V = dfx.fem.functionspace(self.mesh, ("Lagrange", 1))
+
+        # Create functions for storing exact solutions of the four quantities
+        # intracellular potential, extracellular potential, intracellular source term
+        # and extracellular source term.
+        exact_functions = [dfx.fem.Function(V) for _ in range(4)] # ui, ue, fi, fe
+        ui_expr = uiExact(t_0=time)
+        ue_expr = ueExact()
+        fi_expr = IntracellularSource(t_0=time)
+        fe_expr = ExtracellularSource()
+        expressions = [ui_expr, ue_expr, fi_expr, fe_expr]
+        [exact_functions[i].interpolate(expressions[i]) for i in range(4)] # Interpolate function expressions
+        
+        # Gather expressions
+        # exact solutions
+        exact_sols = {'phi_i' : exact_functions[0],
+                      'phi_e' : exact_functions[1]}
+        # source terms
+        src_terms = {'f_i' : exact_functions[2],
+                     'f_e' : exact_functions[3]}
+
+        return exact_sols, src_terms
+
+    def get_exact_solution_KNPEMI(self):
+        """ Define manufactured (exact) solutions for the KNP-EMI system. The functions
+            considered are sodium, potassium and chloride ion concentrations, as well as
+            electric potentials in the intra- and extracellular domain.
+        """
         x = self.x; y = self.y; t = self.t
 
         if self.dim==2:
@@ -52,21 +113,21 @@ class SetupMMS:
             phi_i_e = sp.cos(2*np.pi*x)*sp.cos(2*np.pi*y)*sp.cos(2*np.pi*z)*(1 + sp.exp(-t))
             phi_e_e = sp.cos(2*np.pi*x)*sp.cos(2*np.pi*y)*sp.cos(2*np.pi*z)
 
-        exact_solutions = {'Na_i_e':Na_i_e, 'K_i_e':K_i_e, 'Cl_i_e':Cl_i_e,\
-                           'Na_e_e':Na_e_e, 'K_e_e':K_e_e, 'Cl_e_e':Cl_e_e,\
+        exact_solutions = {'Na_i_e':Na_i_e, 'K_i_e':K_i_e, 'Cl_i_e':Cl_i_e,
+                           'Na_e_e':Na_e_e, 'K_e_e':K_e_e, 'Cl_e_e':Cl_e_e,
                            'phi_i_e':phi_i_e, 'phi_e_e':phi_e_e}
 
         return exact_solutions
 
     def get_MMS_terms_KNPEMI_2D(self, time):
-        """ get exact solutions, source terms, boundary terms and initial
+        """ Get exact solutions, source terms, boundary terms and initial
             conditions for the method of manufactured solution (MMS) for the
-            KNP-EMI problem """
+            KNP-EMI problem in two dimensions. """
         # Variables
         x = self.x; y = self.y; t = self.t
 
         # get manufactured solution
-        exact_solutions = self.get_exact_solution()
+        exact_solutions = self.get_exact_solution_KNPEMI()
         # unwrap exact solutions
         for key in exact_solutions:
             # exec() changed from python2 to python3
@@ -133,7 +194,7 @@ class SetupMMS:
 
         ##### Convert to expressions with exact solutions #####
         # Create P1 space for all functions
-        V = dfx.fem.FunctionSpace(self.mesh, ("Lagrange", 1))
+        V = dfx.fem.functionspace(self.mesh, ("Lagrange", 1))
 
         # Ion concentrations and electric potentials
         var_sym_funcs = [Na_i_e, Na_e_e, K_i_e, K_e_e, Cl_i_e, Cl_e_e, phi_i_e, phi_e_e, phi_M_e]
@@ -173,7 +234,7 @@ class SetupMMS:
 
         # exterior boundary terms
         P1_vec = ufl.VectorElement("Lagrange", self.mesh.ufl_cell(), degree=1)
-        V_vec = dfx.fem.FunctionSpace(self.mesh, element=P1_vec)
+        V_vec = dfx.fem.functionspace(self.mesh, element=P1_vec)
         ext_sym_funcs = [J_Na_e, J_K_e, J_Cl_e]
         ext_exprs = [SymPyToDOLFINxExpr([x, y], time, ext_func, self.dim) for ext_func in ext_sym_funcs]
         ext_dfx_funcs = [dfx.fem.Function(V_vec) for _ in ext_sym_funcs]
@@ -209,9 +270,9 @@ class SetupMMS:
         return src_terms, exact_sols, init_conds, bndry_terms
 
     def get_MMS_terms_KNPEMI_3D(self, time):
-        """ get exact solutions, source terms, boundary terms and initial
+        """ Get exact solutions, source terms, boundary terms and initial
             conditions for the method of manufactured solution (MMS) for the
-            KNP-EMI problem """
+            KNP-EMI problem in three dimensions. """
         # Variables
         x = self.x; y = self.y; z = self.z; t = self.t
 
@@ -287,7 +348,7 @@ class SetupMMS:
 
         ##### Convert to expressions with exact solutions #####
         # Create P1 space for all functions
-        V = dfx.fem.FunctionSpace(self.mesh, ("Lagrange", 1))
+        V = dfx.fem.functionspace(self.mesh, ("Lagrange", 1))
 
         # Ion concentrations and electric potentials
         var_sym_funcs = [Na_i_e, Na_e_e, K_i_e, K_e_e, Cl_i_e, Cl_e_e, phi_i_e, phi_e_e, phi_M_e]
@@ -328,7 +389,7 @@ class SetupMMS:
         # exterior boundary terms
         import ufl
         P1_vec = ufl.VectorElement("Lagrange", self.mesh.ufl_cell(), degree=1)
-        V_vec = dfx.fem.FunctionSpace(self.mesh, element=P1_vec)
+        V_vec = dfx.fem.functionspace(self.mesh, element=P1_vec)
         ext_sym_funcs = [J_Na_e, J_K_e, J_Cl_e]
         ext_exprs = [SymPyToDOLFINxExpr([x, y], time, ext_func, self.dim) for ext_func in ext_sym_funcs]
         ext_dfx_funcs = [dfx.fem.Function(V_vec) for _ in ext_sym_funcs]

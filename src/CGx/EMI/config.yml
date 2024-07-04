@@ -1,4 +1,5 @@
 ## EMI Test Config File
+problem_type : EMI
 
 # Numerical parameters 
 dt : 0.00005 # Timestep size 
