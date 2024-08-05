@@ -69,7 +69,8 @@ class MixedDimensionalProblem(ABC):
         if 'output_dir' in config:
             self.output_dir = config['output_dir']
             if not os.path.isdir(self.output_dir):
-                raise ValueError('Output directory ' + self.output_dir + ' does not exist.')
+                os.mkdir('./output')
+                print('Output directory ' + self.output_dir + ' does not exist. Creating a directory /output in the current working directory.')
         else:
             # Set output directory to a new folder in current directory
             if not os.path.isdir('./output'): os.mkdir('./output')
@@ -81,7 +82,10 @@ class MixedDimensionalProblem(ABC):
             facet_file = input_dir + config['facet_tag_file']
 
             # Check that the files exist
-            [check_if_file_exists(file) for file in [mesh_file, facet_file]]
+            if not os.path.exists(mesh_file):
+                print(f'The mesh and cell tag file {mesh_file} does not exist. Provide a valid mesh file.')
+            if not os.path.exists(facet_file):
+                 print(f'The mesh and cell tag file {mesh_file} does not exist. Provide a valid facet tag file.')
 
             # Initialize input files dictionary and set mesh and facet files
             self.input_files = dict()

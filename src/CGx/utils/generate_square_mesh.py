@@ -1,3 +1,4 @@
+import os
 import argparse
 import dolfinx as dfx
 
@@ -11,7 +12,7 @@ The exterior boundary as tagged as 3, the interface between the domains with 4 a
 """
 parser = argparse.ArgumentParser(formatter_class=CustomParser,
                                  description=description)
-parser.add_argument("-N", "--N" ,default=20, type=int, help="Number of elements in each direction")
+parser.add_argument("-N", "--N" ,default=32, type=int, help="Number of elements in each direction")
 parser.add_argument("-f", "--flag", dest="flag", default='w', type=str, choices=["r", "w"], help="Read or write")
 parser.add_argument("-o", "--output", dest="output_dir", default='./geometries', type=Path, help="Output directory")
 args = parser.parse_args()
@@ -19,8 +20,8 @@ flag = args.flag
 N = args.N
 gm = dfx.mesh.GhostMode.shared_facet
 comm = MPI.COMM_WORLD
+if not os.path.exists(args.output_dir): os.mkdir(args.output_dir)
 filename = args.output_dir / f"square{N}.xdmf"
-
 
 # Create mesh
 mesh = dfx.mesh.create_unit_square(comm, nx=N, ny=N, ghost_mode=gm)
