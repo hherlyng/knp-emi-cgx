@@ -16,10 +16,17 @@ Whilst still in the root directory, install the `CGx` Python module by running
 pip install -e .
 ```
 
-# Testing the setup
-The setup can be tested by solving the KNP-EMI problem on a 32x32 unit square by navigating to the KNP-EMI directory and running the main file:
-
+# Testing the setup on a unit square mesh
+To test the setup by solving the KNP-EMI problem on a unit square, start by generating a mesh. Navigate to the KNP-EMI directory
 ```
 cd src/CGx/KNPEMI
+```
+and run
+```
+python ../utils/generate_square_mesh.py
+```
+to generate a 32x32 unit square mesh. The script `generate_square_mesh.py` has an option -N which can be provided to generate an NxN unit square mesh.
+To run a simulation with a test setup config, run
+```
 python main.py --config test_setup_config.yaml
 ```
