@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 
 from mpi4py         import MPI
 from petsc4py       import PETSc
+from CGx.utils      import restructure_xdmf
 from CGx.utils.misc import dump
 from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
 
@@ -517,6 +518,7 @@ class SolverKNPEMI(object):
         filename = self.out_file_prefix + 'solution.xdmf'
         self.xdmf_file = dfx.io.XDMFFile(self.comm, filename, "w")
         self.xdmf_file.write_mesh(p.mesh)
+        self.output_filename = filename # Store the output filename for post-processing
 
         # Write solution functions to file
         for idx in range(p.N_ions+1):
@@ -537,7 +539,11 @@ class SolverKNPEMI(object):
     def close_xdmf(self):
         """ Close .xdmf files. """
 
+        # Close the XDMF file
         self.xdmf_file.close()
+        
+        # Run XDMF parser to restructure the data for better visualization
+        restructure_xdmf.run(self.output_filename)
 
         return
     
