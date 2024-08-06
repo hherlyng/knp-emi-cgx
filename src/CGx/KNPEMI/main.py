@@ -66,7 +66,7 @@ def main_yaml(yaml_file="config.yaml"):
 	problem.init_ionic_model(ionic_models)
 
 	# Create solver and solve
-	solver = SolverKNPEMI(problem)
+	solver = SolverKNPEMI(problem, save_xdmfs=True)
 	solver.solve()
 
 	tags = {'intra' : 1, 'extra' : 2, 'boundary' : 3, 'membrane' : 4}
