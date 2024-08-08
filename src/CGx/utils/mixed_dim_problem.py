@@ -9,7 +9,7 @@ import dolfinx as dfx
 from abc            import ABC, abstractmethod
 from mpi4py         import MPI
 from petsc4py       import PETSc
-from CGx.utils.misc import flatten_list, mark_boundaries_cube_MMS, mark_boundaries_square_MMS, mark_subdomains_cube, mark_subdomains_square, check_if_file_exists
+from CGx.utils.misc import flatten_list, mark_boundaries_cube_MMS, mark_boundaries_square_MMS, mark_subdomains_cube, mark_subdomains_square
 
 print = PETSc.Sys.Print
 
@@ -69,8 +69,14 @@ class MixedDimensionalProblem(ABC):
         if 'output_dir' in config:
             self.output_dir = config['output_dir']
             if not os.path.isdir(self.output_dir):
-                os.mkdir('./output')
-                print('Output directory ' + self.output_dir + ' does not exist. Creating a directory /output in the current working directory.')
+                print('Output directory ' + self.output_dir + ' does not exist. Creating the directory in the current working directory.')
+                if self.output_dir.startswith('./'):
+                    os.mkdir(self.output_dir)
+                elif self.output_dir.startswith('/'):    
+                    os.mkdir('.' + self.output_dir)
+                else:
+                    os.mkdir('./' + self.output_dir)
+                
         else:
             # Set output directory to a new folder in current directory
             if not os.path.isdir('./output'): os.mkdir('./output')
@@ -116,6 +122,11 @@ class MixedDimensionalProblem(ABC):
         if 'ecs_tags'      in config: tags['extra']    = config['ecs_tags']
         if 'boundary_tags' in config: tags['boundary'] = config['boundary_tags']
         if 'membrane_tags' in config: tags['membrane'] = config['membrane_tags']
+        if 'stimulus_tags' in config:
+            self.stimulus_tags = config['stimulus_tags']
+        else:
+            # All cells are stimulated
+            self.stimulus_tags = tags['membrane']
 
         # Parse the tags
         self.parse_tags(tags=tags)
@@ -262,21 +273,24 @@ class MixedDimensionalProblem(ABC):
 
         # Rename file for readability
         mesh_file = self.input_files['mesh_file']
+        ft_file = self.input_files['facet_file']
 
         if not self.MMS_test:
             # Load mesh files with meshtags
             
             with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
                 # Read mesh and cell tags
-                self.mesh = xdmf.read_mesh(ghost_mode=self.ghost_mode, name="mesh")
-                self.subdomains = xdmf.read_meshtags(self.mesh, name="ct")
+                self.mesh = xdmf.read_mesh(ghost_mode=self.ghost_mode)
+                self.subdomains = xdmf.read_meshtags(self.mesh, name="mesh")
                 self.subdomains.name = "ct"
 
-                # Create facet-to-cell connectivity
-                self.mesh.topology.create_connectivity(self.mesh.topology.dim-1, self.mesh.topology.dim)
+            # Create facet entities and facet-to-cell connectivity
+            self.mesh.topology.create_entities(self.mesh.topology.dim-1)
+            self.mesh.topology.create_connectivity(self.mesh.topology.dim-1, self.mesh.topology.dim)
 
+            with dfx.io.XDMFFile(MPI.COMM_WORLD, ft_file, 'r') as xdmf:
                 # Read facet tags
-                self.boundaries = xdmf.read_meshtags(self.mesh, name="ft")
+                self.boundaries = xdmf.read_meshtags(self.mesh, name="mesh")
                 self.boundaries.name = "ft"      
             
             # Scale mesh
@@ -284,7 +298,7 @@ class MixedDimensionalProblem(ABC):
         
         else:
             self.dim=2
-            self.N_mesh = 64
+            self.N_mesh = 32
             if self.dim==2:
                 self.mesh = dfx.mesh.create_unit_square(comm=MPI.COMM_WORLD, nx=self.N_mesh, ny=self.N_mesh, ghost_mode=self.ghost_mode)
                 self.subdomains = mark_subdomains_square(self.mesh)

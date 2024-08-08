@@ -1,3 +1,5 @@
+import copy
+
 from lxml        import etree
 from collections import defaultdict
 
@@ -13,8 +15,10 @@ def run(filename):
     xi_include_element = root.xpath("//xi:include", namespaces=ns)
     if xi_include_element: xi_include_element = xi_include_element[0]  # Use the first found xi:include element
 
-    # Extract the mesh Grid
+    # Extract the mesh Grid and the cell tag Grid
     mesh_grid = root.xpath("//Grid[@Name='mesh']")
+    ct_grid   = root.xpath("//Grid[@Name='ct']")
+    _, topo_el, ct_el = ct_grid[0].getchildren()
 
     # Extract and group Grid elements by Time value
     time_groups = defaultdict(list)
@@ -32,12 +36,20 @@ def run(filename):
         # Create a new Grid element
         new_grid = etree.Element("Grid", Name=f"merged_time_{time_value}", GridType="Uniform")
 
-        # Add xi:include element. Use a deep copy to avoid reusing the same element
+        # Add xi:include element. Use a deep copy to avoid problems with the xi_include_element
         new_grid.append(etree.Element("{https://www.w3.org/2001/XInclude}include", attrib=xi_include_element.attrib))
 
         # Add Time element
         time_element = etree.Element("Time", Value=time_value)
         new_grid.append(time_element)
+        
+        # Add cell tag topology and attribute elements through deep copy
+        new_topo_el = etree.Element("Topology", attrib=topo_el.attrib)
+        for dataitem in topo_el.findall("DataItem"): new_topo_el.append(copy.deepcopy(dataitem))
+        new_ct_el = etree.Element("Attribute", attrib=ct_el.attrib)
+        for dataitem in ct_el.findall("DataItem"): new_ct_el.append(copy.deepcopy(dataitem))
+        new_grid.append(new_topo_el)
+        new_grid.append(new_ct_el)
 
         # Add all Attributes from the grids in this group
         for grid in grids:
@@ -53,7 +65,9 @@ def run(filename):
     root.clear()
     root.append(etree.Element("Domain"))
     for child in root:
+        # Add the mesh Grid
         child.append(mesh_grid[0])
+        # Add the temporal data Grids
         for new_collection_grid in new_collection_grids:
             child.append(new_collection_grid)
 

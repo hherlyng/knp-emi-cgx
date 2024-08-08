@@ -518,6 +518,7 @@ class SolverKNPEMI(object):
         filename = self.out_file_prefix + 'solution.xdmf'
         self.xdmf_file = dfx.io.XDMFFile(self.comm, filename, "w")
         self.xdmf_file.write_mesh(p.mesh)
+        self.xdmf_file.write_meshtags(p.subdomains, p.mesh.geometry)
         self.output_filename = filename # Store the output filename for post-processing
 
         # Write solution functions to file
