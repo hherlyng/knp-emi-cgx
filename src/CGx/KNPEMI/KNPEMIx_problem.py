@@ -298,6 +298,12 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
                     ion['I_ch'][gamma_tag] = model._eval(idx)
 
+                    # Add stimulus current if the current cell membrane belongs to
+                    # a cell that is stimulated
+                    if gamma_tag in self.stimulus_tags:
+                        if ion['name']=='Na' and model.__str__()=='Hodgkin-Huxley':
+                            ion['I_ch'][gamma_tag] += model._add_stimulus(idx)
+
                     # Add contribution to total channel current
                     I_ch[gamma_tag] += ion['I_ch'][gamma_tag]
             

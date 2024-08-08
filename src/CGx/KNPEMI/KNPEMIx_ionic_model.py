@@ -193,7 +193,7 @@ class HH_model(IonicModel):
 
 
     def __str__(self):
-        return f'Hodgkin–Huxley'
+        return f'Hodgkin-Huxley'
 
     def _init(self):	
 
@@ -201,7 +201,7 @@ class HH_model(IonicModel):
         p = self.problem		
 
         # update gating variables
-        if float(p.t) == 0: 
+        if np.isclose(float(p.t), 0): 
             G, _ = p.V.sub(p.N_ions).collapse() # Gating function finite element space
             p.n = dfx.fem.Function(G)
             p.m = dfx.fem.Function(G)
@@ -216,7 +216,18 @@ class HH_model(IonicModel):
 
 
     def _eval(self, ion_idx: int):	
+        """ Evaluate and return the passive channel current for ion number 'ion_idx'.
 
+        Parameters
+        ----------
+        ion_idx : int
+            Ion index.
+
+        Returns
+        -------
+        I_ch : float
+            The value of the passive channel current.
+        """
         # aliases		
         p     = self.problem		
         ion   = p.ion_list[ion_idx]
@@ -226,8 +237,7 @@ class HH_model(IonicModel):
         ion['g_k'] = ion['g_leak']
 
         # stimulus and gating
-        if ion['name'] == 'Na':
-            if self.stimuls: ion['g_k'] += g_syn(p.g_syn_bar, p.a_syn, float(p.t.value)) 
+        if ion['name'] == 'Na': 
             ion['g_k'] += p.g_Na_bar*p.m**3*p.h
 
         elif ion['name'] == 'K':
@@ -236,6 +246,29 @@ class HH_model(IonicModel):
         I_ch = ion['g_k']*(phi_M - ion['E'])
 
         return I_ch
+
+    def _add_stimulus(self, ion_idx: int):
+        """ Evaluate and return the stimulus part of the channel current for ion number 'ion_idx'.
+
+        Parameters
+        ----------
+        ion_idx : int
+            Ion index.
+
+        Returns
+        -------
+        type float
+            The stimulus part of the channel current.
+        """
+
+        # aliases		
+        p     = self.problem		
+        ion   = p.ion_list[ion_idx]
+        phi_M = p.phi_M_prev
+
+        assert ion['name'] == 'Na', print("Only Na can have a stimulus current in the Hodgkin-Huxley model.")
+    
+        return g_syn(p.g_syn_bar, p.a_syn, float(p.t.value))*(phi_M - ion['E'])
 
 
     def update_gating_variables(self):		
