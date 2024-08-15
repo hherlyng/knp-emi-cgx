@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 
 from mpi4py         import MPI
 from petsc4py       import PETSc
+from CGx.utils      import restructure_xdmf
 from CGx.utils.misc import dump
 from CGx.EMI.EMIx_problem import ProblemEMI
 
@@ -511,6 +512,8 @@ class SolverEMI(object):
         filename = self.out_file_prefix + 'solution.xdmf'
         self.xdmf_file = dfx.io.XDMFFile(self.comm, filename, "w")
         self.xdmf_file.write_mesh(p.mesh)
+        self.xdmf_file.write_meshtags(p.subdomains, p.mesh.geometry)
+        self.output_filename = filename # Store the output filename for post-processing
 
         # Write solution functions to file
         self.xdmf_file.write_function(p.u_p[0], float(p.t.value))
@@ -529,7 +532,11 @@ class SolverEMI(object):
     def close_xdmf(self):
         """ Close .xdmf files. """
 
+        # Close the XDMF file
         self.xdmf_file.close()
+        
+        # Run XDMF parser to restructure the data for better visualization
+        restructure_xdmf.run(self.output_filename)
 
         return
     

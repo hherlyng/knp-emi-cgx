@@ -16,7 +16,7 @@ print = PETSc.Sys.Print # Enables printing only on rank 0 when running in parall
 
 class SolverKNPEMI(object):
 
-    def __init__(self, problem: ProblemKNPEMI, use_direct_solver: bool=True,
+    def __init__(self, problem: ProblemKNPEMI, view_input, use_direct_solver: bool=True,
                  save_xdmfs: bool=False, save_pngs: bool=False, save_mat: bool=False):
         """ Constructor. """
 
@@ -28,6 +28,7 @@ class SolverKNPEMI(object):
         self.save_pngs  = save_pngs               # Option to save .png  output
         self.save_mat   = save_mat                # Option to save the system matrix
         self.out_file_prefix = problem.output_dir # The output file directory
+        self.view_input = view_input
 
         # Initialize varational form
         self.problem.setup_variational_form()
@@ -167,9 +168,10 @@ class SolverKNPEMI(object):
 
             # vector to collect number of iterations
             self.iterations    = []
-        
-            if self.verbose:   
+
+            if self.view_input:
                 opts.setValue('ksp_view', None)
+            if self.verbose:   
                 opts.setValue('ksp_monitor_true_residual', None)
 
         # Set the configured options
@@ -408,15 +410,14 @@ class SolverKNPEMI(object):
         # Get indices of the membrane (gamma) facets   
         if len(p.gamma_tags) > 1:
             list_of_indices = [p.boundaries.find(tag) for tag in p.gamma_tags]
-            gamma_indices = np.array([], dtype=np.int32)
+            facets_gamma = np.array([], dtype=np.int32)
             for l in list_of_indices:
-                gamma_indices = np.concatenate((gamma_indices, l))
+                facets_gamma = np.concatenate((facets_gamma, l))
         else:
-            gamma_indices = p.boundaries.values==p.gamma_tags[0]
-        facets_gamma = p.boundaries.indices[gamma_indices] # The facets that lie on gamma
+            facets_gamma = p.boundaries.values==p.gamma_tags[0]
         dofs_gamma   = dfx.fem.locate_dofs_topological(phi_M_space, p.mesh.topology.dim-1, facets_gamma) # The dofs of the gamma facets
         self.point_to_plot = dofs_gamma[0] # Choose one of the dofs as the point for plotting the membrane potential 
-
+        from IPython import embed;embed()
         self.v_t = []
         self.v_t.append(1000 * p.phi_M_prev.x.array[self.point_to_plot]) # Converted to mV
         self.out_v_string = self.out_file_prefix + 'v.png'
