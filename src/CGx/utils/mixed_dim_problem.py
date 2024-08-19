@@ -142,7 +142,7 @@ class MixedDimensionalProblem(ABC):
         if 'C_M' in config: self.C_M = config['C_M']
 
         # Scaling mesh factor (default 1)
-        if 'mesh_conversion_factor' in config: self.mesh_conversion_factor = config['mesh_conversion_factor']
+        if 'mesh_conversion_factor' in config: self.mesh_conversion_factor = float(config['mesh_conversion_factor'])
 
         # Finite element polynomial order (default 1)
         if 'fem_order' in config: self.fem_order = config['fem_order']
@@ -281,7 +281,7 @@ class MixedDimensionalProblem(ABC):
             with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
                 # Read mesh and cell tags
                 self.mesh = xdmf.read_mesh(ghost_mode=self.ghost_mode)
-                self.subdomains = xdmf.read_meshtags(self.mesh, name="mesh")
+                self.subdomains = xdmf.read_meshtags(self.mesh, name="ct")
                 self.subdomains.name = "ct"
 
             # Create facet entities and facet-to-cell connectivity
@@ -290,7 +290,7 @@ class MixedDimensionalProblem(ABC):
 
             with dfx.io.XDMFFile(MPI.COMM_WORLD, ft_file, 'r') as xdmf:
                 # Read facet tags
-                self.boundaries = xdmf.read_meshtags(self.mesh, name="mesh")
+                self.boundaries = xdmf.read_meshtags(self.mesh, name="ft")
                 self.boundaries.name = "ft"      
             
             # Scale mesh
