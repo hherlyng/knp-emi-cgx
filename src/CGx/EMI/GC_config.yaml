@@ -1,0 +1,26 @@
+# EMI Config File using EMIx Grand Challenge meshes (meshes created by Marius Causemann)
+problem_type : "EMI"
+
+# Input and output directories
+input_dir  : './geometries/GC/'
+output_dir : './output/GC/'
+
+# Numerical parameters 
+dt : 0.00005 # Timestep size 
+time_steps : 100 # Number of timesteps
+#T  : 50 # Simulation end time
+
+# Problem constants (in consistent units)
+
+C_M : 0.02 # membrane capacitance
+
+# Mesh and meshtags files 
+mesh_file      : "mesh.xdmf"
+cell_tag_file  : "mesh.xdmf"
+facet_tag_file : "tags.xdmf"
+
+ics_tags  : [2, 3, 4, 5, 6] # Intracellular space cell tags
+ecs_tags  : [1] # Extracellular space cell tags
+boundary_tags : [11, 12, 13, 14, 15, 16] # Boundary facet tags
+membrane_tags : [2, 3, 4, 5, 6] # Membrane (interface) facet tags
+stimulus_tags : [2, 5] # Membrane facet tags of the cells being stimulated

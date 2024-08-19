@@ -249,7 +249,7 @@ class SolverEMI(object):
             tic = time.perf_counter()
             p.setup_linear_form()
             setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
-            # from IPython import embed;embed()
+            
             # Assemble system matrix and RHS vector
             tic = time.perf_counter()
             self.assemble_rhs()
@@ -409,10 +409,11 @@ class SolverEMI(object):
             gamma_indices = p.boundaries.values==p.gamma_tags[0]
         facets_gamma = p.boundaries.indices[gamma_indices] # The facets that lie on gamma
         dofs_gamma   = dfx.fem.locate_dofs_topological(phi_M_space, p.mesh.topology.dim-1, facets_gamma) # The dofs of the gamma facets
-        self.point_to_plot = dofs_gamma[0] # Choose one of the dofs as the point for plotting the membrane potential 
+        self.point_to_plot = dofs_gamma[int(len(dofs_gamma)/2)] # Choose one of the dofs as the point for plotting the membrane potential 
 
         self.v_t = []
         self.v_t.append(1000 * p.phi_M.x.array[self.point_to_plot]) # Converted to mV
+        print(1000 * p.phi_M.x.array[self.point_to_plot])
         self.out_v_string = self.out_file_prefix + 'v.png'
 
         if hasattr(p, 'n'):
@@ -438,6 +439,7 @@ class SolverEMI(object):
         p = self.problem
 
         self.v_t.append(1000 * p.phi_M.x.array[self.point_to_plot]) # Converted to mV
+        print(1000 * p.phi_M.x.array[self.point_to_plot])
         
         if hasattr(p, 'n'):
             with p.n.vector.localForm() as local_n, p.m.vector.localForm() as local_m, p.h.vector.localForm() as local_h:

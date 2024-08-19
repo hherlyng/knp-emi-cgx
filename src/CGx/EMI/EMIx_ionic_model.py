@@ -98,7 +98,7 @@ class HH_model(IonicModel):
         # Alias
         p = self.problem
 
-        if float(p.t.value==0):
+        if np.isclose(float(p.t.value), 0.0):
             # Initial timestep
 
             p.n = dfx.fem.Function(p.V)
@@ -109,14 +109,8 @@ class HH_model(IonicModel):
             p.m.x.array[:] = self.m_init_val
             p.h.x.array[:] = self.h_init_val
 
-            # output
-            #if self.save_png_file: self.init_png()
-
         else:
-            self.update_gating_variables()	
-
-            # output
-            #if self.save_png_file: self.save_png()					
+            self.update_gating_variables()			
 
         # conductivities
         g_Na = self.g_Na_leak + self.g_Na_bar*p.m**3*p.h
@@ -124,7 +118,7 @@ class HH_model(IonicModel):
         g_Cl = self.g_Cl_leak
 
         # stimulus
-        g_Na += self.g_Na_stim(float(p.t.value)) 
+        g_Na += self.g_Na_stim(float(p.t.value))
 
         # ionic currents
         I_ch_Na = g_Na * (p.phi_M - self.E_Na)
