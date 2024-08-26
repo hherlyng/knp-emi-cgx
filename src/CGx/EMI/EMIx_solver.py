@@ -483,7 +483,7 @@ class SolverEMI(object):
         plt.ylabel('Membrane potential (mV)')
         plt.savefig(self.out_v_string)
         
-        # Save plot of membrane potential
+        # Save plot of averaged membrane potential
         plt.figure(4)        
         plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.v_m_avg)
         plt.xlabel('Time (ms)')
