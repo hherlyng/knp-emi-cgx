@@ -1,5 +1,5 @@
 ## EMI Test Config File
-problem_type : EMI
+problem_type : "KNP-EMI"
 
 # I/O directories
 input_dir  : './geometries/box/'
@@ -10,7 +10,12 @@ dt : 0.00005 # Timestep size
 time_steps : 100 # Number of timesteps
 T   : 50 # Simulation end time
 
-# Physical parameters
+# Problem constants (in consistent units)
+physical_constants:
+  T : 300   # Temperature [K]
+  F : 96485 # Faraday constant [C/mol]
+  R : 8.314 # Gas constant [J/(K*mol)]
+
 C_M : 0.02 # membrane capacitance
 
 # Mesh and meshtags files 

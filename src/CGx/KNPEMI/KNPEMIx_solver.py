@@ -410,17 +410,21 @@ class SolverKNPEMI(object):
         # Get indices of the membrane (gamma) facets   
         if len(p.gamma_tags) > 1:
             list_of_indices = [p.boundaries.find(tag) for tag in p.gamma_tags]
-            facets_gamma = np.array([], dtype=np.int32)
+            gamma_indices = np.array([], dtype=np.int32)
             for l in list_of_indices:
-                facets_gamma = np.concatenate((facets_gamma, l))
+                gamma_indices = np.concatenate((gamma_indices, l))
         else:
-            facets_gamma = p.boundaries.values==p.gamma_tags[0]
+            gamma_indices = p.boundaries.values==p.gamma_tags[0]
+        facets_gamma = p.boundaries.indices[gamma_indices] # The facets that lie on gamma
         dofs_gamma   = dfx.fem.locate_dofs_topological(phi_M_space, p.mesh.topology.dim-1, facets_gamma) # The dofs of the gamma facets
         self.point_to_plot = dofs_gamma[0] # Choose one of the dofs as the point for plotting the membrane potential 
     
         self.v_t = []
+        self.v_m_avg = []
         self.v_t.append(1000 * p.phi_M_prev.x.array[self.point_to_plot]) # Converted to mV
+        self.v_m_avg.append(1000 * self.calc_average_membrane_potential())
         self.out_v_string = self.out_file_prefix + 'v.png'
+        self.out_v_m_avg_string = self.out_file_prefix + 'v_m_avg.png'
 
         if hasattr(p, 'n'):
             # Gating variables are a part of the problem
@@ -452,6 +456,18 @@ class SolverKNPEMI(object):
                 self.m_t.append(local_m[self.point_to_plot])
                 self.h_t.append(local_h[self.point_to_plot])
 
+    def calc_average_membrane_potential(self):
+        """ Calculate the average of the membrane potential on the membrane
+            separating the intra- and extracellular compartments.
+        """
+        p = self.problem
+        dS = p.dS(p.gamma_tags)
+        v_m = p.phi_M_prev
+        membrane_measure = dfx.fem.assemble_scalar(dfx.fem.form(1*dS))
+        averaged = 1/membrane_measure * dfx.fem.assemble_scalar(dfx.fem.form(v_m*dS))
+        
+        return averaged
+
     def print_figures(self):
         """ Output .png plot of:
         - the membrane potential
@@ -473,6 +489,13 @@ class SolverKNPEMI(object):
         plt.xlabel('Time (ms)')
         plt.ylabel('Membrane potential (mV)')
         plt.savefig(self.out_v_string)
+
+        # Save plot of averaged membrane potential
+        plt.figure(4)        
+        plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.v_m_avg)
+        plt.xlabel('Time (ms)')
+        plt.ylabel('Average membrane potential (mV)')
+        plt.savefig(self.out_v_m_avg_string)
 
 		# save plot of gating variables
         if hasattr(self.problem, 'n'):
