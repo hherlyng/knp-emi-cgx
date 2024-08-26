@@ -407,17 +407,23 @@ class SolverKNPEMI(object):
 
         phi_M_space = p.phi_M_prev.function_space # Membrane electric potential
         
-        # Get indices of the membrane (gamma) facets   
-        if len(p.gamma_tags) > 1:
+        # Get indices of the membrane (gamma) facets that are being stimulated
+        if len(p.stimulus_tags) > 1:
+            # Not all cells are stimulated
+            list_of_indices = [p.boundaries.find(tag) for tag in p.stimulus_tags]
+            facets_gamma = np.array([], dtype=np.int32)
+            for  l in list_of_indices:
+                facets_gamma = np.concatenate((facets_gamma, l))
+        elif len(p.gamma_tags) > 1:
             list_of_indices = [p.boundaries.find(tag) for tag in p.gamma_tags]
             facets_gamma = np.array([], dtype=np.int32)
             for l in list_of_indices:
                 facets_gamma = np.concatenate((facets_gamma, l))
         else:
             facets_gamma = p.boundaries.values==p.gamma_tags[0]
-        dofs_gamma   = dfx.fem.locate_dofs_topological(phi_M_space, p.mesh.topology.dim-1, facets_gamma) # The dofs of the gamma facets
+        dofs_gamma   = dfx.fem.locate_dofs_topological(phi_M_space, p.mesh.topology.dim-1, facets_gamma) # The dofs of the gamma facets that are being stimulated 
         self.point_to_plot = dofs_gamma[0] # Choose one of the dofs as the point for plotting the membrane potential 
-        from IPython import embed;embed()
+        
         self.v_t = []
         self.v_t.append(1000 * p.phi_M_prev.x.array[self.point_to_plot]) # Converted to mV
         self.out_v_string = self.out_file_prefix + 'v.png'

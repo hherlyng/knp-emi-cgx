@@ -142,7 +142,7 @@ class MixedDimensionalProblem(ABC):
         if 'C_M' in config: self.C_M = config['C_M']
 
         # Scaling mesh factor (default 1)
-        if 'mesh_conversion_factor' in config: self.mesh_conversion_factor = config['mesh_conversion_factor']
+        if 'mesh_conversion_factor' in config: self.mesh_conversion_factor = float(config['mesh_conversion_factor'])
 
         # Finite element polynomial order (default 1)
         if 'fem_order' in config: self.fem_order = config['fem_order']
