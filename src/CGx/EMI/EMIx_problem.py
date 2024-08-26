@@ -8,7 +8,6 @@ import dolfinx as dfx
 from ufl      import grad, inner
 from mpi4py   import MPI
 from petsc4py import PETSc
-from CGx.EMI.EMIx_ionic_model    import g_syn_none, HH_model, Passive_model, IonicModel
 from CGx.utils.setup_mms         import SetupMMS, mark_MMS_boundaries
 from CGx.utils.mixed_dim_problem import MixedDimensionalProblem
 
@@ -20,17 +19,6 @@ class ProblemEMI(MixedDimensionalProblem):
         """ Constructor. """
 
         if self.MMS_test: self.setup_MMS_params() # Perform numerical verification
-
-    def add_ionic_model(self, model: IonicModel, tags: int | tuple | dict=None, stim_fun=g_syn_none):
-        model = model[0]
-        # if model.__str__()=='Hodgkin-Huxley':
-        #     model = HH_model(self, tags, stim_fun)
-        # elif model.__str__()=='Passive':
-        #     model = Passive_model(self, tags)
-        # else:
-        #     raise RuntimeError(f'Model type {model.__str__()} not supported. Choose either "HH" or "Passive".')
-
-        self.ionic_models.append(model)
         
     def setup_spaces(self):
 

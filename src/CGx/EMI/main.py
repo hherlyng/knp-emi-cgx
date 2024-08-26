@@ -17,7 +17,6 @@ def main_yaml(yaml_file="config.yaml"):
     HH = HH_model(problem, stim_fun=g_syn)
     ionic_models = [HH]
 
-    problem.add_ionic_model(ionic_models, problem.gamma_tags, stim_fun=g_syn)
     problem.init_ionic_model(ionic_models)
 
     # Create solver and solve
