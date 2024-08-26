@@ -1,0 +1,31 @@
+## EMI Test Config File
+problem_type : EMI
+
+# I/O directories
+input_dir  : './geometries/'
+output_dir : './output/box/'
+
+# Numerical parameters 
+dt : 0.00005 # Timestep size 
+time_steps : 100 # Number of timesteps
+T  : 50 # Simulation end time
+
+# Problem constants (in consistent units)
+physical_constants:
+  T : 300   # Temperature [K]
+  F : 96485 # Faraday constant [C/mol]
+  R : 8.314 # Gas constant [J/(K*mol)]
+
+C_M : 0.02 # membrane capacitance
+
+# Mesh and meshtags files 
+mesh_file      : "box_mesh.xdmf"
+cell_tag_file  : "box_mesh.xdmf"
+facet_tag_file : "box_mesh_facets.xdmf"
+
+mesh_conversion_factor : 1e-2
+
+ics_tags  : [1] # Intracellular space cell tags
+ecs_tags  : [2] # Extracellular space cell tags
+boundary_tags : [3] # Boundary facet tags
+membrane_tags : [4] # Membrane (interface) facet tags

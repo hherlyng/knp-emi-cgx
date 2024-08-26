@@ -8,7 +8,6 @@ import dolfinx as dfx
 from ufl      import grad, inner
 from mpi4py   import MPI
 from petsc4py import PETSc
-from CGx.EMI.EMIx_ionic_model    import g_syn_none, HH_model, Passive_model, IonicModel
 from CGx.utils.setup_mms         import SetupMMS, mark_MMS_boundaries
 from CGx.utils.mixed_dim_problem import MixedDimensionalProblem
 
@@ -138,12 +137,12 @@ class ProblemEMI(MixedDimensionalProblem):
         ue, ve = ufl.TrialFunction(self.W[1]), ufl.TestFunction(self.W[1])
         
         # Weak form - equation for phi_i
-        a00 = dt * inner(sigma_i * grad(ui), grad(vi)) * dxi + C_M * inner(ui('-'), vi('-')) * dS
-        a01 = - C_M * inner(ue('+'), vi('-')) * dS
+        a00 = inner(sigma_i * grad(ui), grad(vi)) * dxi + (C_M/dt) * inner(ui('-'), vi('-')) * dS
+        a01 = - (C_M/dt) * inner(ue('+'), vi('-')) * dS
         
         # Weak form - equation for phi_e
-        a11 = dt * inner(sigma_e * grad(ue), grad(ve)) * dxe + C_M * inner(ue('+'), ve('+')) * dS
-        a10 = - C_M * inner(ui('-'), ve('+')) * dS 
+        a11 = inner(sigma_e * grad(ue), grad(ve)) * dxe + (C_M/dt) * inner(ue('+'), ve('+')) * dS
+        a10 = - (C_M/dt) * inner(ui('-'), ve('+')) * dS 
 
         # Store weak form in matrix and vector
         a = [[a00, a01],
@@ -201,9 +200,9 @@ class ProblemEMI(MixedDimensionalProblem):
         
         # Loop over the gamma tags and add the source term contributions
         for gamma_tag in self.gamma_tags:
-            fg = C_M*self.phi_M - dt*I_ch[gamma_tag]
-            fi += dt * inner(fg, vi('-')) * dS(gamma_tag)
-            fe -= dt * inner(fg, ve('+')) * dS(gamma_tag)         
+            fg = self.phi_M - (dt/C_M) * I_ch[gamma_tag]
+            fi += (C_M/dt) * inner(fg, vi('-')) * dS(gamma_tag)
+            fe -= (C_M/dt) * inner(fg, ve('+')) * dS(gamma_tag)
 
         L = [fi, fe]
 
@@ -298,7 +297,7 @@ class ProblemEMI(MixedDimensionalProblem):
     #        DEFAULT CLASS VARIABLES        #
     #---------------------------------------#
     # Physical parameters
-    C_M      = 0.1 # Membrane capacitance
+    C_M      = 0.01 # Membrane capacitance
     sigma_i  = 1   # Intracellular electrical conductivity
     sigma_e  = 1   # Extracellular electrical conductivity
     source_i = 0.0 # Intracellular source/forcing term
