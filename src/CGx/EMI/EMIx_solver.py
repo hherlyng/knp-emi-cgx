@@ -412,9 +412,11 @@ class SolverEMI(object):
         self.point_to_plot = dofs_gamma[int(len(dofs_gamma)/2)] # Choose one of the dofs as the point for plotting the membrane potential 
 
         self.v_t = []
+        self.v_m_avg = []
         self.v_t.append(1000 * p.phi_M.x.array[self.point_to_plot]) # Converted to mV
-        print(1000 * p.phi_M.x.array[self.point_to_plot])
+        self.v_m_avg.append(1000 * self.calc_average_membrane_potential())
         self.out_v_string = self.out_file_prefix + 'v.png'
+        self.out_v_m_avg_string = self.out_file_prefix + 'v_m_avg.png'
 
         if hasattr(p, 'n'):
             # Gating variables are a part of the problem
@@ -439,13 +441,25 @@ class SolverEMI(object):
         p = self.problem
 
         self.v_t.append(1000 * p.phi_M.x.array[self.point_to_plot]) # Converted to mV
-        print(1000 * p.phi_M.x.array[self.point_to_plot])
+        self.v_m_avg.append(1000 * self.calc_average_membrane_potential())
         
         if hasattr(p, 'n'):
             with p.n.vector.localForm() as local_n, p.m.vector.localForm() as local_m, p.h.vector.localForm() as local_h:
                 self.n_t.append(local_n[self.point_to_plot])
                 self.m_t.append(local_m[self.point_to_plot])
                 self.h_t.append(local_h[self.point_to_plot])
+
+    def calc_average_membrane_potential(self):
+        """ Calculate the average of the membrane potential on the membrane
+            separating the intra- and extracellular compartments.
+        """
+        p = self.problem
+        dS = p.dS(p.gamma_tags)
+        v_m = p.phi_M
+        membrane_measure = dfx.fem.assemble_scalar(dfx.fem.form(1*dS))
+        averaged = 1/membrane_measure * dfx.fem.assemble_scalar(dfx.fem.form(v_m*dS))
+        
+        return averaged
 
     def print_figures(self):
         """ Output .png plot of:
@@ -468,6 +482,13 @@ class SolverEMI(object):
         plt.xlabel('Time (ms)')
         plt.ylabel('Membrane potential (mV)')
         plt.savefig(self.out_v_string)
+        
+        # Save plot of membrane potential
+        plt.figure(4)        
+        plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.v_m_avg)
+        plt.xlabel('Time (ms)')
+        plt.ylabel('Average membrane potential (mV)')
+        plt.savefig(self.out_v_m_avg_string)
 
 		# save plot of gating variables
         if hasattr(self.problem, 'n'):

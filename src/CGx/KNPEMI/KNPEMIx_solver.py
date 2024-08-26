@@ -417,7 +417,7 @@ class SolverKNPEMI(object):
             facets_gamma = p.boundaries.values==p.gamma_tags[0]
         dofs_gamma   = dfx.fem.locate_dofs_topological(phi_M_space, p.mesh.topology.dim-1, facets_gamma) # The dofs of the gamma facets
         self.point_to_plot = dofs_gamma[0] # Choose one of the dofs as the point for plotting the membrane potential 
-        from IPython import embed;embed()
+    
         self.v_t = []
         self.v_t.append(1000 * p.phi_M_prev.x.array[self.point_to_plot]) # Converted to mV
         self.out_v_string = self.out_file_prefix + 'v.png'
