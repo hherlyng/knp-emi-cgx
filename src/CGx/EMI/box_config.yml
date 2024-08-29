@@ -7,7 +7,7 @@ output_dir : './output/box18/'
 
 # Numerical parameters 
 dt : 0.00005 # Timestep size 
-time_steps : 100 # Number of timesteps
+time_steps : 1000 # Number of timesteps
 T   : 50 # Simulation end time
 
 # Physical parameters

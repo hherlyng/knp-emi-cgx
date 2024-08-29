@@ -36,8 +36,6 @@ class SolverEMI(object):
         self.problem.setup_bilinear_form()
         self.problem.setup_linear_form()
 
-        if self.use_block_Jacobi: self.problem.setup_preconditioner()
-
         # Initialize output files
         if save_xdmfs : self.init_xdmf_savefile()
         if save_pngs  : self.init_png_savefile()
@@ -110,19 +108,10 @@ class SolverEMI(object):
 
         else:
             print("Setting up iterative solver ...")
-            # TODO remove ion concentration index sets
-            # set initial guess
-            for idx, ion in enumerate(p.ion_list):
-                # Get dof mapping between subspace and parent space
-                _, sub_to_parent_i = p.wh[0].sub(idx).function_space.collapse()
-                _, sub_to_parent_e = p.wh[1].sub(idx).function_space.collapse()
-
-                # Set the array values at the subspace dofs 
-                p.wh[0].sub(idx).x.array[sub_to_parent_i] = ion['ki_init']
-                p.wh[1].sub(idx).x.array[sub_to_parent_e] = ion['ke_init']
             
-            p.wh[0].sub(p.N_ions).x.array[:] = p.phi_i_init
-            p.wh[1].sub(p.N_ions).x.array[:] = p.phi_e_init
+            # set initial guess
+            p.wh[0].x.array[:] = p.phi_M_init + p.phi_e_init
+            p.wh[1].x.array[:] = p.phi_e_init
 
             self.ksp.setType(self.ksp_type)
             pc = self.ksp.getPC()
@@ -134,16 +123,10 @@ class SolverEMI(object):
                 Wi = p.W[0]
                 We = p.W[1]
 
-                is0 = PETSc.IS().createGeneral(Wi.sub(0).dofmap.list)
-                is1 = PETSc.IS().createGeneral(Wi.sub(1).dofmap.list)
-                is2 = PETSc.IS().createGeneral(Wi.sub(2).dofmap.list)
-                is3 = PETSc.IS().createGeneral(Wi.sub(3).dofmap.list)
-                is4 = PETSc.IS().createGeneral(We.sub(0).dofmap.list)
-                is5 = PETSc.IS().createGeneral(We.sub(1).dofmap.list)
-                is6 = PETSc.IS().createGeneral(We.sub(2).dofmap.list)
-                is7 = PETSc.IS().createGeneral(We.sub(3).dofmap.list)
+                is0 = PETSc.IS().createGeneral(Wi.dofmap.list)
+                is1 = PETSc.IS().createGeneral(We.dofmap.list)
 
-                fields = [('0', is0), ('1', is1), ('2', is2), ('3', is3),('4', is4), ('5', is5),('6', is6), ('7', is7)]
+                fields = [('0', is0), ('1', is1)]
                 pc.setFieldSplitIS(*fields)
 
                 ksp_solver = 'preonly'
@@ -153,27 +136,15 @@ class SolverEMI(object):
 
                 opts.set('fieldsplit_0_ksp_type', ksp_solver)
                 opts.set('fieldsplit_1_ksp_type', ksp_solver)
-                opts.set('fieldsplit_2_ksp_type', ksp_solver)
-                opts.set('fieldsplit_3_ksp_type', ksp_solver)
-                opts.set('fieldsplit_4_ksp_type', ksp_solver)
-                opts.set('fieldsplit_5_ksp_type', ksp_solver)
-                opts.set('fieldsplit_6_ksp_type', ksp_solver)
-                opts.set('fieldsplit_7_ksp_type', ksp_solver)
 
                 opts.set('fieldsplit_0_pc_type',  P_inv)				
                 opts.set('fieldsplit_1_pc_type',  P_inv)
-                opts.set('fieldsplit_2_pc_type',  P_inv)
-                opts.set('fieldsplit_3_pc_type',  P_inv)
-                opts.set('fieldsplit_4_pc_type',  P_inv)
-                opts.set('fieldsplit_5_pc_type',  P_inv)
-                opts.set('fieldsplit_6_pc_type',  P_inv)
-                opts.set('fieldsplit_7_pc_type',  P_inv)
             
             opts.setValue('ksp_converged_reason', None)
             opts.setValue('ksp_rtol',      self.ksp_rtol)
             opts.setValue('ksp_max_it',    self.ksp_max_it)
             opts.setValue('ksp_norm_type', self.norm_type)
-            opts.setValue('ksp_initial_guess_nonzero',   self.nonzero_init_guess)
+            opts.setValue('ksp_initial_guess_nonzero', self.nonzero_init_guess)
             if self.ksp_type=='hypre': opts.setValue('pc_hypre_boomeramg_max_iter', self.max_amg_iter)
             if self.problem.mesh.geometry.dim == 3: opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.5)
 
@@ -230,7 +201,7 @@ class SolverEMI(object):
 
         # Assemble preconditioner if enabled
         if not self.direct_solver and self.use_P_mat:
-            p.setup_preconditioner(self.use_block_Jacobi)
+            p.setup_preconditioner()
             self.assemble_preconditioner()
         
         setup_timer = 0
@@ -572,7 +543,6 @@ class SolverEMI(object):
     max_amg_iter       = 1
     use_P_mat          = True # use P as preconditioner?
     verbose            = False
-    use_block_Jacobi   = True
     nonzero_init_guess = True
 
     # Default output save interval

@@ -14,13 +14,16 @@ def main_yaml(yaml_file="config.yaml"):
 
     problem = ProblemEMI(yaml_file)
 
-    HH = HH_model(problem, stim_fun=g_syn)
-    ionic_models = [HH]
+    # HH = HH_model(problem, stim_fun=g_syn)
+    # ionic_models = [HH]
+
+    passive = Passive_model(problem)
+    ionic_models = [passive]
 
     problem.init_ionic_model(ionic_models)
 
     # Create solver and solve
-    solver = SolverEMI(problem, save_xdmfs=True, save_pngs=True)
+    solver = SolverEMI(problem, save_xdmfs=True, save_pngs=True, use_direct_solver=False)
     solver.solve()
 
     tags = {'intra' : 1, 'extra' : 2, 'boundary' : 3, 'membrane' : 4}
