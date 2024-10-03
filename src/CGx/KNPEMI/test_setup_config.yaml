@@ -2,7 +2,7 @@
 problem_type : "KNP-EMI"
 
 # Input and output directories
-output_dir : './output'
+output_dir : './output/square32_test/'
 
 # Numerical parameters 
 dt : 0.00005 # Timestep size 

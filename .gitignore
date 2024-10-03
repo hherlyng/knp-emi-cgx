@@ -132,6 +132,7 @@ venv.bak/
 output/
 *.xdmf
 *.h5
+*.png
 
 # Spyder project settings
 .spyderproject
