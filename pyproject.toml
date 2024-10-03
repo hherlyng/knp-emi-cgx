@@ -16,5 +16,6 @@ dependencies = [
     'numpy',
     'sympy',
     'gmsh',
+    'lxml',
     'multiphenicsx@git+https://github.com/multiphenics/multiphenicsx.git@dolfinx-v0.7.1'
 ]

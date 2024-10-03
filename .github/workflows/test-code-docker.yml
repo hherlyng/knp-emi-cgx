@@ -1,4 +1,4 @@
-name: Test KNP-EMI CGx code
+name: Test KNP-EMI CGx code via docker
 on:
   workflow_dispatch:
   workflow_call:
@@ -17,24 +17,14 @@ defaults:
 jobs:
   test_scripts:
     runs-on: ubuntu-latest
-    container: ubuntu:latest
+    container: ghcr.io/fenics/dolfinx/dolfinx:v0.7.1
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup conda-forge
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          miniforge-variant: Mambaforge
-          miniforge-version: latest
-          activate-environment: CGx
-          python-version: "3.10"
-          use-mamba: true
-          environment-file: environment.yml
-
       - name: install package
         run: |
-          python -m pip install .
+          python3 -m pip install .
 
       - name: install package
         run: |
