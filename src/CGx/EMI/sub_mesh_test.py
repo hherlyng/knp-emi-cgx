@@ -3,7 +3,7 @@ import time
 import numpy.typing
 
 import numpy    as np
-import scipy    as sp
+# import scipy    as sp
 import dolfinx  as dfx
 
 from ufl       import inner, grad
@@ -12,8 +12,246 @@ from mpi4py    import MPI
 from pathlib   import Path
 from petsc4py  import PETSc
 from dolfinx.fem.petsc import assemble_matrix_block, assemble_vector_block, create_vector_block
-from CGx.utils.misc              import calc_error_L2
-from CGx.utils.dfx_mesh_creation import create_square_mesh_with_tags
+# from CGx.utils.misc              import calc_error_L2
+# from CGx.utils.dfx_mesh_creation import create_square_mesh_with_tags
+def calc_error_L2(u_h: dfx.fem.Function, u_exact: dfx.fem.Function, dX: ufl.Measure, degree_raise: int=3) -> float:
+    """ Calculate the L2 error for a solution approximated with finite elements.
+
+    Parameters
+    ----------
+    u_h : dolfinx.fem Function
+        The solution function approximated with finite elements.
+
+    u_exact : dolfinx.fem Function
+        The exact solution function.
+
+    degree_raise : int, optional
+        The amount of polynomial degrees that the approximated solution
+        is refined, by default 3
+
+    Returns
+    -------
+    error_global : float
+        The L2 error norm.
+    """
+    # Create higher-order function space for solution refinement
+    degree = u_h.function_space.ufl_element().degree
+    family = u_h.function_space.ufl_element().element_family
+    mesh   = u_h.function_space.mesh
+    import basix.ufl
+    if u_h.function_space.element.signature().startswith('Vector'):
+        # Create higher-order function space based on vector elements
+        W = dfx.fem.functionspace(mesh, basix.ufl.element(family=family, 
+                                    degree=(degree+degree_raise), cell=mesh.basix_cell(), shape=(mesh.topology.dim, )))
+    else:
+        # Create higher-order funciton space based on finite elements
+        W = dfx.fem.functionspace(mesh, (family, degree+degree_raise))
+
+    # Interpolate the approximate solution into the refined space
+    u_W = dfx.fem.Function(W)
+    u_W.interpolate(u_h)
+
+    # Interpolate exact solution, special handling if exact solution
+    # is a ufl expression
+    u_exact_W = dfx.fem.Function(W)
+
+    if isinstance(u_exact, ufl.core.expr.Expr):
+        u_expr = dfx.fem.Expression(u_exact, W.element.interpolation_points())
+        u_exact_W.interpolate(u_expr)
+    else:
+        u_exact_W.interpolate(u_exact)
+    
+    # Compute the error in the higher-order function space
+    e_W = dfx.fem.Function(W)
+    with e_W.vector.localForm() as e_W_loc, u_W.vector.localForm() as u_W_loc, u_exact_W.vector.localForm() as u_ex_W_loc:
+        e_W_loc[:] = u_W_loc[:] - u_ex_W_loc[:]
+
+    # Integrate the error
+    error        = dfx.fem.form(ufl.inner(e_W, e_W) * dX)
+    error_local  = dfx.fem.assemble_scalar(error)
+
+    return error_local
+
+
+def transfer_meshtags_to_submesh(mesh, entity_tag, submesh, sub_vertex_to_parent, sub_cell_to_parent):
+    """
+    Transfer a meshtag from a parent mesh to a sub-mesh.
+    """
+
+    tdim = mesh.topology.dim
+    cell_imap = mesh.topology.index_map(tdim)
+    num_cells = cell_imap.size_local + cell_imap.num_ghosts
+    mesh_to_submesh = np.full(num_cells, -1)
+    mesh_to_submesh[sub_cell_to_parent] = np.arange(len(sub_cell_to_parent), dtype=np.int32)
+    sub_vertex_to_parent = np.asarray(sub_vertex_to_parent)
+
+    submesh.topology.create_connectivity(entity_tag.dim, 0)
+
+    num_child_entities = submesh.topology.index_map(
+        entity_tag.dim).size_local + submesh.topology.index_map(entity_tag.dim).num_ghosts
+    submesh.topology.create_connectivity(submesh.topology.dim, entity_tag.dim)
+
+    c_c_to_e = submesh.topology.connectivity(submesh.topology.dim, entity_tag.dim)
+    c_e_to_v = submesh.topology.connectivity(entity_tag.dim, 0)
+
+    child_markers = np.full(num_child_entities, 0, dtype=np.int32)
+
+    mesh.topology.create_connectivity(entity_tag.dim, 0)
+    mesh.topology.create_connectivity(entity_tag.dim, mesh.topology.dim)
+    p_f_to_v = mesh.topology.connectivity(entity_tag.dim, 0)
+    p_f_to_c = mesh.topology.connectivity(entity_tag.dim, mesh.topology.dim)
+    for facet, value in zip(entity_tag.indices, entity_tag.values):
+        facet_found = False
+        for cell in p_f_to_c.links(facet):
+            if facet_found:
+                break
+            if (child_cell := mesh_to_submesh[cell]) != -1:
+                for child_facet in c_c_to_e.links(child_cell):
+                    child_vertices = c_e_to_v.links(child_facet)
+                    child_vertices_as_parent = sub_vertex_to_parent[child_vertices]
+                    is_facet = np.isin(child_vertices_as_parent, p_f_to_v.links(facet)).all()
+                    if is_facet:
+                        child_markers[child_facet] = value
+                        facet_found = True
+    tags =  dfx.mesh.meshtags(submesh, entity_tag.dim,
+                                 np.arange(num_child_entities, dtype=np.int32), child_markers)
+    tags.name = entity_tag.name
+    return tags
+def create_square_mesh_with_tags(N_cells: int,
+                                 comm: MPI.Comm = MPI.COMM_WORLD,
+                                 ghost_mode = dfx.mesh.GhostMode.shared_facet) \
+        -> tuple((dfx.mesh.Mesh, dfx.mesh.MeshTags, dfx.mesh.MeshTags)):
+    """ Create a square mesh of a square within a square, with the inner square defined on (x, y) = [0.25, 0.75]^2.
+
+    Parameters
+    ----------
+    N_cells : int
+        number of mesh cells in x and y direction
+    
+    comm : MPI.Comm
+        MPI communicator, by default MPI.COMM_WORLD
+        
+    ghost_mode : dfx.mesh.GhostMode
+        mode that specifies how ghost nodes are shared in parallel, by default dfx.mesh.GhostMode.shared_facet
+
+    Returns
+    -------
+    mesh : dfx.mesh.Mesh
+        dolfinx mesh
+
+    subdomains : dfx.mesh.MeshTags
+        subdomain mesh tags
+
+    boundaries : dfx.mesh.MeshTags
+        boundary facet tags
+    """
+
+    mesh = dfx.mesh.create_unit_square(comm, N_cells, N_cells,
+                                    cell_type = dfx.mesh.CellType.triangle,
+                                    ghost_mode = ghost_mode)
+
+    subdomains  = mark_subdomains_square(mesh)
+    boundaries  = mark_boundaries_square(mesh)
+
+    return mesh, subdomains, boundaries
+
+def mark_subdomains_square(mesh: dfx.mesh.Mesh) -> dfx.mesh.MeshTags:
+    """ Function for marking subdomains of a unit square mesh with an interior square defined on [0.25, 0.75]^2.
+    
+    The subdomains have the following tags:
+        - tag value 1 : inner square, (x, y) = [0.25, 0.75]^2
+        - tag value 2 : outer square, (x, y) = [0, 1]^2 \ [0.25, 0.75]^2
+    
+    """ 
+    def inside(x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.bool_]:
+        """ Locator function for the inner square. """
+
+        bool1 = np.logical_and(x[0] <= 0.75, x[0] >= 0.25) # True if inside inner box in x range
+        bool2 = np.logical_and(x[1] <= 0.75, x[1] >= 0.25) # True if inside inner box in y range
+        
+        return np.logical_and(bool1, bool2)
+
+    # Tag values
+    INTRA = 1
+    EXTRA = 2
+
+    cell_dim = mesh.topology.dim
+    
+    # Generate mesh topology
+    mesh.topology.create_entities(cell_dim)
+    mesh.topology.create_connectivity(cell_dim, cell_dim - 1)
+    
+    # Get total number of cells and set default facet marker value to OUTER
+    num_cells    = mesh.topology.index_map(cell_dim).size_local + mesh.topology.index_map(cell_dim).num_ghosts
+    cell_marker  = np.full(num_cells, EXTRA, dtype = np.int32)
+
+    # Get all facets
+    inner_cells = dfx.mesh.locate_entities(mesh, cell_dim, inside)
+    cell_marker[inner_cells] = INTRA
+
+    cell_tags = dfx.mesh.meshtags(mesh, cell_dim, np.arange(num_cells, dtype = np.int32), cell_marker)
+
+    return cell_tags
+
+def mark_boundaries_square(mesh: dfx.mesh.Mesh) -> dfx.mesh.MeshTags:
+    """ Function for marking boundaries of a unit square mesh with an interior square defined on [0.25, 0.75]^2
+    
+    The boundaries have the following tags:
+        - tag value 3 : outer boundary (\partial\Omega) 
+        - tag value 4 : interface gamma between inner and outer square
+        - tag value 5 : interior facets
+
+    """    
+    def right(x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.bool_]:
+        y_range = np.logical_and(x[1] >= 0.25, x[1] <= 0.75)
+        return np.logical_and(np.isclose(x[0], 0.75), y_range)
+
+    def left(x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.bool_]:
+        y_range = np.logical_and(x[1] >= 0.25, x[1] <= 0.75)
+        return np.logical_and(np.isclose(x[0], 0.25), y_range)
+
+    def bottom(x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.bool_]:
+        x_range = np.logical_and(x[0] >= 0.25, x[0] <= 0.75)
+        return np.logical_and(np.isclose(x[1], 0.25), x_range)
+
+    def top(x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.bool_]:
+        x_range = np.logical_and(x[0] >= 0.25, x[0] <= 0.75)
+        return np.logical_and(np.isclose(x[1], 0.75), x_range)
+
+    # Tag values
+    PARTIAL_OMEGA = 3
+    GAMMA         = 4
+    DEFAULT       = 5
+
+    facet_dim = mesh.topology.dim - 1
+
+    # Generate mesh topology
+    mesh.topology.create_entities(facet_dim)
+    mesh.topology.create_connectivity(facet_dim, facet_dim + 1)
+
+    # Get total number of facets
+    num_facets = mesh.topology.index_map(facet_dim).size_local + mesh.topology.index_map(facet_dim).num_ghosts
+    facet_marker = np.full(num_facets, DEFAULT, dtype = np.int32)
+
+    # Get boundary facets
+    bdry_facets = dfx.mesh.exterior_facet_indices(mesh.topology)
+    facet_marker[bdry_facets] = PARTIAL_OMEGA
+
+    top_facets = dfx.mesh.locate_entities(mesh, facet_dim, top)
+    facet_marker[top_facets] = GAMMA
+
+    bottom_facets = dfx.mesh.locate_entities(mesh, facet_dim, bottom)
+    facet_marker[bottom_facets] = GAMMA
+
+    left_facets = dfx.mesh.locate_entities(mesh, facet_dim, left)
+    facet_marker[left_facets] = GAMMA
+
+    right_facets = dfx.mesh.locate_entities(mesh, facet_dim, right)
+    facet_marker[right_facets] = GAMMA
+
+    facet_tags = dfx.mesh.meshtags(mesh, facet_dim, np.arange(num_facets, dtype = np.int32), facet_marker)
+
+    return facet_tags
 
 def compute_interface_integration_entities(
         msh, interface_facets, domain_0_cells, domain_1_cells,
@@ -139,7 +377,7 @@ conductivity_extracellular = 1.0
 
 # Flags
 write_mesh     = False
-save_output    = False    
+save_output    = True    
 save_matrix    = False
 direct_solver  = False
 ksp_type       = 'cg'
@@ -207,9 +445,9 @@ gamma_facets = ft.indices[ft.values==GAMMA]
 intra_sort = np.argsort(cells_intra)
 extra_sort = np.argsort(cells_extra)
 gamma_sort = np.argsort(gamma_facets)
-intra_mesh, im_to_mesh = dfx.mesh.create_submesh(msh=mesh, dim=gdim, entities=cells_intra[intra_sort])[:2]
-extra_mesh, em_to_mesh = dfx.mesh.create_submesh(msh=mesh, dim=gdim, entities=cells_extra[extra_sort])[:2]
-gamma_mesh, gmesh_to_mesh = dfx.mesh.create_submesh(msh=mesh, dim=fdim, entities=gamma_facets[gamma_sort])[:2]
+intra_mesh, im_to_mesh, i_v_map, _ = dfx.mesh.create_submesh(msh=mesh, dim=gdim, entities=cells_intra[intra_sort])
+extra_mesh, em_to_mesh, e_v_map, _ = dfx.mesh.create_submesh(msh=mesh, dim=gdim, entities=cells_extra[extra_sort])
+gamma_mesh, gmesh_to_mesh, g_v_map, _ = dfx.mesh.create_submesh(msh=mesh, dim=fdim, entities=gamma_facets[gamma_sort])
 print(f"Create mesh time: {time.perf_counter()-t1:.2f}")
 
 # Mesh constants
@@ -225,6 +463,8 @@ V  = dfx.fem.functionspace(mesh, ("Lagrange", P)) # Space for functions defined 
 V1 = dfx.fem.functionspace(intra_mesh, ("Lagrange", P)) # Intracellular space
 V2 = dfx.fem.functionspace(extra_mesh, ("Lagrange", P)) # Extracellular space
 V3 = dfx.fem.functionspace(gamma_mesh, ("Lagrange", P)) # Cellular membrane (gamma)
+
+num_dofs_V1 = V1.dofmap.index_map.size_local
 
 print(f"MPI Rank {comm.rank}")
 print(f"Size of local index map V1: {V1.dofmap.index_map.size_local}")
@@ -282,13 +522,18 @@ mesh_to_im = np.full(num_cells, -1, dtype=np.int32)
 mesh_to_em = np.full(num_cells, -1, dtype=np.int32)
 mesh_to_im[im_to_mesh] = np.arange(len(im_to_mesh), dtype=np.int32)
 mesh_to_em[em_to_mesh] = np.arange(len(em_to_mesh), dtype=np.int32)
-entity_maps = {intra_mesh._cpp_object : mesh_to_im,
-               extra_mesh._cpp_object : mesh_to_em}
+mesh_facet_imap = mesh.topology.index_map(tdim-1)
+num_facets = mesh_facet_imap.size_local + mesh_facet_imap.num_ghosts
+
+mesh_to_gm = np.full(num_facets, -1, dtype=np.int32)
+mesh_to_gm[gmesh_to_mesh] = np.arange(len(gmesh_to_mesh), dtype=np.int32)
+entity_maps = {intra_mesh : mesh_to_im,
+               extra_mesh : mesh_to_em,
+               gamma_mesh : mesh_to_gm}
 
 # Compute integration entities for gamma (cellular membrane)
 gamma_entities, mesh_to_im, mesh_to_em = compute_interface_integration_entities(msh=mesh, interface_facets=gamma_facets,
                             domain_0_cells=cells_intra, domain_1_cells=cells_extra, domain_to_domain_0=mesh_to_im, domain_to_domain_1=mesh_to_em)
-
 # Define integral measures
 dx = ufl.Measure("dx", domain=mesh, subdomain_data=ct) # Cell integrals
 dS = ufl.Measure("dS", domain=mesh, subdomain_data=[(GAMMA, gamma_entities)]) # Facet integrals
@@ -310,18 +555,20 @@ zero = dfx.fem.Constant(mesh, dfx.default_scalar_type(0.0)) # Grounded exterior 
 
 facets_partial_Omega = ft.indices[ft.values==PARTIAL_OMEGA] # Get indices of the facets on the exterior boundary
 extra_mesh.topology.create_connectivity(fdim, tdim)
-dofs_V2_partial_Omega = dfx.fem.locate_dofs_topological(V2, fdim, facets_partial_Omega) # Get the dofs on the exterior boundary facets
+ft2 = transfer_meshtags_to_submesh(mesh, ft, extra_mesh, e_v_map,em_to_mesh)
+
+dofs_V2_partial_Omega = dfx.fem.locate_dofs_topological(V2, fdim, ft2.find(PARTIAL_OMEGA)) # Get the dofs on the exterior boundary facets
 bce = dfx.fem.dirichletbc(zero, dofs_V2_partial_Omega, V2) # Set Dirichlet BC on exterior boundary facets
 
 bcs = [bce]
-from IPython import embed;embed()
+
 # Assemble block form
 a11 = dfx.fem.form(a11, entity_maps=entity_maps, jit_options=jit_parameters)
 a12 = dfx.fem.form(a12, entity_maps=entity_maps, jit_options=jit_parameters)
 a21 = dfx.fem.form(a21, entity_maps=entity_maps, jit_options=jit_parameters)
 a22 = dfx.fem.form(a22, entity_maps=entity_maps, jit_options=jit_parameters)
 a_cpp = [[a11, a12],
-        [a21, a22]]
+         [a21, a22]]
 
 # Compile form
 # a_cpp = dfx.fem.form(a, jit_options=jit_parameters)
@@ -370,17 +617,18 @@ ksp.setFromOptions()
 
 if save_output:
     # Create output files
-    out_ui = dfx.io.XDMFFile(mesh.comm, "ui_mphx_square.xdmf", "w")
-    out_ue = dfx.io.XDMFFile(mesh.comm, "ue_mphx_square.xdmf", "w")
-    out_v  = dfx.io.XDMFFile(mesh.comm, "v_mphx_square.xdmf" , "w")
+    out_ui = dfx.io.XDMFFile(mesh.comm, "ui_submesh_square.xdmf", "w")
+    out_ue = dfx.io.XDMFFile(mesh.comm, "ue_submesh_square.xdmf", "w")
+    out_v  = dfx.io.XDMFFile(mesh.comm, "v_submesh_square.xdmf" , "w")
 
-    out_ui.write_mesh(mesh)
-    out_ue.write_mesh(mesh)
-    out_v.write_mesh(mesh)
+    out_ui.write_mesh(intra_mesh)
+    out_ue.write_mesh(extra_mesh)
+    out_v.write_mesh(gamma_mesh)
 
 
 print(f"Time 2: {time.perf_counter()-t_second:.2f}")
 
+vg = ui_h("+") - ue_h("-")
 #---------------------------------#
 #        SOLUTION TIMELOOP        #
 #---------------------------------#
@@ -398,9 +646,9 @@ for i in range(time_steps):
 
     # Forcing term on membrane
     # Get local + ghost values of vectors using .localForm() (for parallel)
-    with fg.vector.localForm() as fg_local, v.vector.localForm() as v_local:
-        fg_local[:] = v_local[:] - (deltaT / capacitance_membrane) * v_local[:]
-    
+    #with fg.vector.localForm() as fg_local, v.vector.localForm() as v_local:
+    #    fg_local[:] = v_local[:] - (deltaT / capacitance_membrane) * v_local[:]
+    fg = vg - deltaT / capacitance_membrane * vg
     Li = dt * inner(fi, vi) * dx(INTRA) + C_M * inner(fg, vi('-')) * dS # Linear form intracellular space
     Le = dt * inner(fe, ve) * dx(EXTRA) - C_M * inner(fg, ve('+')) * dS # Linear form extracellular space
 
@@ -419,15 +667,21 @@ for i in range(time_steps):
 
     # Update ghost values
     sol_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
+    ui_h.x.array[:] = sol_vec.array[:num_dofs_V1]
+    ue_h.x.array[:] = sol_vec.array[num_dofs_V1:]
+    vg = ui_h("+") - ue_h("-")
+    # vg_expr = dfx.fem.Expression(vg, V3.element.interpolation_points())
+    # v.interpolate(vg_expr)
 
     solve_time += time.perf_counter() - t1 # Add time lapsed to total solver time
 
     # Extract sub-components of solution
 
+
     # Update membrane potential
     # Get local + ghost values using .localForm() 
-    with v.vector.localForm() as v_local, ui_h.vector.localForm() as ui_h_local, ue_h.vector.localForm() as ue_h_local:
-        v_local[:]  = ui_h_local[:] - ue_h_local[:]
+    #with v.vector.localForm() as v_local, ui_h.vector.localForm() as ui_h_local, ue_h.vector.localForm() as ue_h_local:
+    #    v_local[:]  = ui_h_local[:] - ue_h_local[:]
     
     if save_output:
         out_ui.write_function(ui_h, t)
@@ -442,8 +696,8 @@ ui_ex.interpolate(ui_ex_expr)
 #         POST PROCESS         #
 #------------------------------#
 # Error analysis
-L2_error_i_local = calc_error_L2(u_h=ui_h, u_exact=ui_ex, dX=dx(INTRA)) # Local L2 error (squared) of intracellular electric potential
-L2_error_e_local = calc_error_L2(u_h=ue_h, u_exact=ue_ex, dX=dx(EXTRA)) # Local L2 error (squared) of extracellular electric potential
+L2_error_i_local = calc_error_L2(u_h=ui_h, u_exact=ui_ex, dX=ufl.Measure("dx", domain=intra_mesh)) # Local L2 error (squared) of intracellular electric potential
+L2_error_e_local = calc_error_L2(u_h=ue_h, u_exact=ue_ex, dX=ufl.Measure("dx", domain=extra_mesh)) # Local L2 error (squared) of extracellular electric potential
 
 L2_error_i_global = np.sqrt(comm.allreduce(L2_error_i_local, op=MPI.SUM)) # Global L2 error of intracellular electric potential
 L2_error_e_global = np.sqrt(comm.allreduce(L2_error_e_local, op=MPI.SUM)) # Global L2 error of extracellular electric potential
