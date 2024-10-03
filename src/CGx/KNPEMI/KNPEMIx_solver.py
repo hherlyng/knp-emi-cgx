@@ -16,8 +16,8 @@ print = PETSc.Sys.Print # Enables printing only on rank 0 when running in parall
 
 class SolverKNPEMI(object):
 
-    def __init__(self, problem: ProblemKNPEMI, view_input, use_direct_solver: bool=True,
-                 save_xdmfs: bool=False, save_pngs: bool=False, save_mat: bool=False):
+    def __init__(self, problem: ProblemKNPEMI, use_direct_solver: bool=True, 
+                 save_xdmfs: bool=False, save_pngs: bool=False, save_mat: bool=False, view_ksp: bool=False):
         """ Constructor. """
 
         self.problem    = problem                 # The KNP-EMI problem
@@ -28,7 +28,7 @@ class SolverKNPEMI(object):
         self.save_pngs  = save_pngs               # Option to save .png  output
         self.save_mat   = save_mat                # Option to save the system matrix
         self.out_file_prefix = problem.output_dir # The output file directory
-        self.view_input = view_input
+        self.view_ksp = view_ksp
 
         # Initialize varational form
         self.problem.setup_variational_form()
@@ -169,7 +169,7 @@ class SolverKNPEMI(object):
             # vector to collect number of iterations
             self.iterations    = []
 
-            if self.view_input:
+            if self.view_ksp:
                 opts.setValue('ksp_view', None)
             if self.verbose:   
                 opts.setValue('ksp_monitor_true_residual', None)
@@ -417,7 +417,6 @@ class SolverKNPEMI(object):
             facets_gamma = p.boundaries.values==p.gamma_tags[0]
         dofs_gamma   = dfx.fem.locate_dofs_topological(phi_M_space, p.mesh.topology.dim-1, facets_gamma) # The dofs of the gamma facets
         self.point_to_plot = dofs_gamma[0] # Choose one of the dofs as the point for plotting the membrane potential 
-        from IPython import embed;embed()
         self.v_t = []
         self.v_t.append(1000 * p.phi_M_prev.x.array[self.point_to_plot]) # Converted to mV
         self.out_v_string = self.out_file_prefix + 'v.png'

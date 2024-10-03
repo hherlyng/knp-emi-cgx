@@ -22,11 +22,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: install package
+      - name: install python packages
         run: |
           python3 -m pip install .
 
-      - name: install package
+      - name: run tests
         run: |
           python3 ./src/CGx/utils/generate_square_mesh.py -N 32 -o './'
           python3 ./tests/test_L2_norm_potentials.py

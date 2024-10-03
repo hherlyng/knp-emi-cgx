@@ -56,7 +56,16 @@ def main(argv=None):
 	print(f"L2 norm phi_i = {phi_i_L2_global}")
 	print(f"L2 norm phi_e = {phi_e_L2_global}")
 
-def main_yaml(yaml_file="config.yaml", view_input=None):
+def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
+	""" Main for running scripts with a yaml/yml configuration file.
+
+	Parameters
+	----------
+	yaml_file : str, optional
+		The path to the yaml configuration file, by default "config.yaml"
+	ksp_view : bool, optional
+		Iterative solver option used to view information of KSP object, by default False
+	"""
 	
 	problem = ProblemKNPEMI(yaml_file)
 
@@ -66,7 +75,7 @@ def main_yaml(yaml_file="config.yaml", view_input=None):
 	problem.init_ionic_model(ionic_models)
 
 	# Create solver and solve
-	solver = SolverKNPEMI(problem, view_input=view_input, save_xdmfs=True, use_direct_solver=False, save_pngs=True)
+	solver = SolverKNPEMI(problem, save_xdmfs=True, use_direct_solver=False, save_pngs=True, view_ksp=view_ksp)
 	solver.solve()
 
 	phi_i = solver.problem.wh[0].sub(problem.N_ions)
@@ -88,6 +97,6 @@ if __name__=='__main__':
 
 	parser = argparse.ArgumentParser(formatter_class=CustomParser)
 	parser.add_argument("--config", dest="config_file", default='./test_setup_config.yaml', type=Path, help="Configuration file")
-	parser.add_argument("--view", dest="view_input", type=bool)
+	parser.add_argument("--view", dest="view_ksp", type=bool)
 	args = parser.parse_args(None)
-	main_yaml(yaml_file=str(args.config_file), view_input=bool(args.view_input))
+	main_yaml(yaml_file=str(args.config_file), view_ksp=bool(args.view_ksp))
