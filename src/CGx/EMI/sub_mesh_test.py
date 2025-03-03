@@ -323,6 +323,13 @@ def compute_interface_integration_entities(
             domain_to_domain_1[cell_plus] = domain_to_domain_1[cell_minus]
 
     return interface_entities, domain_to_domain_0, domain_to_domain_1
+def dump(thing, path):
+    if isinstance(thing, PETSc.Vec):
+        assert np.all(np.isfinite(thing.array))
+        return np.save(path, thing.array)
+    m = sp.sparse.csr_matrix(thing.getValuesCSR()[::-1]).tocoo()
+    assert np.all(np.isfinite(m.data))
+    return np.save(path, np.c_[m.row, m.col, m.data])
 
 print = PETSc.Sys.Print
 start_time = time.perf_counter()
@@ -343,14 +350,6 @@ jit_parameters  = {"cffi_extra_compile_args"  : compile_options,
                     "cache_dir"               : cache_dir,
                     "cffi_libraries"          : ["m"]}
 
-def dump(thing, path):
-    if isinstance(thing, PETSc.Vec):
-        assert np.all(np.isfinite(thing.array))
-        return np.save(path, thing.array)
-    m = sp.sparse.csr_matrix(thing.getValuesCSR()[::-1]).tocoo()
-    assert np.all(np.isfinite(m.data))
-    return np.save(path, np.c_[m.row, m.col, m.data])
-
 #----------------------------------------#
 #     PARAMETERS AND SOLVER SETTINGS     #
 #----------------------------------------#
@@ -361,7 +360,7 @@ P = 1
 # Time discretization parameters
 t          = 0.0
 T          = 0.1
-deltaT     = 0.1
+deltaT     = 0.01
 time_steps = int(T / deltaT)
 
 # Physical parameters
@@ -391,7 +390,7 @@ class InitialMembranePotential:
     def __init__(self): pass
 
     def __call__(self, x: numpy.typing.NDArray) -> numpy.typing.NDArray:
-        return np.zeros_like(x[0])
+        return np.sin(2 * np.pi * x[0]) * np.sin(2 * np.pi * x[1]) #np.zeros_like(x[0])
 
 # Forcing factor expressions
 class IntracellularSource:
@@ -399,7 +398,7 @@ class IntracellularSource:
         self.t = t_0 # Initial time
 
     def __call__(self, x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.float64]:
-        return 8 * np.pi ** 2 * np.sin(2 * np.pi * x[0]) * np.sin(2 * np.pi * x[1])
+        return 8 * np.pi ** 2 * np.sin(2 * np.pi * x[0]) * np.sin(2 * np.pi * x[1]) * (1 + np.exp(-self.t))
 
 class ExtracellularSource:
     def __init__(self): pass
@@ -413,7 +412,7 @@ class uiExact:
         self.t = t_0
 
     def __call__(self, x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.float64]:
-        return np.sin(2 * np.pi * x[0]) * np.sin(2 * np.pi * x[1])
+        return np.sin(2 * np.pi * x[0]) * np.sin(2 * np.pi * x[1]) * (1 + np.exp(-self.t))
 
 class ueExact:
     def __init__(self): pass
@@ -478,7 +477,6 @@ vi, ve = ufl.TestFunction (V1), ufl.TestFunction (V2)
 # Functions for storing the solutions and the exact solutions
 ui_h, ui_ex = dfx.fem.Function(V1), dfx.fem.Function(V1)
 ue_h, ue_ex = dfx.fem.Function(V2), dfx.fem.Function(V2)
-vg = ui_h("+") - ue_h("-") # Membrane potential
 
 ui_ex_expr = uiExact(t_0=t)
 ui_ex.interpolate(ui_ex_expr)
@@ -540,6 +538,7 @@ dS = dS(GAMMA) # Restrict facet integrals to gamma interface
 # Define restrictions
 i_res = '+'
 e_res = '-'
+vg = ui_h(i_res) - ue_h(e_res) # Membrane potential
 
 # First row of block bilinear form
 a11 = dt * inner(sigma_i * grad(ui), grad(vi)) * dx(INTRA) + C_M * inner(ui(i_res), vi(i_res)) * dS # ui terms
@@ -642,7 +641,10 @@ for i in range(time_steps):
     t1 = time.perf_counter() # Timestamp for assembly time-lapse
 
     # Forcing term on membrane
-    fg = vg - deltaT / capacitance_membrane * vg
+    if i==0:
+        fg = v - dt / capacitance_membrane * v
+    else:
+        fg = vg - dt / capacitance_membrane * vg
     Li = dt * inner(fi, vi) * dx(INTRA) + C_M * inner(fg, vi(i_res)) * dS # Linear form intracellular space
     Le = dt * inner(fe, ve) * dx(EXTRA) - C_M * inner(fg, ve(e_res)) * dS # Linear form extracellular space
 
