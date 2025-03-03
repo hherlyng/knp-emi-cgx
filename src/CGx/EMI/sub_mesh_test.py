@@ -3,7 +3,7 @@ import time
 import numpy.typing
 
 import numpy    as np
-# import scipy    as sp
+import scipy    as sp
 import dolfinx  as dfx
 
 from ufl       import inner, grad
@@ -12,8 +12,7 @@ from mpi4py    import MPI
 from pathlib   import Path
 from petsc4py  import PETSc
 from dolfinx.fem.petsc import assemble_matrix_block, assemble_vector_block, create_vector_block
-# from CGx.utils.misc              import calc_error_L2
-# from CGx.utils.dfx_mesh_creation import create_square_mesh_with_tags
+
 def calc_error_L2(u_h: dfx.fem.Function, u_exact: dfx.fem.Function, dX: ufl.Measure, degree_raise: int=3) -> float:
     """ Calculate the L2 error for a solution approximated with finite elements.
 
@@ -63,7 +62,7 @@ def calc_error_L2(u_h: dfx.fem.Function, u_exact: dfx.fem.Function, dX: ufl.Meas
     
     # Compute the error in the higher-order function space
     e_W = dfx.fem.Function(W)
-    with e_W.vector.localForm() as e_W_loc, u_W.vector.localForm() as u_W_loc, u_exact_W.vector.localForm() as u_ex_W_loc:
+    with e_W.x.petsc_vec.localForm() as e_W_loc, u_W.x.petsc_vec.localForm() as u_W_loc, u_exact_W.x.petsc_vec.localForm() as u_ex_W_loc:
         e_W_loc[:] = u_W_loc[:] - u_ex_W_loc[:]
 
     # Integrate the error
@@ -71,8 +70,6 @@ def calc_error_L2(u_h: dfx.fem.Function, u_exact: dfx.fem.Function, dX: ufl.Meas
     error_local  = dfx.fem.assemble_scalar(error)
 
     return error_local
-
-
 def transfer_meshtags_to_submesh(mesh, entity_tag, submesh, sub_vertex_to_parent, sub_cell_to_parent):
     """
     Transfer a meshtag from a parent mesh to a sub-mesh.
@@ -154,13 +151,12 @@ def create_square_mesh_with_tags(N_cells: int,
     boundaries  = mark_boundaries_square(mesh)
 
     return mesh, subdomains, boundaries
-
 def mark_subdomains_square(mesh: dfx.mesh.Mesh) -> dfx.mesh.MeshTags:
     """ Function for marking subdomains of a unit square mesh with an interior square defined on [0.25, 0.75]^2.
     
     The subdomains have the following tags:
         - tag value 1 : inner square, (x, y) = [0.25, 0.75]^2
-        - tag value 2 : outer square, (x, y) = [0, 1]^2 \ [0.25, 0.75]^2
+        - tag value 2 : outer square, (x, y) = [0, 1]^2 setminus [0.25, 0.75]^2
     
     """ 
     def inside(x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.bool_]:
@@ -192,12 +188,11 @@ def mark_subdomains_square(mesh: dfx.mesh.Mesh) -> dfx.mesh.MeshTags:
     cell_tags = dfx.mesh.meshtags(mesh, cell_dim, np.arange(num_cells, dtype = np.int32), cell_marker)
 
     return cell_tags
-
 def mark_boundaries_square(mesh: dfx.mesh.Mesh) -> dfx.mesh.MeshTags:
     """ Function for marking boundaries of a unit square mesh with an interior square defined on [0.25, 0.75]^2
     
     The boundaries have the following tags:
-        - tag value 3 : outer boundary (\partial\Omega) 
+        - tag value 3 : outer boundary (partial Omega) 
         - tag value 4 : interface gamma between inner and outer square
         - tag value 5 : interior facets
 
@@ -252,7 +247,6 @@ def mark_boundaries_square(mesh: dfx.mesh.Mesh) -> dfx.mesh.MeshTags:
     facet_tags = dfx.mesh.meshtags(mesh, facet_dim, np.arange(num_facets, dtype = np.int32), facet_marker)
 
     return facet_tags
-
 def compute_interface_integration_entities(
         msh, interface_facets, domain_0_cells, domain_1_cells,
         domain_to_domain_0, domain_to_domain_1):
@@ -379,11 +373,11 @@ conductivity_extracellular = 1.0
 write_mesh     = False
 save_output    = True    
 save_matrix    = False
-direct_solver  = False
+direct_solver  = True
 ksp_type       = 'cg'
 pc_type        = 'hypre'
 ds_solver_type = 'mumps'
-ksp_rtol       = 1e-6
+ksp_rtol       = 1e-8
 
 # Timers
 solve_time    = 0
@@ -397,7 +391,7 @@ class InitialMembranePotential:
     def __init__(self): pass
 
     def __call__(self, x: numpy.typing.NDArray) -> numpy.typing.NDArray:
-        return np.sin(2 * np.pi * x[0]) * np.sin(2 * np.pi * x[1])
+        return np.zeros_like(x[0])
 
 # Forcing factor expressions
 class IntracellularSource:
@@ -405,7 +399,7 @@ class IntracellularSource:
         self.t = t_0 # Initial time
 
     def __call__(self, x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.float64]:
-        return 8 * np.pi ** 2 * np.sin(2 * np.pi * x[0]) * np.sin(2 * np.pi * x[1]) * (1.0 + np.exp(-self.t))
+        return 8 * np.pi ** 2 * np.sin(2 * np.pi * x[0]) * np.sin(2 * np.pi * x[1])
 
 class ExtracellularSource:
     def __init__(self): pass
@@ -419,7 +413,7 @@ class uiExact:
         self.t = t_0
 
     def __call__(self, x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.float64]:
-        return np.sin(2 * np.pi * x[0]) * np.sin(2 * np.pi * x[1]) * (1.0 + np.exp(-self.t))
+        return np.sin(2 * np.pi * x[0]) * np.sin(2 * np.pi * x[1])
 
 class ueExact:
     def __init__(self): pass
@@ -467,12 +461,15 @@ V3 = dfx.fem.functionspace(gamma_mesh, ("Lagrange", P)) # Cellular membrane (gam
 num_dofs_V1 = V1.dofmap.index_map.size_local
 
 print(f"MPI Rank {comm.rank}")
-print(f"Size of local index map V1: {V1.dofmap.index_map.size_local}")
-print(f"Size of global index map V1: {V1.dofmap.index_map.size_global}")
-print(f"Number of ghost nodes V1: {V1.dofmap.index_map.num_ghosts}")
-print(f"Size of local index map V2: {V2.dofmap.index_map.size_local}")
-print(f"Size of global index map V2: {V2.dofmap.index_map.size_global}")
-print(f"Number of ghost nodes V2: {V2.dofmap.index_map.num_ghosts}")
+print(f"Size of local index map V-intra: {V1.dofmap.index_map.size_local}")
+print(f"Size of global index map V-intra: {V1.dofmap.index_map.size_global}")
+print(f"Number of ghost nodes V-intra: {V1.dofmap.index_map.num_ghosts}\n")
+print(f"Size of local index map V-extra: {V2.dofmap.index_map.size_local}")
+print(f"Size of global index map V-extra: {V2.dofmap.index_map.size_global}")
+print(f"Number of ghost nodes V-extra: {V2.dofmap.index_map.num_ghosts}\n")
+print(f"Size of local index map V-gamma: {V3.dofmap.index_map.size_local}")
+print(f"Size of global index map V-gamma: {V3.dofmap.index_map.size_global}")
+print(f"Number of ghost nodes V-gamma: {V3.dofmap.index_map.num_ghosts}")
 
 # Trial and test functions
 ui, ue = ufl.TrialFunction(V1), ufl.TrialFunction(V2)
@@ -481,6 +478,7 @@ vi, ve = ufl.TestFunction (V1), ufl.TestFunction (V2)
 # Functions for storing the solutions and the exact solutions
 ui_h, ui_ex = dfx.fem.Function(V1), dfx.fem.Function(V1)
 ue_h, ue_ex = dfx.fem.Function(V2), dfx.fem.Function(V2)
+vg = ui_h("+") - ue_h("-") # Membrane potential
 
 ui_ex_expr = uiExact(t_0=t)
 ui_ex.interpolate(ui_ex_expr)
@@ -542,6 +540,7 @@ dS = dS(GAMMA) # Restrict facet integrals to gamma interface
 # Define restrictions
 i_res = '+'
 e_res = '-'
+
 # First row of block bilinear form
 a11 = dt * inner(sigma_i * grad(ui), grad(vi)) * dx(INTRA) + C_M * inner(ui(i_res), vi(i_res)) * dS # ui terms
 a12 = - C_M * inner(ue(e_res), vi(i_res)) * dS # ue terms
@@ -555,23 +554,20 @@ zero = dfx.fem.Constant(mesh, dfx.default_scalar_type(0.0)) # Grounded exterior 
 
 facets_partial_Omega = ft.indices[ft.values==PARTIAL_OMEGA] # Get indices of the facets on the exterior boundary
 extra_mesh.topology.create_connectivity(fdim, tdim)
-ft2 = transfer_meshtags_to_submesh(mesh, ft, extra_mesh, e_v_map,em_to_mesh)
+ft2 = transfer_meshtags_to_submesh(mesh, ft, extra_mesh, e_v_map, em_to_mesh)
 
 dofs_V2_partial_Omega = dfx.fem.locate_dofs_topological(V2, fdim, ft2.find(PARTIAL_OMEGA)) # Get the dofs on the exterior boundary facets
 bce = dfx.fem.dirichletbc(zero, dofs_V2_partial_Omega, V2) # Set Dirichlet BC on exterior boundary facets
 
 bcs = [bce]
 
-# Assemble block form
+# Compile block form
 a11 = dfx.fem.form(a11, entity_maps=entity_maps, jit_options=jit_parameters)
 a12 = dfx.fem.form(a12, entity_maps=entity_maps, jit_options=jit_parameters)
 a21 = dfx.fem.form(a21, entity_maps=entity_maps, jit_options=jit_parameters)
 a22 = dfx.fem.form(a22, entity_maps=entity_maps, jit_options=jit_parameters)
 a_cpp = [[a11, a12],
          [a21, a22]]
-
-# Compile form
-# a_cpp = dfx.fem.form(a, jit_options=jit_parameters)
 
 
 #---------------------------#
@@ -593,6 +589,7 @@ L_cpp = [
 ]
 b = assemble_vector_block(L_cpp, a=a_cpp, bcs=bcs) # Assemble RHS vector
 sol_vec = create_vector_block(L_cpp) # Create solution vector
+
 
 # Configure Krylov solver
 ksp = PETSc.KSP()
@@ -624,11 +621,11 @@ if save_output:
     out_ui.write_mesh(intra_mesh)
     out_ue.write_mesh(extra_mesh)
     out_v.write_mesh(gamma_mesh)
+    out_v.write_function(v)
 
 
 print(f"Time 2: {time.perf_counter()-t_second:.2f}")
 
-vg = ui_h("+") - ue_h("-")
 #---------------------------------#
 #        SOLUTION TIMELOOP        #
 #---------------------------------#
@@ -645,12 +642,9 @@ for i in range(time_steps):
     t1 = time.perf_counter() # Timestamp for assembly time-lapse
 
     # Forcing term on membrane
-    # Get local + ghost values of vectors using .localForm() (for parallel)
-    #with fg.vector.localForm() as fg_local, v.vector.localForm() as v_local:
-    #    fg_local[:] = v_local[:] - (deltaT / capacitance_membrane) * v_local[:]
     fg = vg - deltaT / capacitance_membrane * vg
-    Li = dt * inner(fi, vi) * dx(INTRA) + C_M * inner(fg, vi('-')) * dS # Linear form intracellular space
-    Le = dt * inner(fe, ve) * dx(EXTRA) - C_M * inner(fg, ve('+')) * dS # Linear form extracellular space
+    Li = dt * inner(fi, vi) * dx(INTRA) + C_M * inner(fg, vi(i_res)) * dS # Linear form intracellular space
+    Le = dt * inner(fe, ve) * dx(EXTRA) - C_M * inner(fg, ve(e_res)) * dS # Linear form extracellular space
 
     # Compile block linear form
     L_cpp = [dfx.fem.form(Li, entity_maps=entity_maps, jit_options=jit_parameters),
@@ -669,24 +663,13 @@ for i in range(time_steps):
     sol_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
     ui_h.x.array[:] = sol_vec.array[:num_dofs_V1]
     ue_h.x.array[:] = sol_vec.array[num_dofs_V1:]
-    vg = ui_h("+") - ue_h("-")
-    # vg_expr = dfx.fem.Expression(vg, V3.element.interpolation_points())
-    # v.interpolate(vg_expr)
+    vg = ui_h(i_res) - ue_h(e_res)
 
     solve_time += time.perf_counter() - t1 # Add time lapsed to total solver time
-
-    # Extract sub-components of solution
-
-
-    # Update membrane potential
-    # Get local + ghost values using .localForm() 
-    #with v.vector.localForm() as v_local, ui_h.vector.localForm() as ui_h_local, ue_h.vector.localForm() as ue_h_local:
-    #    v_local[:]  = ui_h_local[:] - ue_h_local[:]
     
     if save_output:
         out_ui.write_function(ui_h, t)
         out_ue.write_function(ue_h, t)
-        out_v.write_function(v, t)
 
 # Update time of exact ui expression
 ui_ex_expr.t = t

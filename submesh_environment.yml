@@ -1,0 +1,18 @@
+name: CGx-submesh
+channels:
+  - conda-forge
+dependencies:
+  - fenics-dolfinx
+  - python
+  - pandas
+  - matplotlib
+  - scipy
+  - numpy
+  - sympy
+  - git
+  - mpich
+  - conda-ecosystem-user-package-isolation
+  - pip:
+      - pyyaml
+
+
