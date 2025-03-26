@@ -30,3 +30,18 @@ To run a simulation with a test setup config, run
 ```
 python main.py --config test_setup_config.yaml
 ```
+
+# Citation
+If you use this code, please cite the following paper
+```
+@article{benedusi2024scalable,
+  author = {Benedusi, Pietro and Ellingsrud, Ada Johanne and Herlyng, Halvor and Rognes, Marie E.},
+  title = {Scalable Approximation and Solvers for Ionic Electrodiffusion in Cellular Geometries},
+  journal = {SIAM Journal on Scientific Computing},
+  volume = {46},
+  number = {5},
+  pages = {B725-B751},
+  year = {2024},
+  doi = {10.1137/24M1644717}
+}
+```
