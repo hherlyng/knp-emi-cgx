@@ -18,6 +18,7 @@ dependencies:
   - pyyaml
   - lxml
   - cmake
+  - ninja
   - pip:
       - "multiphenicsx@git+https://github.com/multiphenics/multiphenicsx.git@dolfinx-v0.9.0"
 
