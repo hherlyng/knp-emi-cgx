@@ -19,6 +19,7 @@ dependencies:
   - lxml
   - cmake
   - ninja
+  - cxx-compiler
   - pip:
       - "multiphenicsx@git+https://github.com/multiphenics/multiphenicsx.git@dolfinx-v0.9.0"
 
