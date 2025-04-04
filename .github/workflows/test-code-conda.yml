@@ -9,6 +9,7 @@ on:
 
 env:
   DEB_PYTHON_INSTALL_LAYOUT: deb_system
+  PIP_NO_BUILD_ISOLATION: 1
 
 defaults:
   run:
