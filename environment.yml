@@ -19,4 +19,4 @@ dependencies:
       - lxml
 
 variables:
-  PIP_NO_BUILD_ISOLATION: True
+  PIP_NO_BUILD_ISOLATION: 1
