@@ -13,9 +13,12 @@ dependencies:
   - mpich
   - conda-ecosystem-user-package-isolation
   - pip
+  - nanobind
+  - scikit-build-core
+  - pyyaml
+  - lxml
   - pip:
-      - pyyaml
-      - lxml
+      - "multiphenicsx@git+https://github.com/multiphenics/multiphenicsx.git@dolfinx-v0.9.0"
 
 variables:
   PIP_NO_BUILD_ISOLATION: 0
