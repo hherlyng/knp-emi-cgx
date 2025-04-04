@@ -10,7 +10,7 @@ from mpi4py   import MPI
 from petsc4py import PETSc
 from CGx.utils.setup_mms         import SetupMMS, mark_MMS_boundaries
 from CGx.utils.mixed_dim_problem import MixedDimensionalProblem
-
+import basix.ufl
 print = PETSc.Sys.Print
 
 class ProblemKNPEMI(MixedDimensionalProblem):
@@ -25,12 +25,12 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         print("Setting up function spaces ...")
 
         # Define elements
-        P = ufl.FiniteElement("Lagrange", self.mesh.ufl_cell(), self.fem_order)
+        P = basix.ufl.element("Lagrange", self.mesh.basix_cell(), self.fem_order)
 
         # Ion concentrations for each ion + electric potential
         element_list = [P] * (self.N_ions + 1)
 
-        self.V = dfx.fem.functionspace(self.mesh, ufl.MixedElement(element_list))
+        self.V = dfx.fem.functionspace(self.mesh, basix.ufl.mixed_element(element_list))
 
         # Define block function space
         V1 = self.V.clone()
@@ -65,6 +65,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         cells_extra = self.subdomains.indices[extra_indices]
         
         # Get interior and exterior dofs
+        self.mesh.topology.create_connectivity(self.subdomains.dim, self.subdomains.dim)
         self.dofs_intra = dfx.fem.locate_dofs_topological(self.W[0], self.subdomains.dim, cells_intra)
         self.dofs_extra = dfx.fem.locate_dofs_topological(self.W[1], self.subdomains.dim, cells_extra)
         

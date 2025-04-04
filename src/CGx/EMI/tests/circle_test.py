@@ -4,14 +4,14 @@ import numpy.typing
 import multiphenicsx.fem
 import multiphenicsx.fem.petsc
 
-import numpy    as np
-import scipy    as sp
-import dolfinx  as dfx
+import numpy as np
+import scipy as sp
+import dolfinx as dfx
 
-from ufl      import inner, grad
-from sys      import argv
-from mpi4py   import MPI
-from pathlib  import Path
+from ufl import inner, grad
+from sys import argv
+from mpi4py import MPI
+from pathlib import Path
 from petsc4py import PETSc
 from CGx.utils.dfx_mesh_creation import create_circle_mesh_gmsh
 
@@ -24,15 +24,18 @@ EXTRA = 2
 
 # Boundary tags
 PARTIAL_OMEGA = 3
-GAMMA         = 4
-DEFAULT       = 5
+GAMMA = 4
+DEFAULT = 5
 
 # Options for the fenicsx form compiler optimization
-cache_dir       = f"{str(Path.cwd())}/.cache"
+cache_dir = f"{str(Path.cwd())}/.cache"
 compile_options = ["-Ofast", "-march=native"]
-jit_parameters  = {"cffi_extra_compile_args"  : compile_options,
-                    "cache_dir"               : cache_dir,
-                    "cffi_libraries"          : ["m"]}
+jit_parameters = {
+    "cffi_extra_compile_args": compile_options,
+    "cache_dir": cache_dir,
+    "cffi_libraries": ["m"],
+}
+
 
 def dump(thing, path):
     if isinstance(thing, PETSc.Vec):
@@ -42,164 +45,205 @@ def dump(thing, path):
     assert np.all(np.isfinite(m.data))
     return np.save(path, np.c_[m.row, m.col, m.data])
 
-def calc_error_L2(u_h: dfx.fem.Function, u_exact: dfx.fem.Function, subdomain_id: int, degree_raise: int = 3) -> float:
-        """ Calculate the L2 error for a solution approximated with finite elements.
 
-        Parameters
-        ----------
-        u_h : dolfinx.fem Function
-            The solution function approximated with finite elements.
+def calc_error_L2(
+    u_h: dfx.fem.Function,
+    u_exact: dfx.fem.Function,
+    subdomain_id: int,
+    degree_raise: int = 3,
+) -> float:
+    """Calculate the L2 error for a solution approximated with finite elements.
 
-        u_exact : dolfinx.fem Function
-            The exact solution function.
+    Parameters
+    ----------
+    u_h : dolfinx.fem Function
+        The solution function approximated with finite elements.
 
-        degree_raise : int, optional
-            The amount of polynomial degrees that the approximated solution
-            is refined, by default 3
+    u_exact : dolfinx.fem Function
+        The exact solution function.
 
-        Returns
-        -------
-        error_global : float
-            The L2 error norm.
-        """
-        # Create higher-order function space for solution refinement
-        degree = u_h.function_space.ufl_element().degree()
-        family = u_h.function_space.ufl_element().family()
-        mesh   = u_h.function_space.mesh
+    degree_raise : int, optional
+        The amount of polynomial degrees that the approximated solution
+        is refined, by default 3
 
-        if u_h.function_space.element.signature().startswith('Vector'):
-            # Create higher-order function space based on vector elements
-            W = dfx.fem.FunctionSpace(mesh, ufl.VectorElement(family=family, 
-                                      degree=(degree+degree_raise), cell=mesh.ufl_cell()))
-        else:
-            # Create higher-order funciton space based on finite elements
-            W = dfx.fem.FunctionSpace(mesh, (family, degree+degree_raise))
+    Returns
+    -------
+    error_global : float
+        The L2 error norm.
+    """
+    # Create higher-order function space for solution refinement
+    degree = u_h.function_space.ufl_element().degree()
+    family = u_h.function_space.ufl_element().family()
+    mesh = u_h.function_space.mesh
 
-        # Interpolate the approximate solution into the refined space
-        u_W = dfx.fem.Function(W)
-        u_W.interpolate(u_h)
+    if u_h.function_space.element.signature().startswith("Vector"):
+        # Create higher-order function space based on vector elements
+        W = dfx.fem.FunctionSpace(
+            mesh,
+            ufl.x.petsc_vecElement(
+                family=family, degree=(degree + degree_raise), cell=mesh.ufl_cell()
+            ),
+        )
+    else:
+        # Create higher-order funciton space based on finite elements
+        W = dfx.fem.FunctionSpace(mesh, (family, degree + degree_raise))
 
-        # Interpolate exact solution, special handling if exact solution
-        # is a ufl expression
-        u_exact_W = dfx.fem.Function(W)
+    # Interpolate the approximate solution into the refined space
+    u_W = dfx.fem.Function(W)
+    u_W.interpolate(u_h)
 
-        if isinstance(u_exact, ufl.core.expr.Expr):
-            u_expr = dfx.fem.Expression(u_exact, W.element.interpolation_points())
-            u_exact_W.interpolate(u_expr)
-        else:
-            u_exact_W.interpolate(u_exact)
-        
-        # Compute the error in the higher-order function space
-        e_W = dfx.fem.Function(W)
-        with e_W.vector.localForm() as e_W_loc, u_W.vector.localForm() as u_W_loc, u_exact_W.vector.localForm() as u_ex_W_loc:
-            e_W_loc[:] = u_W_loc[:] - u_ex_W_loc[:]
+    # Interpolate exact solution, special handling if exact solution
+    # is a ufl expression
+    u_exact_W = dfx.fem.Function(W)
 
-        # Integrate the error
-        error        = dfx.fem.form(inner(e_W, e_W) * dx(subdomain_id))
-        error_local  = dfx.fem.assemble_scalar(error)
+    if isinstance(u_exact, ufl.core.expr.Expr):
+        u_expr = dfx.fem.Expression(u_exact, W.element.interpolation_points())
+        u_exact_W.interpolate(u_expr)
+    else:
+        u_exact_W.interpolate(u_exact)
 
-        return error_local
+    # Compute the error in the higher-order function space
+    e_W = dfx.fem.Function(W)
+    with e_W.x.petsc_vec.localForm() as e_W_loc, u_W.x.petsc_vec.localForm() as u_W_loc, u_exact_W.x.petsc_vec.localForm() as u_ex_W_loc:
+        e_W_loc[:] = u_W_loc[:] - u_ex_W_loc[:]
+
+    # Integrate the error
+    error = dfx.fem.form(inner(e_W, e_W) * dx(subdomain_id))
+    error_local = dfx.fem.assemble_scalar(error)
+
+    return error_local
 
 
-#----------------------------------------#
+# ----------------------------------------#
 #     PARAMETERS AND SOLVER SETTINGS     #
-#----------------------------------------#
+# ----------------------------------------#
 # Space discretization parameters
 N = int(argv[1])
 P = 1
 
 # Time discretization parameters
-t          = 0.0
-T          = 0.1
-deltaT     = 0.1
+t = 0.0
+T = 0.1
+deltaT = 0.1
 time_steps = int(T / deltaT)
 
 # Physical parameters
-capacitance_membrane       = 1.0
+capacitance_membrane = 1.0
 conductivity_intracellular = 1.0
 conductivity_extracellular = 1.0
 
 # Flags
-write_mesh     = False
-save_output    = False    
-save_matrix    = False
-direct_solver  = False
-ksp_type       = 'cg'
-pc_type        = 'hypre'
-ds_solver_type = 'mumps'
-ksp_rtol       = 1e-6
+write_mesh = False
+save_output = False
+save_matrix = False
+direct_solver = False
+ksp_type = "cg"
+pc_type = "hypre"
+ds_solver_type = "mumps"
+ksp_rtol = 1e-6
 
 # Timers
-solve_time    = 0
+solve_time = 0
 assemble_time = 0
 
-#------------------------------------#
+
+# ------------------------------------#
 #        FUNCTION EXPRESSIONS        #
-#------------------------------------#
+# ------------------------------------#
 # Membrane potential expression
 class InitialMembranePotential:
-    def __init__(self): pass
+    def __init__(self):
+        pass
 
     def __call__(self, x: numpy.typing.NDArray) -> numpy.typing.NDArray:
         return np.sin(2 * np.pi * x[0]) * np.sin(2 * np.pi * x[1])
 
+
 # Forcing factor expressions
 class IntracellularSource:
     def __init__(self, t_0: float):
-        self.t = t_0 # Initial time
+        self.t = t_0  # Initial time
 
-    def __call__(self, x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.float64]:
-        return 8 * np.pi ** 2 * np.sin(2 * np.pi * x[0]) * np.sin(2 * np.pi * x[1]) * (1.0 + np.exp(-self.t))
+    def __call__(
+        self, x: numpy.typing.NDArray[np.float64]
+    ) -> numpy.typing.NDArray[np.float64]:
+        return (
+            8
+            * np.pi**2
+            * np.sin(2 * np.pi * x[0])
+            * np.sin(2 * np.pi * x[1])
+            * (1.0 + np.exp(-self.t))
+        )
+
 
 class ExtracellularSource:
-    def __init__(self): pass
+    def __init__(self):
+        pass
 
-    def __call__(self, x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.float64]:
-        return 8 * np.pi ** 2 * np.sin(2 * np.pi * x[0]) * np.sin(2 * np.pi * x[1])
+    def __call__(
+        self, x: numpy.typing.NDArray[np.float64]
+    ) -> numpy.typing.NDArray[np.float64]:
+        return 8 * np.pi**2 * np.sin(2 * np.pi * x[0]) * np.sin(2 * np.pi * x[1])
+
 
 # Exact solution expressions
 class uiExact:
     def __init__(self, t_0: float):
         self.t = t_0
 
-    def __call__(self, x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.float64]:
-        return np.sin(2 * np.pi * x[0]) * np.sin(2 * np.pi * x[1]) * (1.0 + np.exp(-self.t))
+    def __call__(
+        self, x: numpy.typing.NDArray[np.float64]
+    ) -> numpy.typing.NDArray[np.float64]:
+        return (
+            np.sin(2 * np.pi * x[0])
+            * np.sin(2 * np.pi * x[1])
+            * (1.0 + np.exp(-self.t))
+        )
+
 
 class ueExact:
-    def __init__(self): pass
+    def __init__(self):
+        pass
 
-    def __call__(self, x: numpy.typing.NDArray[np.float64]) -> numpy.typing.NDArray[np.float64]:
+    def __call__(
+        self, x: numpy.typing.NDArray[np.float64]
+    ) -> numpy.typing.NDArray[np.float64]:
         return np.sin(2 * np.pi * x[0]) * np.sin(2 * np.pi * x[1])
 
-#-----------------------#
+
+# -----------------------#
 #          MESH         #
-#-----------------------#
-comm       = MPI.COMM_WORLD # MPI communicator
-ghost_mode = dfx.mesh.GhostMode.shared_facet # How dofs are distributed in parallel
+# -----------------------#
+comm = MPI.COMM_WORLD  # MPI communicator
+ghost_mode = dfx.mesh.GhostMode.shared_facet  # How dofs are distributed in parallel
 
 # Create mesh
 t1 = time.perf_counter()
 partitioner = dfx.mesh.create_cell_partitioner(ghost_mode)
-mesh, subdomains, boundaries = create_circle_mesh_gmsh(comm = comm, partitioner = partitioner)
-print(f"Create mesh time: {time.perf_counter()-t1:.2f}")
+mesh, subdomains, boundaries = create_circle_mesh_gmsh(
+    comm=comm, partitioner=partitioner
+)
+print(f"Create mesh time: {time.perf_counter() - t1:.2f}")
 
 # Define integral measures
-dx = ufl.Measure("dx", subdomain_data = subdomains) # Cell integrals
-dS = ufl.Measure("dS", subdomain_data = boundaries) # Facet integrals
-dS = dS(GAMMA) # Restrict facet integrals to gamma interface
+dx = ufl.Measure("dx", subdomain_data=subdomains)  # Cell integrals
+dS = ufl.Measure("dS", subdomain_data=boundaries)  # Facet integrals
+dS = dS(GAMMA)  # Restrict facet integrals to gamma interface
 
 # Mesh constants
-dt      = dfx.fem.Constant(mesh, dfx.default_scalar_type(deltaT))
-C_M     = dfx.fem.Constant(mesh, dfx.default_scalar_type(capacitance_membrane))
+dt = dfx.fem.Constant(mesh, dfx.default_scalar_type(deltaT))
+C_M = dfx.fem.Constant(mesh, dfx.default_scalar_type(capacitance_membrane))
 sigma_i = dfx.fem.Constant(mesh, dfx.default_scalar_type(conductivity_intracellular))
 sigma_e = dfx.fem.Constant(mesh, dfx.default_scalar_type(conductivity_extracellular))
 
-#------------------------------------------#
+# ------------------------------------------#
 #     FUNCTION SPACES AND RESTRICTIONS     #
-#------------------------------------------#
-V  = dfx.fem.FunctionSpace(mesh, ("Lagrange", P)) # Space for functions defined on the entire mesh
-V1 = V.clone() # Intracellular space
-V2 = V.clone() # Extracellular space
+# ------------------------------------------#
+V = dfx.fem.FunctionSpace(
+    mesh, ("Lagrange", P)
+)  # Space for functions defined on the entire mesh
+V1 = V.clone()  # Intracellular space
+V2 = V.clone()  # Extracellular space
 
 print(f"MPI Rank {comm.rank}")
 print(f"Size of local index map V1: {V1.dofmap.index_map.size_local}")
@@ -212,13 +256,13 @@ print(f"Number of ghost nodes V2: {V2.dofmap.index_map.num_ghosts}")
 
 # Trial and test functions
 (ui, ue) = (ufl.TrialFunction(V1), ufl.TrialFunction(V2))
-(vi, ve) = (ufl.TestFunction (V1), ufl.TestFunction (V2))
+(vi, ve) = (ufl.TestFunction(V1), ufl.TestFunction(V2))
 
 # Functions for storing the solutions and the exact solutions
 ui_h, ui_ex = dfx.fem.Function(V1), dfx.fem.Function(V1)
 ue_h, ue_ex = dfx.fem.Function(V2), dfx.fem.Function(V2)
 
-ui_ex_expr = uiExact(t_0 = t)
+ui_ex_expr = uiExact(t_0=t)
 ui_ex.interpolate(ui_ex_expr)
 
 ue_ex_expr = ueExact()
@@ -233,7 +277,7 @@ v.interpolate(v_expr)
 fg = dfx.fem.Function(V)
 
 # Forcing term in the intracellular space
-fi_expr = IntracellularSource(t_0 = t)
+fi_expr = IntracellularSource(t_0=t)
 fi = dfx.fem.Function(V)
 fi.interpolate(fi_expr)
 
@@ -244,8 +288,8 @@ fe.interpolate(fe_expr)
 
 ##### Restrictions #####
 # Get indices of the cells of the intra- and extracellular subdomains
-cells_Omega1 = subdomains.indices[subdomains.values==INTRA]
-cells_Omega2 = subdomains.indices[subdomains.values==EXTRA]
+cells_Omega1 = subdomains.indices[subdomains.values == INTRA]
+cells_Omega2 = subdomains.indices[subdomains.values == EXTRA]
 
 # Get dofs of the intra- and extracellular subdomains
 dofs_V1_Omega1 = dfx.fem.locate_dofs_topological(V1, subdomains.dim, cells_Omega1)
@@ -260,43 +304,56 @@ restriction = [restriction_V1_Omega1, restriction_V2_Omega2]
 print(f"Time 1: {time.perf_counter() - start_time:.2f}")
 
 t_second = time.perf_counter()
-#------------------------------------#
+# ------------------------------------#
 #        VARIATIONAL PROBLEM         #
-#------------------------------------#
+# ------------------------------------#
 # First row of block bilinear form
-a11 = dt * inner(sigma_i * grad(ui), grad(vi)) * dx(INTRA) + C_M * inner(ui('-'), vi('-')) * dS # ui terms
-a12 = - C_M * inner(ue('+'), vi('-')) * dS # ue terms
+a11 = (
+    dt * inner(sigma_i * grad(ui), grad(vi)) * dx(INTRA)
+    + C_M * inner(ui("-"), vi("-")) * dS
+)  # ui terms
+a12 = -C_M * inner(ue("+"), vi("-")) * dS  # ue terms
 
 # Second row of block bilinear form
-a21 = - C_M * inner(ui('-'), ve('+')) * dS # ui terms
-a22 = dt * inner(sigma_e * grad(ue), grad(ve)) * dx(EXTRA) + C_M * inner(ue('+'), ve('+')) * dS # ue terms
+a21 = -C_M * inner(ui("-"), ve("+")) * dS  # ui terms
+a22 = (
+    dt * inner(sigma_e * grad(ue), grad(ve)) * dx(EXTRA)
+    + C_M * inner(ue("+"), ve("+")) * dS
+)  # ue terms
 
 # Define boundary conditions
-zero = dfx.fem.Constant(mesh, PETSc.ScalarType(0.0)) # Grounded exterior boundary BC
+zero = dfx.fem.Constant(mesh, PETSc.ScalarType(0.0))  # Grounded exterior boundary BC
 
-facets_partial_Omega = boundaries.indices[boundaries.values==PARTIAL_OMEGA] # Get indices of the facets on the exterior boundary
-dofs_V2_partial_Omega = dfx.fem.locate_dofs_topological(V2, boundaries.dim, facets_partial_Omega) # Get the dofs on the exterior boundary facets
-bce = dfx.fem.dirichletbc(zero, dofs_V2_partial_Omega, V2) # Set Dirichlet BC on exterior boundary facets
+facets_partial_Omega = boundaries.indices[
+    boundaries.values == PARTIAL_OMEGA
+]  # Get indices of the facets on the exterior boundary
+dofs_V2_partial_Omega = dfx.fem.locate_dofs_topological(
+    V2, boundaries.dim, facets_partial_Omega
+)  # Get the dofs on the exterior boundary facets
+bce = dfx.fem.dirichletbc(
+    zero, dofs_V2_partial_Omega, V2
+)  # Set Dirichlet BC on exterior boundary facets
 
 bcs = [bce]
 
 # Assemble block form
-a = [[a11, a12],
-     [a21, a22]]
+a = [[a11, a12], [a21, a22]]
 
 # Convert form to dolfinx form
 a = dfx.fem.form(a, jit_options=jit_parameters)
 
 
-#---------------------------#
+# ---------------------------#
 #      MATRIX ASSEMBLY      #
-#---------------------------#
-t1 = time.perf_counter() # Timestamp for assembly time-lapse
+# ---------------------------#
+t1 = time.perf_counter()  # Timestamp for assembly time-lapse
 
 # Assemble the block linear system matrix
-A = multiphenicsx.fem.petsc.assemble_matrix_block(a, bcs=bcs, restriction=(restriction, restriction))
+A = multiphenicsx.fem.petsc.assemble_matrix_block(
+    a, bcs=bcs, restriction=(restriction, restriction)
+)
 A.assemble()
-assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
+assemble_time += time.perf_counter() - t1  # Add time lapsed to total assembly time
 
 # Configure Krylov solver
 ksp = PETSc.KSP()
@@ -313,7 +370,7 @@ if direct_solver:
 else:
     print("Using an iterative solver ...")
     opt = PETSc.Options()
-    opt['ksp_converged_reason'] = None
+    opt["ksp_converged_reason"] = None
     ksp.setType(ksp_type)
     ksp.getPC().setType(pc_type)
 
@@ -323,20 +380,19 @@ ksp.setFromOptions()
 if save_output:
     out_ui = dfx.io.XDMFFile(mesh.comm, "ui_mphx_square.xdmf", "w")
     out_ue = dfx.io.XDMFFile(mesh.comm, "ue_mphx_square.xdmf", "w")
-    out_v  = dfx.io.XDMFFile(mesh.comm, "v_mphx_square.xdmf" , "w")
+    out_v = dfx.io.XDMFFile(mesh.comm, "v_mphx_square.xdmf", "w")
 
     out_ui.write_mesh(mesh)
     out_ue.write_mesh(mesh)
     out_v.write_mesh(mesh)
 
 
-print(f"Time 2: {time.perf_counter()-t_second:.2f}")
+print(f"Time 2: {time.perf_counter() - t_second:.2f}")
 
-#---------------------------------#
+# ---------------------------------#
 #        SOLUTION TIMELOOP        #
-#---------------------------------#
+# ---------------------------------#
 for i in range(time_steps):
-
     # Increment time
     t += deltaT
 
@@ -345,47 +401,57 @@ for i in range(time_steps):
     fi.interpolate(fi_expr)
 
     # Update and assemble vector that is the RHS of the linear system
-    t1 = time.perf_counter() # Timestamp for assembly time-lapse
+    t1 = time.perf_counter()  # Timestamp for assembly time-lapse
 
     # Forcing term on membrane
     # Get local + ghost values of vectors using .localForm() (for parallel)
-    with fg.vector.localForm() as fg_local, v.vector.localForm() as v_local:
+    with fg.x.petsc_vec.localForm() as fg_local, v.x.petsc_vec.localForm() as v_local:
         fg_local[:] = v_local[:] - (deltaT / capacitance_membrane) * v_local[:]
-    
-    Li = dt * inner(fi, vi) * dx(INTRA) + C_M * inner(fg, vi('-')) * dS # Linear form intracellular space
-    Le = dt * inner(fe, ve) * dx(EXTRA) - C_M * inner(fg, ve('+')) * dS # Linear form extracellular space
 
-    L = [Li, Le] # Block linear form
-    L = dfx.fem.form(L, jit_options=jit_parameters) # Convert form to dolfinx form
+    Li = (
+        dt * inner(fi, vi) * dx(INTRA) + C_M * inner(fg, vi("-")) * dS
+    )  # Linear form intracellular space
+    Le = (
+        dt * inner(fe, ve) * dx(EXTRA) - C_M * inner(fg, ve("+")) * dS
+    )  # Linear form extracellular space
 
-    b = multiphenicsx.fem.petsc.assemble_vector_block(L, a, bcs=bcs, restriction=restriction) # Assemble RHS vector
-    
-    assemble_time += time.perf_counter() - t1 # Add time lapsed to total assembly time
-    
-    if i==0:
+    L = [Li, Le]  # Block linear form
+    L = dfx.fem.form(L, jit_options=jit_parameters)  # Convert form to dolfinx form
+
+    b = multiphenicsx.fem.petsc.assemble_vector_block(
+        L, a, bcs=bcs, restriction=restriction
+    )  # Assemble RHS vector
+
+    assemble_time += time.perf_counter() - t1  # Add time lapsed to total assembly time
+
+    if i == 0:
         # Create solution vector
-        sol_vec = multiphenicsx.fem.petsc.create_vector_block(L, restriction=restriction)
-    
+        sol_vec = multiphenicsx.fem.petsc.create_vector_block(
+            L, restriction=restriction
+        )
+
     # Solve the system
-    t1 = time.perf_counter() # Timestamp for solver time-lapse
+    t1 = time.perf_counter()  # Timestamp for solver time-lapse
     ksp.solve(b, sol_vec)
 
     # Update ghost values
     sol_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
 
-    solve_time += time.perf_counter() - t1 # Add time lapsed to total solver time
+    solve_time += time.perf_counter() - t1  # Add time lapsed to total solver time
 
     # Extract sub-components of solution
-    with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(sol_vec, [V1.dofmap, V2.dofmap], restriction) as ui_ue_wrapper:
-        for ui_ue_wrapper_local, component in zip(ui_ue_wrapper, (ui_h, ue_h)): 
-            with component.vector.localForm() as component_local:
+    with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(
+        sol_vec, [V1.dofmap, V2.dofmap], restriction
+    ) as ui_ue_wrapper:
+        for ui_ue_wrapper_local, component in zip(ui_ue_wrapper, (ui_h, ue_h)):
+            with component.x.petsc_vec.localForm() as component_local:
                 component_local[:] = ui_ue_wrapper_local
 
     # Update membrane potential
-    # Get local + ghost values using .localForm() 
-    with v.vector.localForm() as v_local, ui_h.vector.localForm() as ui_h_local, ue_h.vector.localForm() as ue_h_local:
-        v_local[:]  = ui_h_local[:] - ue_h_local[:]
-    
+    # Get local + ghost values using .localForm()
+    with v.x.petsc_vec.localForm() as v_local, ui_h.x.petsc_vec.localForm() as ui_h_local, ue_h.x.petsc_vec.localForm() as ue_h_local:
+        v_local[:] = ui_h_local[:] - ue_h_local[:]
+
     if save_output:
         out_ui.write_function(ui_h, t)
         out_ue.write_function(ue_h, t)
@@ -395,19 +461,29 @@ for i in range(time_steps):
 ui_ex_expr.t = t
 ui_ex.interpolate(ui_ex_expr)
 
-#------------------------------#
+# ------------------------------#
 #         POST PROCESS         #
-#------------------------------#
+# ------------------------------#
 # Error analysis
-L2_error_i_local = calc_error_L2(u_h=ui_h, u_exact=ui_ex, subdomain_id=INTRA) # Local L2 error (squared) of intracellular electric potential
-L2_error_e_local = calc_error_L2(u_h=ue_h, u_exact=ue_ex, subdomain_id=EXTRA) # Local L2 error (squared) of extracellular electric potential
+L2_error_i_local = calc_error_L2(
+    u_h=ui_h, u_exact=ui_ex, subdomain_id=INTRA
+)  # Local L2 error (squared) of intracellular electric potential
+L2_error_e_local = calc_error_L2(
+    u_h=ue_h, u_exact=ue_ex, subdomain_id=EXTRA
+)  # Local L2 error (squared) of extracellular electric potential
 
-L2_error_i_global = np.sqrt(comm.allreduce(L2_error_i_local, op=MPI.SUM)) # Global L2 error of intracellular electric potential
-L2_error_e_global = np.sqrt(comm.allreduce(L2_error_e_local, op=MPI.SUM)) # Global L2 error of extracellular electric potential
+L2_error_i_global = np.sqrt(
+    comm.allreduce(L2_error_i_local, op=MPI.SUM)
+)  # Global L2 error of intracellular electric potential
+L2_error_e_global = np.sqrt(
+    comm.allreduce(L2_error_e_local, op=MPI.SUM)
+)  # Global L2 error of extracellular electric potential
 
 # Sum local assembly and solve times to get global values
-max_local_assemble_time = comm.allreduce(assemble_time, op=MPI.MAX) # Global assembly time
-max_local_solve_time    = comm.allreduce(solve_time   , op=MPI.MAX) # Global solve time
+max_local_assemble_time = comm.allreduce(
+    assemble_time, op=MPI.MAX
+)  # Global assembly time
+max_local_solve_time = comm.allreduce(solve_time, op=MPI.MAX)  # Global solve time
 
 # Print stuff
 print("\n#-----------INFO-----------#\n")
