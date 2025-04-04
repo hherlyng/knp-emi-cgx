@@ -17,7 +17,7 @@ defaults:
 jobs:
   test_scripts:
     runs-on: ubuntu-latest
-    container: ghcr.io/fenics/dolfinx/dolfinx:v0.7.1
+    container: ghcr.io/fenics/dolfinx/dolfinx:stable
 
     steps:
       - uses: actions/checkout@v4

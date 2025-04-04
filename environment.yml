@@ -2,8 +2,8 @@ name: CGx
 channels:
   - conda-forge
 dependencies:
-  - fenics-dolfinx==0.7.1
-  - python=3.10
+  - fenics-dolfinx==0.9.0
+  - python
   - pandas
   - matplotlib
   - scipy
@@ -14,8 +14,6 @@ dependencies:
   - conda-ecosystem-user-package-isolation
   - pip
   - pip:
-      - "multiphenicsx@git+https://github.com/multiphenics/multiphenicsx.git@dolfinx-v0.7.1"
+      - "multiphenicsx@git+https://github.com/multiphenics/multiphenicsx.git@dolfinx-v0.9.0"
       - pyyaml
       - lxml
-
-
