@@ -9,7 +9,6 @@ on:
 
 env:
   DEB_PYTHON_INSTALL_LAYOUT: deb_system
-  PIP_NO_BUILD_ISOLATION: 1
 
 defaults:
   run:
@@ -31,6 +30,9 @@ jobs:
           python-version: "3.10"
           use-mamba: true
           environment-file: environment.yml
+      - name: Install multiphenicsx
+        run: |
+          python3 -m pip install --check-build-dependencies git+https://github.com/multiphenics/multiphenicsx.git@dolfinx-v0.9.0
 
       - name: install python packages
         run: |
