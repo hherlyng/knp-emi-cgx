@@ -2,8 +2,8 @@ name: CGx
 channels:
   - conda-forge
 dependencies:
-  - fenics-dolfinx==0.7.1
-  - python=3.10
+  - fenics-dolfinx==0.9.0
+  - python
   - pandas
   - matplotlib
   - scipy
