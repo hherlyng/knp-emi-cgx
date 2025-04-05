@@ -13,7 +13,7 @@ conda activate CGx
 Whilst still in the root directory, install the `CGx` Python module by running
 
 ```
-pip install -e .
+pip install -e . --no-build-isolation
 ```
 
 # Testing the setup on a unit square mesh
