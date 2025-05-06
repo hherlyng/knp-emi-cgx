@@ -188,7 +188,7 @@ class ProblemEMI(MixedDimensionalProblem):
         self.L = dfx.fem.form(L, jit_options=self.jit_parameters)
         
 
-    def setup_preconditioner(self, use_block_jacobi: bool):
+    def setup_preconditioner(self):
 
         if self.comm.rank == 0: print('Setting up preconditioner ...')
 

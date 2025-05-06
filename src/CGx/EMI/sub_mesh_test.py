@@ -13,8 +13,6 @@ from pathlib   import Path
 from petsc4py  import PETSc
 from dolfinx.fem.petsc import assemble_matrix_block, assemble_vector_block, create_vector_block
 
-dfx.log.set_log_level(dfx.log.LogLevel.DEBUG)
-
 def calc_error_L2(u_h: dfx.fem.Function, u_exact: dfx.fem.Function, dX: ufl.Measure, degree_raise: int=3) -> float:
     """ Calculate the L2 error for a solution approximated with finite elements.
 
