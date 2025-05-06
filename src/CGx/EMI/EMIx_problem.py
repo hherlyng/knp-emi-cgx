@@ -1,13 +1,12 @@
 import ufl
-import multiphenicsx.fem
-import multiphenicsx.fem.petsc
 
 import numpy   as np
 import dolfinx as dfx
 
-from ufl      import grad, inner
-from mpi4py   import MPI
-from petsc4py import PETSc
+from ufl       import grad, inner
+from mpi4py    import MPI
+from petsc4py  import PETSc
+from basix.ufl import element
 from CGx.utils.setup_mms         import SetupMMS, mark_MMS_boundaries
 from CGx.utils.mixed_dim_problem import MixedDimensionalProblem
 
@@ -25,11 +24,14 @@ class ProblemEMI(MixedDimensionalProblem):
         print("Setting up function spaces ...")
 
         # Create a function space with continuous Lagrange elements
-        P      = ufl.FiniteElement("Lagrange", self.mesh.ufl_cell(), self.fem_order)
-        self.V = dfx.fem.FunctionSpace(self.mesh, P)
+        P       = element("Lagrange", self.mesh.basix_cell(), self.fem_order)
+        self.V  = dfx.fem.functionspace(self.mesh, P) # Space for functions defined on the entire mesh
+        self.Vi = dfx.fem.functionspace(self.intra_mesh, P) # Intracellular space
+        self.Ve = dfx.fem.functionspace(self.extra_mesh, P) # Extracellular space
+        self.Vg = dfx.fem.functionspace(self.gamma_mesh, ("Lagrange", self.fem_order)) # Cellular membranes space (gamma)
 
         # Define block function space
-        self.W = [self.V.clone(), self.V.clone()]
+        self.W = [self.Vi, self.Ve]
 
         # Create functions for storing the solutions
         self.wh = [dfx.fem.Function(self.W[0]), dfx.fem.Function(self.W[1])]
@@ -41,30 +43,8 @@ class ProblemEMI(MixedDimensionalProblem):
         self.u_p[0].name = "intra"
         self.u_p[1].name = "extra"
 
-        print("Creating mesh restrictions ...")
-
-        ### Restrictions
-        # Get indices of the cells of the intra- and extracellular subdomains        
-        if len(self.intra_tags) > 1:
-            list_of_indices = [self.subdomains.find(tag) for tag in self.intra_tags]
-            intra_indices = np.array([], dtype=np.int32)
-            for l in list_of_indices:
-                intra_indices = np.concatenate((intra_indices, l))
-        else:
-            intra_indices = self.subdomains.values==self.intra_tags[0]
-        extra_indices = self.subdomains.values==self.extra_tag
-        
-        cells_intra = self.subdomains.indices[intra_indices]
-        cells_extra = self.subdomains.indices[extra_indices]
-        
-        # Get interior and exterior dofs
-        self.dofs_intra = dfx.fem.locate_dofs_topological(self.W[0], self.subdomains.dim, cells_intra)
-        self.dofs_extra = dfx.fem.locate_dofs_topological(self.W[1], self.subdomains.dim, cells_extra)
-        
-        self.interior = multiphenicsx.fem.DofMapRestriction(self.W[0].dofmap, self.dofs_intra)
-        self.exterior = multiphenicsx.fem.DofMapRestriction(self.W[1].dofmap, self.dofs_extra)
-
-        self.restriction = [self.interior, self.exterior]
+        # Store dof numbers
+        self.num_dofs_Vi = self.Vi.dofmap.index_map.size_local
 
     def setup_boundary_conditions(self):
 
@@ -106,7 +86,12 @@ class ProblemEMI(MixedDimensionalProblem):
         t   = self.t
         dt  = self.dt
         C_M = self.C_M
-        phi_space, _ = self.V
+        phi_space = self.V
+
+        # Source terms
+        self.fi = dfx.fem.Function(self.W[0])
+        self.fe = dfx.fem.Function(self.W[1])
+        self.fg = dfx.fem.Function(self.Vg)
 
         # Set initial membrane potential
         if np.isclose(t.value, 0.0):
@@ -119,8 +104,8 @@ class ProblemEMI(MixedDimensionalProblem):
         # Define integral measures
         dxi = self.dx(self.intra_tags)
         dxe = self.dx(self.extra_tag)
-        dS  = self.dS(self.gamma_tags)
-
+        dS  = self.dS(self.gamma_tags[0])
+        
         # For the MMS test various gamma faces get different tags
         if self.MMS_test:
             # Create new boundary tags
@@ -141,13 +126,13 @@ class ProblemEMI(MixedDimensionalProblem):
             elif self.dim == 3:
                 src_terms, exact_sols, init_conds, bndry_terms = self.M.get_MMS_terms_KNPEMI_3D(t.value)
 
-        # init ionic models
-        for model in self.ionic_models:
-            model._init()
+        # # init ionic models
+        # for model in self.ionic_models:
+        #     model._init()
         
         # Trial and test functions
-        (ui, vi) = ufl.TrialFunctions(self.W[0]), ufl.TestFunctions(self.W[0])
-        (ue, ve) = ufl.TrialFunctions(self.W[1]), ufl.TestFunctions(self.W[1])
+        (ui, vi) = ufl.TrialFunction(self.W[0]), ufl.TestFunction(self.W[0])
+        (ue, ve) = ufl.TrialFunction(self.W[1]), ufl.TestFunction(self.W[1])
 
         # Solutions at previous timestep
         ui_p = self.u_p[0]
@@ -156,26 +141,34 @@ class ProblemEMI(MixedDimensionalProblem):
         if np.isclose(t.value, 0.0):
             # First timestep
             # Set phi_e and phi_i just for visualization
-            ui_p.interpolate(self.phi_i_init)
-            ue_p.interpolate(self.phi_e_init)
+            if self.MMS_test:
+                ui_p.interpolate(self.phi_i_init)
+                ue_p.interpolate(self.phi_e_init)
+            else:
+                ui_p.x.array[:] = self.phi_i_init
+                ue_p.x.array[:] = self.phi_e_init
         
         # Initialize variational form block entries
         a00 = 0; a01 = 0; L0 = 0
         a10 = 0; a11 = 0; L1 = 0
+
+        # Restrictions
+        i_res = self.i_res
+        e_res = self.e_res
         
         # Weak form - equation for phi_i
-        a00 += dt * inner(self.sigma_i * grad(ui), grad(vi)) * dxi + C_M * inner(ui('-'), vi('-')) * dS
-        a01 -= C_M * inner(ue('+'), vi('-')) * dS
+        a00 += dt * inner(self.sigma_i * grad(ui), grad(vi)) * dxi + C_M * inner(ui(i_res), vi(i_res)) * dS
+        a01 -= C_M * inner(ue(e_res), vi(i_res)) * dS
         
         # Weak form - equation for phi_e
-        a11 += dt * inner(self.sigma_e * grad(ue), grad(ve)) * dxe - C_M * inner(ue('+'), ve('+')) * dS
-        a10 -= C_M * inner(ui('-'), ve('+')) * dS 
+        a11 += dt * inner(self.sigma_e * grad(ue), grad(ve)) * dxe - C_M * inner(ue(e_res), ve(e_res)) * dS
+        a10 -= C_M * inner(ui(i_res), ve(e_res)) * dS 
 
         # Linear form intracellular space
-        L0 += dt * inner(self.fi, vi) * dxi + C_M * inner(self.fg, vi('-')) * dS
+        L0 += dt * inner(self.fi, vi) * dxi + C_M * inner(self.fg, vi(i_res)) * dS
         
         # Linear form extracellular space
-        L1 += dt * inner(self.fe, ve) * dxe + C_M * inner(self.fg, ve('+')) * dS
+        L1 += dt * inner(self.fe, ve) * dxe + C_M * inner(self.fg, ve(e_res)) * dS
 
         # Store weak form in matrix and vector
         a = [[a00, a01],
@@ -184,9 +177,8 @@ class ProblemEMI(MixedDimensionalProblem):
         L = [L0, L1]
 
         # Convert to C++ forms
-        self.a = dfx.fem.form(a, jit_options=self.jit_parameters)
-        self.L = dfx.fem.form(L, jit_options=self.jit_parameters)
-        
+        self.a = dfx.fem.form(a, entity_maps=self.entity_maps, jit_options=self.jit_parameters)
+        self.L = dfx.fem.form(L, entity_maps=self.entity_maps, jit_options=self.jit_parameters)
 
     def setup_preconditioner(self):
 
@@ -202,8 +194,8 @@ class ProblemEMI(MixedDimensionalProblem):
         dS  = self.dS(self.gamma_tags)
         
         # Trial and test functions
-        (ui, vi) = ufl.TrialFunctions(self.W[0]), ufl.TestFunctions(self.W[0])
-        (ue, ve) = ufl.TrialFunctions(self.W[1]), ufl.TestFunctions(self.W[1])
+        (ui, vi) = ufl.TrialFunction(self.W[0]), ufl.TestFunction(self.W[0])
+        (ue, ve) = ufl.TrialFunction(self.W[1]), ufl.TestFunction(self.W[1])
 
         # Initialize variational form
         p00 = 0
@@ -211,15 +203,15 @@ class ProblemEMI(MixedDimensionalProblem):
 
         # Setup diagonal preconditioner
         # Add flux contributions to weak form equations
-        p00 += dt * inner(self.sigma_i * grad(ui), grad(vi)) * dxi - C_M * inner(ui('-'), vi('-')) * dS
-        p11 += dt * inner(self.sigma_e * grad(ue), grad(ve)) * dxe - C_M * inner(ue('+'), ve('+')) * dS        
+        p00 += dt * inner(self.sigma_i * grad(ui), grad(vi)) * dxi - C_M * inner(ui(self.i_res), vi(self.i_res)) * dS
+        p11 += dt * inner(self.sigma_e * grad(ue), grad(ve)) * dxe - C_M * inner(ue(self.e_res), ve(self.e_res)) * dS        
 
         # Create block preconditioner matrix
         P = [[p00, None],
              [None, p11]]
 
         # Convert to C++ form
-        self.P = dfx.fem.form(P, jit_options=self.jit_parameters)
+        self.P = dfx.fem.form(P, entity_maps=self.entity_maps, jit_options=self.jit_parameters)
 
     def setup_MMS_params(self):
 
@@ -284,6 +276,9 @@ class ProblemEMI(MixedDimensionalProblem):
         self.errors = [L2_err_phi_i, L2_err_phi_e]        
 
     ### Default class variables ###
+    # Mesh restrictions
+    i_res = "+"
+    e_res = "-"
     
     # Physical parameters
     # Mesh constants

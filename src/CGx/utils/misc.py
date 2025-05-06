@@ -30,6 +30,82 @@ def check_if_file_exists(file_path):
         print(f"The file '{file_path}' does not exist.")
         exit()
 
+def compute_interface_integration_entities(
+        msh, interface_facets, domain_0_cells, domain_1_cells,
+        domain_to_domain_0, domain_to_domain_1):
+    """
+    
+    Copyright (c) 2024 Joseph P. Dean. This function is written by Joe Dean,
+    subject to copyright under an MIT License.
+
+    This function computes the integration entities (as a list of pairs of
+    (cell, local facet index) pairs) required to assemble mixed domain forms
+    over the interface. It assumes there is a domain with two sub-domains,
+    domain_0 and domain_1, that have a common interface. Cells in domain_0
+    correspond to the "+" restriction and cells in domain_1 correspond to
+    the "-" restriction.
+
+    Parameters:
+        interface_facets: A list of facets on the interface
+        domain_0_cells: A list of cells in domain_0
+        domain_1_cells: A list of cells in domain_1
+        c_to_f: The cell to facet connectivity for the domain mesh
+        f_to_c: the facet to cell connectivity for the domain mesh
+        facet_imap: The facet index_map for the domain mesh
+        domain_to_domain_0: A map from cells in domain to cells in domain_0
+        domain_to_domain_1: A map from cells in domain to cells in domain_1
+
+    Returns:
+        interface_entities: The integration entities
+        domain_to_domain_0: A modified map (see HACK below)
+        domain_to_domain_1: A modified map (see HACK below)
+    """
+    # Create measure for integration. Assign the first (cell, local facet)
+    # pair to the cell in domain_0, corresponding to the "+" restriction.
+    # Assign the second pair to the domain_1 cell, corresponding to the "-"
+    # restriction.
+    tdim = msh.topology.dim
+    fdim = tdim - 1
+    msh.topology.create_connectivity(tdim, fdim)
+    msh.topology.create_connectivity(fdim, tdim)
+    facet_imap = msh.topology.index_map(fdim)
+    c_to_f = msh.topology.connectivity(tdim, fdim)
+    f_to_c = msh.topology.connectivity(fdim, tdim)
+    # FIXME This can be done more efficiently
+    interface_entities = []
+    for facet in interface_facets:
+        # Check if this facet is owned
+        if facet < facet_imap.size_local:
+            cells = f_to_c.links(facet)
+            assert len(cells) == 2
+            cell_plus = cells[0] if cells[0] in domain_0_cells else cells[1]
+            cell_minus = cells[0] if cells[0] in domain_1_cells else cells[1]
+            assert cell_plus in domain_0_cells
+            assert cell_minus in domain_1_cells
+
+            # FIXME Don't use tolist
+            local_facet_plus = c_to_f.links(
+                cell_plus).tolist().index(facet)
+            local_facet_minus = c_to_f.links(
+                cell_minus).tolist().index(facet)
+            interface_entities.extend(
+                [cell_plus, local_facet_plus, cell_minus, local_facet_minus])
+
+            # FIXME HACK cell_minus does not exist in the left submesh, so it
+            # will be mapped to index -1. This is problematic for the
+            # assembler, which assumes it is possible to get the full macro
+            # dofmap for the trial and test functions, despite the restriction
+            # meaning we don't need the non-existant dofs. To fix this, we just
+            # map cell_minus to the cell corresponding to cell plus. This will
+            # just add zeros to the assembled system, since there are no
+            # u("-") terms. Could map this to any cell in the submesh, but
+            # I think using the cell on the other side of the facet means a
+            # facet space coefficient could be used
+            domain_to_domain_0[cell_minus] = domain_to_domain_0[cell_plus]
+            # Same hack for the right submesh
+            domain_to_domain_1[cell_plus] = domain_to_domain_1[cell_minus]
+
+    return interface_entities, domain_to_domain_0, domain_to_domain_1
 
 # Meshing utility functions
 def mark_subdomains_square(mesh: dfx.mesh.Mesh) -> dfx.mesh.MeshTags:

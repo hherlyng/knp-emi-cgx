@@ -4,12 +4,19 @@ import time
 import yaml
 import collections.abc
 
+import numpy   as np
 import dolfinx as dfx
 
 from abc            import ABC, abstractmethod
 from mpi4py         import MPI
 from petsc4py       import PETSc
-from CGx.utils.misc import flatten_list, mark_boundaries_cube_MMS, mark_boundaries_square_MMS, mark_subdomains_cube, mark_subdomains_square, check_if_file_exists
+from CGx.utils.misc import (flatten_list,
+                            mark_boundaries_cube_MMS,
+                            mark_boundaries_square_MMS,
+                            mark_subdomains_cube,
+                            mark_subdomains_square,
+                            check_if_file_exists,
+                            compute_interface_integration_entities)
 
 print = PETSc.Sys.Print
 
@@ -256,7 +263,6 @@ class MixedDimensionalProblem(ABC):
 
         if not self.MMS_test:
             # Load mesh files with meshtags
-            
             with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
                 # Read mesh and cell tags
                 self.mesh = xdmf.read_mesh(ghost_mode=self.ghost_mode, name="mesh")
@@ -272,22 +278,58 @@ class MixedDimensionalProblem(ABC):
             
             # Scale mesh
             self.mesh.geometry.x[:] *= self.mesh_conversion_factor
+            
+            self.dim = self.mesh.geometry.dim
         
         else:
-            self.dim = 2
-            if self.dim == 2:
-                self.mesh = dfx.mesh.create_unit_square(comm=MPI.COMM_WORLD, nx = self.N_mesh, ny = self.N_mesh, ghost_mode=self.ghost_mode)
+            self.dim=2
+            if self.dim==2:
+                self.mesh = dfx.mesh.create_unit_square(comm=MPI.COMM_WORLD, nx=self.N_mesh, ny=self.N_mesh, ghost_mode=self.ghost_mode)
                 self.subdomains = mark_subdomains_square(self.mesh)
                 self.boundaries = mark_boundaries_square_MMS(self.mesh)
             
-            elif self.dim == 3:
-                self.mesh = dfx.mesh.create_unit_cube(comm=MPI.COMM_WORLD, nx = self.N_mesh, ny = self.N_mesh, nz = self.N_mesh, ghost_mode=self.ghost_mode)
+            elif self.dim==3:
+                self.mesh = dfx.mesh.create_unit_cube(comm=MPI.COMM_WORLD, nx=self.N_mesh, ny=self.N_mesh, nz=self.N_mesh, ghost_mode=self.ghost_mode)
                 self.subdomains = mark_subdomains_cube(self.mesh)
                 self.boundaries = mark_boundaries_cube_MMS(self.mesh)
+        
+        # Create submeshes
+        cells_intra = np.concatenate([self.subdomains.find(tag) for tag in self.intra_tags])
+        cells_extra = self.subdomains.find(self.extra_tag[0])
+        facets_gamma = np.concatenate([self.boundaries.find(tag) for tag in self.gamma_tags])
+        self.intra_mesh, self.im_to_mesh, self.i_v_map, _ = dfx.mesh.create_submesh(msh=self.mesh, dim=self.dim, entities=cells_intra[np.argsort(cells_intra)])
+        self.extra_mesh, self.em_to_mesh, self.e_v_map, _ = dfx.mesh.create_submesh(msh=self.mesh, dim=self.dim, entities=cells_extra[np.argsort(cells_extra)])
+        self.gamma_mesh, self.gm_to_mesh, self.g_v_map, _ = dfx.mesh.create_submesh(msh=self.mesh, dim=self.dim-1, entities=facets_gamma[np.argsort(facets_gamma)])
+
+        # mesh will be used as the integration domain, so need to create
+        # mapping from cells in mesh to the cells in intra_mesh and extra_mesh
+        mesh_cell_imap = self.mesh.topology.index_map(self.dim)
+        num_cells = mesh_cell_imap.size_local + mesh_cell_imap.num_ghosts
+        mesh_to_im = np.full(num_cells, -1, dtype=np.int32)
+        mesh_to_em = np.full(num_cells, -1, dtype=np.int32)
+        mesh_to_im[self.im_to_mesh] = np.arange(len(self.im_to_mesh), dtype=np.int32)
+        mesh_to_em[self.em_to_mesh] = np.arange(len(self.em_to_mesh), dtype=np.int32)
+        mesh_facet_imap = self.mesh.topology.index_map(self.dim-1)
+        num_facets = mesh_facet_imap.size_local + mesh_facet_imap.num_ghosts
+
+        mesh_to_gm = np.full(num_facets, -1, dtype=np.int32)
+        mesh_to_gm[self.gm_to_mesh] = np.arange(len(self.gm_to_mesh), dtype=np.int32)
+        self.entity_maps = {self.intra_mesh : mesh_to_im,
+                            self.extra_mesh : mesh_to_em,
+                            self.gamma_mesh : mesh_to_gm}
+                            
+        # Compute integration entities for the cellular membranes (gamma)
+        self.gamma_entities, self.mesh_to_im, self.mesh_to_em = \
+                compute_interface_integration_entities(msh=self.mesh,
+                                                       interface_facets=facets_gamma,
+                                                       domain_0_cells=cells_intra,
+                                                       domain_1_cells=cells_extra,
+                                                       domain_to_domain_0=mesh_to_im,
+                                                       domain_to_domain_1=mesh_to_em)
 
         # Integral measures for the domain
         self.dx = ufl.Measure("dx", domain=self.mesh, subdomain_data=self.subdomains) # Volume integral measure
-        self.dS = ufl.Measure("dS", domain=self.mesh, subdomain_data=self.boundaries) # Facet integral measure
+        self.dS = ufl.Measure("dS", domain=self.mesh, subdomain_data=[(self.gamma_tags[0], self.gamma_entities)]) # Facet integral measure
     
     @abstractmethod
     def init(self):

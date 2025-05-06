@@ -568,7 +568,6 @@ a22 = dfx.fem.form(a22, entity_maps=entity_maps, jit_options=jit_parameters)
 a_cpp = [[a11, a12],
          [a21, a22]]
 
-
 #---------------------------#
 #      MATRIX ASSEMBLY      #
 #---------------------------#
