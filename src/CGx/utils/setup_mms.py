@@ -1,10 +1,10 @@
-import ufl
 import numpy.typing
 
 import numpy as np
 import dolfinx as dfx
 import sympy as sp
 
+from basix.ufl import element
 from CGx.utils.misc import mark_boundaries_cube_MMS, mark_boundaries_square_MMS
 from sympy.utilities.lambdify import lambdify
 
@@ -353,7 +353,7 @@ class SetupMMS:
         ]
 
         # exterior boundary terms
-        P1_vec = ufl.x.petsc_vecElement("Lagrange", self.mesh.ufl_cell(), degree=1)
+        P1_vec = element("Lagrange", self.mesh.basix_cell(), degree=1, shape=(self.mesh.geometry.dim,))
         V_vec = dfx.fem.functionspace(self.mesh, element=P1_vec)
         ext_sym_funcs = [J_Na_e, J_K_e, J_Cl_e]
         ext_exprs = [
@@ -634,9 +634,7 @@ class SetupMMS:
         ]
 
         # exterior boundary terms
-        import ufl
-
-        P1_vec = ufl.x.petsc_vecElement("Lagrange", self.mesh.ufl_cell(), degree=1)
+        P1_vec = element("Lagrange", self.mesh.basix_cell(), degree=1, shape=(self.mesh.geometry.dim,))
         V_vec = dfx.fem.functionspace(self.mesh, element=P1_vec)
         ext_sym_funcs = [J_Na_e, J_K_e, J_Cl_e]
         ext_exprs = [
