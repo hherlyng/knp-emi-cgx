@@ -9,9 +9,9 @@ from mpi4py   import MPI
 from petsc4py import PETSc
 
 # Stimulus
-def g_syn(g_syn_bar, a_syn, t: float) -> float:
+def g_syn(g_syn_bar, a_syn, t: dfx.fem.Constant) -> float:
     T = 5e-3
-    return g_syn_bar * np.exp(-np.mod(t, T)/a_syn)
+    g = g_syn_bar * ufl.exp(-np.mod(float(t), T) / a_syn)
 
 # Kir-function used in ionic pump (Halnes et al. 2013(?))
 def f_Kir(K_e_init, K_e, E_K_init, delta_phi, phi_m):
@@ -67,15 +67,17 @@ class Null_model(IonicModel):
 	def _eval(self, ion_idx):			
 		return 0
 
-# Passive membrane
+# Passive membrane model: I_ch = phi_M
 class PassiveModel(IonicModel):
     """ Ionic current is the membrane potential."""
-    
-    def _init(self):		
+    def __init__(self, KNPEMIx_problem, tags=None):
+        super().__init__(KNPEMIx_problem, tags)
+
+    def _init(self):
         pass
 
     def __str__(self):
-        return f'Passive'
+        return f"Passive"
 
     def _eval(self, ion_idx):	
         I_ch = self.problem.phi_m_prev	
@@ -359,15 +361,19 @@ class HodgkinHuxley(IonicModel):
             The stimulus part of the channel current.
         """
 
-        # aliases		
-        p     = self.problem		
-        ion   = p.ion_list[ion_idx]
-        phi_m = p.phi_m_prev
+        # Aliases
+        p = self.problem
+        ion = p.ion_list[ion_idx]
 
-        assert ion['name'] == 'Na', print("Only Na can have a stimulus current in the Hodgkin-Huxley model.")
-    
-        return g_syn(p.g_syn_bar, p.a_syn, float(p.t.value))*(phi_m - ion['E'])
+        assert ion["name"] == "Na", print(
+            "Only Na can have a stimulus current in the Hodgkin-Huxley model."
+        )
 
+        # Synaptic conductivity factor
+        g_syn_fac = g_syn(p.g_syn_bar, p.a_syn, p.t)
+
+        # Return stimulus
+        return g_syn_fac * (p.phi_m_prev - ion["E"])
 
     def update_gating_variables(self):		
 

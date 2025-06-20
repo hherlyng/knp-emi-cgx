@@ -29,10 +29,10 @@ mesh = dfx.mesh.create_unit_square(comm, nx=N, ny=N, ghost_mode=gm)
 
 # Generate meshtags
 ct = mark_subdomains_square(mesh)
-ct.name = "ct"
+ct.name = "mesh"
 
 ft = mark_boundaries_square(mesh)
-ft.name = "ft"
+ft.name = "mesh"
 
 with dfx.io.XDMFFile(comm, mesh_filename, 'w') as mesh_xdmf, \
      dfx.io.XDMFFile(comm, ft_filename, 'w') as ft_xdmf:

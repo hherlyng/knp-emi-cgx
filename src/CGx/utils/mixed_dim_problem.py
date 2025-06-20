@@ -38,16 +38,17 @@ class MixedDimensionalProblem(ABC):
         self.read_config_file(config_file=config_file)
         self.setup_domain()
 
-        # Perform FEM setup
-        self.init()
-        self.find_steady_state_initial_conditions()
-        self.setup_spaces()
-        self.setup_boundary_conditions()
-        if self.source_terms=="ion_injection": self.setup_source_terms()
-
         # Initialize time
         self.t  = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(0.0))
         self.dt = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(self.dt))
+
+        # Perform FEM setup
+        self.setup_constants()
+        self.setup_spaces()
+        self.init()
+        self.find_steady_state_initial_conditions()
+        self.setup_boundary_conditions()
+        if self.source_terms=="ion_injection": self.setup_source_terms()
 
         # Initialize empty ionic models list
         self.ionic_models = []
@@ -283,11 +284,12 @@ class MixedDimensionalProblem(ABC):
             for tag in model.tags:
                 if tag not in ionic_tags:
                     ionic_tags.append(tag)
+            print("Added tags for ionic model: ", model.__str__())
         
         ionic_tags = sorted(flatten_list(ionic_tags))
         gamma_tags = sorted(flatten_list([self.gamma_tags]))
 
-        if ionic_tags != gamma_tags:
+        if ionic_tags != gamma_tags and not self.MMS_test:
             raise RuntimeError('Mismatch between membrane tags and ionic models tags.' \
                 + f'\nIonic models tags: {ionic_tags}\nMembrane tags: {gamma_tags}')
         
@@ -327,16 +329,20 @@ class MixedDimensionalProblem(ABC):
         
         else:
             self.dim=2
-            self.N_mesh = 32
+            self.N_mesh = 16
             if self.dim==2:
                 self.mesh = dfx.mesh.create_unit_square(comm=MPI.COMM_WORLD, nx=self.N_mesh, ny=self.N_mesh, ghost_mode=self.ghost_mode)
                 self.subdomains = mark_subdomains_square(self.mesh)
                 self.boundaries = mark_boundaries_square_MMS(self.mesh)
+                self.gamma_tags = (1, 2, 3, 4)
             
             elif self.dim==3:
                 self.mesh = dfx.mesh.create_unit_cube(comm=MPI.COMM_WORLD, nx=self.N_mesh, ny=self.N_mesh, nz=self.N_mesh, ghost_mode=self.ghost_mode)
                 self.subdomains = mark_subdomains_cube(self.mesh)
                 self.boundaries = mark_boundaries_cube_MMS(self.mesh)
+                self.gamma_tags = (1, 2, 3, 4, 5, 6)
+
+            self.boundary_tag = 8
 
         # Integral measures for the domain
         self.dx = ufl.Measure("dx", domain=self.mesh, subdomain_data=self.subdomains) # Volume integral measure
@@ -924,5 +930,10 @@ class MixedDimensionalProblem(ABC):
     
     @abstractmethod
     def setup_source_terms(self):
+        # Abstract method that must be implemented by concrete subclasses.
+        pass
+
+    @abstractmethod
+    def setup_constants(self):
         # Abstract method that must be implemented by concrete subclasses.
         pass

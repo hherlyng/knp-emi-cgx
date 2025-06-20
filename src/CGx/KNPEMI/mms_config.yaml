@@ -1,0 +1,28 @@
+# Test setup with a KNP-EMI problem
+problem_type : "KNP-EMI"
+
+# Input and output directories
+output_dir : './output/mms/'
+
+# Numerical parameters 
+dt : 1.0e-5 # Timestep size 
+time_steps : 1 # Number of timesteps
+T  : 1.0e-5 # Simulation end time
+
+# Problem constants (in consistent units)
+physical_constants:
+  T : 1.0   # Temperature [K]
+  F : 1.0 # Faraday constant [C/mol]
+  R : 1.0 # Gas constant [J/(K*mol)]
+
+C_M : 1.0 # membrane capacitance
+
+# Mesh and meshtags files 
+mesh_file      : "geometries/square64.xdmf"
+cell_tag_file  : "geometries/square64.xdmf"
+facet_tag_file : "geometries/square64_facets.xdmf"
+
+ics_tags  : [1] # Intracellular space cell tags
+ecs_tags  : [2] # Extracellular space cell tags
+boundary_tags : [3] # Boundary facet tags
+membrane_tags : [4] # Membrane (interface) facet tags

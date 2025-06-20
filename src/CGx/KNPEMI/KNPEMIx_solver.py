@@ -114,8 +114,8 @@ class SolverKNPEMI(object):
                     _, sub_to_parent_e = p.wh[1].sub(idx).function_space.collapse()
 
                     # Set the array values at the subspace dofs 
-                    p.wh[0].sub(idx).x.array[sub_to_parent_i] = ion['ki_init']
-                    p.wh[1].sub(idx).x.array[sub_to_parent_e] = ion['ke_init']
+                    p.wh[0].sub(idx).x.array[sub_to_parent_i] = ion['ki_init'].value
+                    p.wh[1].sub(idx).x.array[sub_to_parent_e] = ion['ke_init'].value
                 else:
                     # Get dof mapping between subspace and parent space
                     W_ion_i, sub_to_parent_i = p.wh[0].sub(idx).function_space.collapse()
@@ -124,9 +124,9 @@ class SolverKNPEMI(object):
                     _, sub_to_parent_e = p.wh[1].sub(idx).function_space.collapse()
                     
                     # Set the array values at the subspace dofs 
-                    p.wh[0].sub(idx).x.array[np.intersect1d(sub_to_parent_i, neuron_dofs[0])] = ion['ki_init_n']
-                    p.wh[0].sub(idx).x.array[np.intersect1d(sub_to_parent_i, glia_dofs[0])]   = ion['ki_init_g']
-                    p.wh[1].sub(idx).x.array[sub_to_parent_e] = ion['ke_init']
+                    p.wh[0].sub(idx).x.array[np.intersect1d(sub_to_parent_i, neuron_dofs[0])] = ion['ki_init_n'].value
+                    p.wh[0].sub(idx).x.array[np.intersect1d(sub_to_parent_i, glia_dofs[0])]   = ion['ki_init_g'].value
+                    p.wh[1].sub(idx).x.array[sub_to_parent_e] = ion['ke_init'].value
 
             self.ksp.setType(self.ksp_type)
             pc = self.ksp.getPC()
@@ -266,8 +266,7 @@ class SolverKNPEMI(object):
             print('t (ms) = ', 1000 * float(t.value))               
 
             # Set up the variational form
-            tic = time.perf_counter()   
-            p.setup_variational_form()
+            tic = time.perf_counter()
             setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
 
             if i==0:
@@ -278,6 +277,12 @@ class SolverKNPEMI(object):
                 if not self.direct_solver and self.use_P_mat:
                     p.setup_preconditioner(self.use_block_Jacobi)
                     self.assemble_preconditioner()
+
+            # Update ionic models
+            #############
+            # TODO IONIC MODELS
+            p.ionic_models[0].update_gating_variables()
+            ############
 
             # Assemble system matrix and RHS vector
             tic = time.perf_counter()
@@ -369,7 +374,10 @@ class SolverKNPEMI(object):
 
                 # Print solver info and problem info
                 self.print_info()
-                      
+
+            if self.problem.MMS_test:
+                self.problem.print_errors()
+
             if self.save_mat:
                 if self.problem.MMS_test:
                     print("Saving Amat_MMS ...")
@@ -640,7 +648,6 @@ class SolverKNPEMI(object):
         
         # Run XDMF parser to restructure the data for better visualization
         # restructure_xdmf.run(self.output_filename)
-
         return
 
     def save_data(self):
