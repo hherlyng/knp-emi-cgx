@@ -284,9 +284,10 @@ class MixedDimensionalProblem(ABC):
                 self.subdomains = xdmf.read_meshtags(self.mesh, name="mesh")
                 self.subdomains.name = "ct"
 
-            # Create facet entities and facet-to-cell connectivity
+            # Create facet entities, facet-to-cell connectivity and cell-to-cell connectivity
             self.mesh.topology.create_entities(self.mesh.topology.dim-1)
             self.mesh.topology.create_connectivity(self.mesh.topology.dim-1, self.mesh.topology.dim)
+            self.mesh.topology.create_connectivity(self.mesh.topology.dim, self.mesh.topology.dim)
 
             with dfx.io.XDMFFile(MPI.COMM_WORLD, ft_file, 'r') as xdmf:
                 # Read facet tags

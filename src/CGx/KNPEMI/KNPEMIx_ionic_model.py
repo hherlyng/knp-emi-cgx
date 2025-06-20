@@ -283,7 +283,7 @@ class HH_model(IonicModel):
         dt_ode     = float(self.problem.dt.value) / self.time_steps_ODE
         
         # Set membrane potential
-        with phi_M_prev.vector.localForm() as loc_phi_M_prev:
+        with phi_M_prev.x.petsc_vec.localForm() as loc_phi_M_prev:
             V_M = 1000*(loc_phi_M_prev[:] - self.problem.V_rest) # convert phi_M to mV	
         
         alpha_n = 0.01e3 * (10.-V_M) / (np.exp((10. - V_M)/10.) - 1.)
@@ -320,7 +320,7 @@ class HH_model(IonicModel):
             
             if self.use_Rush_Lar:
                 # Get vector entries local to process + ghosts
-                with n.vector.localForm() as loc_n, m.vector.localForm() as loc_m, h.vector.localForm() as loc_h:
+                with n.x.petsc_vec.localForm() as loc_n, m.x.petsc_vec.localForm() as loc_m, h.x.petsc_vec.localForm() as loc_h:
 
                     loc_n[:] = y_inf_n + (loc_n[:] - y_inf_n) * y_exp_n
                     loc_m[:] = y_inf_m + (loc_m[:] - y_inf_m) * y_exp_m
@@ -328,7 +328,7 @@ class HH_model(IonicModel):
 
             else:
                 # Get vector entries local to process + ghosts
-                with n.vector.localForm() as loc_n, m.vector.localForm() as loc_m, h.vector.localForm() as loc_h:
+                with n.x.petsc_vec.localForm() as loc_n, m.x.petsc_vec.localForm() as loc_m, h.x.petsc_vec.localForm() as loc_h:
 
                     loc_n[:] += alpha_n * (1 - loc_n[:]) - beta_n * loc_n[:]
                     loc_m[:] += alpha_m * (1 - loc_m[:]) - beta_m * loc_m[:]

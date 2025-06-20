@@ -196,8 +196,8 @@ class SolverKNPEMI(object):
         ci.x.array[Vi_dofs] = 1.0
         ce.x.array[Ve_dofs] = 1.0
 
-        Ci = ci.vector
-        Ce = ce.vector 
+        Ci = ci.x.petsc_vec
+        Ce = ce.x.petsc_vec 
 
         with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(
             ns_vec, [p.W[0].dofmap, p.W[1].dofmap], p.restriction) as C_dd_wrapper:
@@ -314,7 +314,7 @@ class SolverKNPEMI(object):
             # Extract sub-components of solution and store them in the solution functions wh
             with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(x, [p.W[0].dofmap, p.W[1].dofmap], p.restriction) as ui_ue_wrapper:
                 for ui_ue_wrapper_local, component in zip(ui_ue_wrapper, (wh[0], wh[1])):
-                    with component.vector.localForm() as component_local:
+                    with component.x.petsc_vec.localForm() as component_local:
                         component_local[:] = ui_ue_wrapper_local
 
             # Update previous timestep values
@@ -434,9 +434,9 @@ class SolverKNPEMI(object):
             self.m_t = []
             self.h_t = []
 
-            with p.n.vector.localForm() as local_n, \
-                 p.m.vector.localForm() as local_m, \
-                 p.h.vector.localForm() as local_h:
+            with p.n.x.petsc_vec.localForm() as local_n, \
+                 p.m.x.petsc_vec.localForm() as local_m, \
+                 p.h.x.petsc_vec.localForm() as local_h:
             
                 self.n_t.append(local_n[self.point_to_plot])
                 self.m_t.append(local_m[self.point_to_plot])
@@ -453,7 +453,7 @@ class SolverKNPEMI(object):
         self.v_t.append(1000 * p.phi_M_prev.x.array[self.point_to_plot]) # Converted to mV
         
         if hasattr(p, 'n'):
-            with p.n.vector.localForm() as local_n, p.m.vector.localForm() as local_m, p.h.vector.localForm() as local_h:
+            with p.n.x.petsc_vec.localForm() as local_n, p.m.x.petsc_vec.localForm() as local_m, p.h.x.petsc_vec.localForm() as local_h:
                 self.n_t.append(local_n[self.point_to_plot])
                 self.m_t.append(local_m[self.point_to_plot])
                 self.h_t.append(local_h[self.point_to_plot])
