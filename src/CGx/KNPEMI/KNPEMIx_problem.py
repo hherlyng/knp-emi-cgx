@@ -4,12 +4,14 @@ import multiphenicsx.fem.petsc
 
 import numpy   as np
 import dolfinx as dfx
+from dolfinx.fem import Constant
 
 from ufl      import grad, inner, dot
 from mpi4py   import MPI
 from petsc4py import PETSc
 from CGx.utils.setup_mms         import SetupMMS, mark_MMS_boundaries
 from CGx.utils.mixed_dim_problem import MixedDimensionalProblem
+from CGx.utils.setup_mms_new import ExactSolutionsKNPEMI
 import basix.ufl
 print = PETSc.Sys.Print
 
@@ -93,7 +95,11 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                 We_ion, _ = We.sub(idx).collapse()
                 func = dfx.fem.Function(We_ion)
                 if self.MMS_test:
-                    func.interpolate(ion['ke_init'])
+                    func.interpolate(dfx.fem.Expression(
+                                        ion['ke_init'],
+                                        We_ion.element.interpolation_points()
+                                        )
+                                    )
                 else:
                     func.x.array[:] = ion['ke_init']
 
@@ -106,7 +112,11 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             func = dfx.fem.Function(W_phi)
 
             if self.MMS_test:
-                func.interpolate(self.phi_e_init)
+                func.interpolate(dfx.fem.Expression(
+                                    self.phi_e_init,
+                                    W_phi.element.interpolation_points()
+                                    )
+                                )
             else:
                 func.x.array[:] = self.phi_e_init
 
@@ -115,22 +125,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             bce.append(bc)
 
         self.bcs = bce
-
-
-    def setup_constants(self, dt: float):
-        """ Initialize constants as dolfinx.fem.Constant objects to reduce total compilation time. """
-
-        # TODO
-        self.dt       = dfx.fem.Constant(self.mesh, PETSc.ScalarType(dt))
-        self.F_const  = dfx.fem.Constant(self.mesh, PETSc.ScalarType(self.F))
-        self.psi_const = dfx.fem.Constant(self.mesh, PETSc.ScalarType(self.psi))
-        self.C_M_const = dfx.fem.Constant(self.mesh, PETSc.ScalarType(self.C_M))
-        self.domain_L_const = dfx.fem.Constant(self.mesh, PETSc.ScalarType(self.domain_L))
-        for ion in self.ion_list:
-            # Get ion attributes
-            ion['z']  = dfx.fem.Constant(self.mesh, PETSc.ScalarType(ion['z']))
-            ion['Di'] = dfx.fem.Constant(self.mesh, PETSc.ScalarType(ion['Di']))
-            ion['De'] = dfx.fem.Constant(self.mesh, PETSc.ScalarType(ion['De']))
             
     def setup_variational_form(self):
 
@@ -144,15 +138,20 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         psi = self.psi
         C_M = self.C_M
         t   = self.t
+    
         phi_space, _ = self.V.sub(self.N_ions).collapse()
 
         # Set initial membrane potential
         if np.isclose(t.value, 0.0):
             self.phi_M_prev = dfx.fem.Function(phi_space)
             if self.MMS_test:
-                self.phi_M_prev.interpolate(self.phi_M_init)
+                self.phi_M_prev.interpolate(dfx.fem.Expression(
+                                                self.phi_M_init,
+                                                phi_space.element.interpolation_points()
+                                                )
+                                            )
             else:
-                self.phi_M_prev.x.array[:] = self.phi_M_init
+                self.phi_M_prev.x.array[:] = self.phi_M_init.value
         
         print("Setting up variational form ...")
 
@@ -163,74 +162,9 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
         # For the MMS test various gamma faces get different tags
         if self.MMS_test:
-            # Create new boundary tags
-            self.boundaries = mark_MMS_boundaries(self.mesh)
-            dS = ufl.Measure("dS", domain=self.mesh, subdomain_data=self.boundaries)
-            if self.mesh.topology.dim == 2:
-                # for Omega_i = [0.25, 0.75] x [0.25, 0.75]
-                dS = dS((1, 2, 3, 4))
-            elif self.mesh.topology.dim == 3:
-                # for Omega_i = [0.25, 0.75] x [0.25, 0.75] x [0.25, 0.75]
-                dS = dS((1, 2, 3, 4, 5, 6))
+            # Create boundary integral measure
+            ds = ufl.Measure("ds", domain=self.mesh, subdomain_data=self.boundaries)
 
-            dsOuter = dS(self.boundary_tag)
-
-            # Update MMS expressions
-            if self.dim == 2:
-                src_terms, exact_sols, init_conds, bndry_terms = self.M.get_MMS_terms_KNPEMI_2D(t.value)
-            elif self.dim == 3:
-                src_terms, exact_sols, init_conds, bndry_terms = self.M.get_MMS_terms_KNPEMI_3D(t.value)
-        
-            # create ions
-            self.Na = {'Di':1.0, 'De':1.0, 'z':1.0,
-                    'ki_init':init_conds['Na_i'],
-                    'ke_init':init_conds['Na_e'],		
-                    'k_scaling': 1,	  
-                    'f_k_i':src_terms['f_Na_i'],
-                    'f_k_e':src_terms['f_Na_e'],
-                    'J_k_e':bndry_terms['J_Na_e'],
-                    'phi_i_e':exact_sols['phi_i_e'],
-                    'phi_e_e':exact_sols['phi_e_e'],
-                    'f_phi_i':src_terms['f_phi_i'],
-                    'f_phi_e':src_terms['f_phi_e'],
-                    'f_g_M':src_terms['f_g_M'],
-                    'f_I_M':src_terms['f_I_M'],
-                    'name':'Na'}
-
-            self.K = {'Di':1.0, 'De':1.0, 'z':1.0,
-                    'ki_init':init_conds['K_i'],
-                    'ke_init':init_conds['K_e'],			 
-                    'k_scaling': 1,
-                    'f_k_i':src_terms['f_K_i'],
-                    'f_k_e':src_terms['f_K_e'],
-                    'J_k_e':bndry_terms['J_K_e'],
-                    'phi_i_e':exact_sols['phi_i_e'],
-                    'phi_e_e':exact_sols['phi_e_e'],
-                    'f_phi_i':src_terms['f_phi_i'],
-                    'f_phi_e':src_terms['f_phi_e'],
-                    'f_g_M':src_terms['f_g_M'],
-                    'f_I_M':src_terms['f_I_M'],
-                    'name':'K'}
-
-            self.Cl = {'Di':1.0, 'De':1.0, 'z':-1.0,
-                    'ki_init':init_conds['Cl_i'],
-                    'ke_init':init_conds['Cl_e'],		
-                    'k_scaling': 1,	  
-                    'f_k_i':src_terms['f_Cl_i'],
-                    'f_k_e':src_terms['f_Cl_e'],
-                    'J_k_e':bndry_terms['J_Cl_e'],
-                    'phi_i_e':exact_sols['phi_i_e'],
-                    'phi_e_e':exact_sols['phi_e_e'],
-                    'f_phi_i':src_terms['f_phi_i'],
-                    'f_phi_e':src_terms['f_phi_e'],
-                    'f_g_M':src_terms['f_g_M'],
-                    'f_I_M':src_terms['f_I_M'],
-                    'name':'Cl'}
-
-            # create ion list
-            self.ion_list = [self.Na, self.K, self.Cl]
-
-        # init ionic models
         for model in self.ionic_models:
             model._init()
         
@@ -270,16 +204,28 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             # Set initial value of intra- and extracellular ion concentrations
             if np.isclose(t.value, 0.0):
                 if self.MMS_test:
-                    ui_p.sub(idx).interpolate(ion['ki_init'])
-                    ue_p.sub(idx).interpolate(ion['ke_init'])
+                    ui_space, _ = ui_p.sub(idx).function_space.collapse()
+                    ue_space, _ = ue_p.sub(idx).function_space.collapse()
+                    ui_p.sub(idx).interpolate(
+                                        dfx.fem.Expression(
+                                            ion['ki_init'],
+                                            ui_space.element.interpolation_points()
+                                            )
+                                        )
+                    ue_p.sub(idx).interpolate(
+                                        dfx.fem.Expression(
+                                            ion['ke_init'],
+                                            ue_space.element.interpolation_points()
+                                            )
+                                        )
                 else:
                     # Get dof mapping between subspace and parent space
                     _, sub_to_parent_i = ui_p.sub(idx).function_space.collapse()
                     _, sub_to_parent_e = ue_p.sub(idx).function_space.collapse()
 
                     # Set the array values at the subspace dofs 
-                    ui_p.sub(idx).x.array[sub_to_parent_i] = ion['ki_init']
-                    ue_p.sub(idx).x.array[sub_to_parent_e] = ion['ke_init']
+                    ui_p.sub(idx).x.array[sub_to_parent_i] = ion['ki_init'].value
+                    ue_p.sub(idx).x.array[sub_to_parent_e] = ion['ke_init'].value
 
             # Add ion specific contribution to fraction alpha
             alpha_i_sum += Di * z**2 * ui_p.sub(idx)
@@ -298,12 +244,14 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                 for gamma_tag in model.tags:
 
                     ion['I_ch'][gamma_tag] = model._eval(idx)
-
+        
                     # Add stimulus current if the current cell membrane belongs to
                     # a cell that is stimulated
                     if gamma_tag in self.stimulus_tags:
                         if ion['name']=='Na' and model.__str__()=='Hodgkin-Huxley':
-                            ion['I_ch'][gamma_tag] += model._add_stimulus(idx)
+                            stim = model._add_stimulus(idx)
+                            # self.stim, self.stim_expr = model._add_stimulus(idx)
+                            ion['I_ch'][gamma_tag] += stim
 
                     # Add contribution to total channel current
                     I_ch[gamma_tag] += ion['I_ch'][gamma_tag]
@@ -312,16 +260,28 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             # First timestep
             # Set phi_e and phi_i just for visualization
             if self.MMS_test:
-                ui_p.sub(self.N_ions).interpolate(self.phi_i_init)
-                ue_p.sub(self.N_ions).interpolate(self.phi_e_init)
+                ui_space, _ = ui_p.sub(self.N_ions).function_space.collapse()
+                ue_space, _ = ue_p.sub(self.N_ions).function_space.collapse()
+                ui_p.sub(self.N_ions).interpolate(
+                                        dfx.fem.Expression(
+                                            self.phi_i_init,
+                                            ui_space.element.interpolation_points()
+                                            )
+                                        )
+                ue_p.sub(self.N_ions).interpolate(
+                                        dfx.fem.Expression(
+                                            self.phi_e_init,
+                                            ue_space.element.interpolation_points()
+                                            )
+                                        )
             else:
                 # Get dof mapping between subspace and parent space
                 _, sub_to_parent_i = ui_p.sub(self.N_ions).function_space.collapse()
                 _, sub_to_parent_e = ue_p.sub(self.N_ions).function_space.collapse()
                 
                 # Set the array values at the subspace dofs 
-                ui_p.sub(self.N_ions).x.array[sub_to_parent_i] = self.phi_i_init
-                ue_p.sub(self.N_ions).x.array[sub_to_parent_e] = self.phi_e_init
+                ui_p.sub(self.N_ions).x.array[sub_to_parent_i] = self.phi_i_init.value
+                ue_p.sub(self.N_ions).x.array[sub_to_parent_e] = self.phi_e_init.value
         
         # Initialize variational form block entries
         a00 = 0; a01 = 0; L0 = 0
@@ -380,8 +340,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             J_phi_e += z*Je
 
             # Source terms
-            L0 += inner(ion['f_i'], vki) * dxi
-            L1 += inner(ion['f_e'], vke) * dxe
+            L0 += dt * inner(ion['f_i'], vki) * dxi
+            L1 += dt * inner(ion['f_e'], vke) * dxe
             
             if self.MMS_test:
                 # Define outward normal on exterior boundary (\partial\Omega)
@@ -392,16 +352,15 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                 L1 += dt * inner(ion['f_k_e'], vke) * dxe # Equation for k_e
 
                 # Enforcing correction for I_m
-                for i, JM in enumerate(ion['f_I_M'], 1):
-                    L0 += dt/(F*z) * alpha_i('-') * inner(JM, vki('-')) * dS(i)
-                    L1 -= dt/(F*z) * alpha_e('-') * inner(JM, vke('-')) * dS(i)
-                
+                L0 += dt/(F*z) * alpha_i('-') * inner(ion['f_I_M'], vki('-')) * dS(self.gamma_tags)
+                L1 -= dt/(F*z) * alpha_e('-') * inner(ion['f_I_M'], vke('-')) * dS(self.gamma_tags)
+            
                 # Enforcing correction for I_m, assuming gM_k = gM / N_ions
-                L1 -= dt/(F*z) * sum(alpha_e('-')*inner(gM, vke('-'))*dS(i) for i, gM in enumerate(ion['f_g_M'], 1))
+                L1 -= dt/(F*z) * alpha_e('-')*inner(ion['f_g_M'], vke('-'))*dS(self.gamma_tags)
 
                 # Exterior boundary terms (zero in "physical problem")
-                L1 -=  dt * inner(dot(ion['J_k_e'], n_outer('-')), vke('-')   ) * dsOuter # Equation for k_e
-                L1 += F*z * inner(dot(ion['J_k_e'], n_outer('-')), vphi_e('-')) * dsOuter # Equation for phi_e
+                L1 -=  dt * inner(dot(ion['J_k_e'], n_outer), vke) * ds # Equation for k_e
+                L1 += F*z * inner(dot(ion['J_k_e'], n_outer), vphi_e) * ds # Equation for phi_e
         
         # Weak form - equation for phi_i
         a00 -= inner(J_phi_i, grad(vphi_i)) * dxi - (C_M/(F*dt)) * inner(phi_i('-'), vphi_i('-')) * dS
@@ -421,11 +380,11 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             L1 -= inner(ion['f_phi_e'], vphi_e) * dxe # Equation for phi_e
 
             # Enforcing correction for I_m
-            for i, JM in enumerate(ion['f_I_M'], 1):
-                L0 += inner(JM, vphi_i('-')) * dS(i)
-                L1 -= inner(JM, vphi_e('-')) * dS(i)
+            
+            L0 += inner(self.src_terms['f_phi_m'], vphi_i('-')) * dS(self.gamma_tags)
+            L1 -= inner(self.src_terms['f_phi_m'], vphi_e('-')) * dS(self.gamma_tags)
 
-            L1 -= sum(inner(gM, vphi_e('-')) * dS(i) for i, gM in enumerate(ion['f_g_M'], 1))
+            L1 -= inner(self.src_terms['f_gamma'], vphi_e('-')) * dS(self.gamma_tags)
               
 
         # Store weak form in matrix and vector
@@ -535,70 +494,82 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
         # ionic model
         self.HH_model = False
+    
+        assert np.allclose([self.C_M, self.R, self.F], [1.0]*3) 
+        self.psi = 1.0
 
-        self.C_M = 1
-        self.F   = 1
-        self.R   = 1
-        self.T   = 1   
-        self.psi = 1           
-
-        self.M = SetupMMS(self.mesh)
-
-        if self.mesh.geometry.dim == 2:
-            src_terms, exact_sols, init_conds, bndry_terms = self.M.get_MMS_terms_KNPEMI_2D(0.0)
-        elif self.mesh.geometry.dim == 3:
-            src_terms, exact_sols, init_conds, bndry_terms = self.M.get_MMS_terms_KNPEMI_3D(0.0)
+        self.M = ExactSolutionsKNPEMI(self.mesh, self.t)
         
+        if self.mesh.geometry.dim == 2:
+            exact_sols, src_terms = self.M.get_mms_terms()
+        elif self.mesh.geometry.dim == 3:
+            src_terms, exact_sols, bndry_terms = self.M.get_MMS_terms_KNPEMI_3D(0.0)
+        
+        self.exact_sols = exact_sols
+        self.src_terms  = src_terms
+
         # initial values
-        self.phi_M_init = init_conds['phi_M']   # membrane potential (V)
-        self.phi_i_init = exact_sols['phi_i_e'] # internal potential (V) just for visualization
-        self.phi_e_init = exact_sols['phi_e_e'] # external potential (V) just for visualization
+        self.phi_i_init = exact_sols["phi_i_init"] # internal potential (V) just for visualization
+        self.phi_e_init = exact_sols["phi_e_init"] # external potential (V) just for visualization
+        self.phi_M_init = self.phi_i_init - self.phi_e_init # membrane potential (V)
 
         # create ions
-        self.Na = {'Di':1.0, 'De':1.0, 'z':1.0,
-                'ki_init':init_conds['Na_i'],
-                'ke_init':init_conds['Na_e'],		
-                'k_scaling': 1,	  
-                'f_k_i':src_terms['f_Na_i'],
-                'f_k_e':src_terms['f_Na_e'],
-                'J_k_e':bndry_terms['J_Na_e'],
-                'phi_i_e':exact_sols['phi_i_e'],
-                'phi_e_e':exact_sols['phi_e_e'],
-                'f_phi_i':src_terms['f_phi_i'],
-                'f_phi_e':src_terms['f_phi_e'],
-                'f_g_M':src_terms['f_g_M'],
-                'f_I_M':src_terms['f_I_M'],
-                'name':'Na'}
+        self.Na = {'Di' : dfx.fem.Constant(self.mesh, 1.0),
+                   'De' : dfx.fem.Constant(self.mesh, 1.0),
+                   'z'  : dfx.fem.Constant(self.mesh, 1.0),
+                   'ki_init':exact_sols['Na_i'],
+                   'ke_init':exact_sols['Na_e'],		
+                   'k_scaling': dfx.fem.Constant(self.mesh, 1.0),	  
+                   'f_k_i':src_terms['f_Na_i'],
+                   'f_k_e':src_terms['f_Na_e'],
+                   'J_k_e':src_terms['J_Na_e'],
+                   'phi_i_e':exact_sols['phi_i'],
+                   'phi_e_e':exact_sols['phi_e'],
+                   'f_phi_i':src_terms['f_phi_i'],
+                   'f_phi_e':src_terms['f_phi_e'],
+                   'f_g_M':src_terms['f_gamma'],
+                   'f_I_M':src_terms['f_phi_Na'],
+                   'name':'Na',
+                   'f_i' : dfx.fem.Constant(self.mesh, 0.0),
+                   'f_e' : dfx.fem.Constant(self.mesh, 0.0)}
 
-        self.K = {'Di':1.0, 'De':1.0, 'z':1.0,
-                'ki_init':init_conds['K_i'],
-                'ke_init':init_conds['K_e'],			 
-                'k_scaling': 1,
-                'f_k_i':src_terms['f_K_i'],
-                'f_k_e':src_terms['f_K_e'],
-                'J_k_e':bndry_terms['J_K_e'],
-                'phi_i_e':exact_sols['phi_i_e'],
-                'phi_e_e':exact_sols['phi_e_e'],
-                'f_phi_i':src_terms['f_phi_i'],
-                'f_phi_e':src_terms['f_phi_e'],
-                'f_g_M':src_terms['f_g_M'],
-                'f_I_M':src_terms['f_I_M'],
-                'name':'K'}
+        self.K = {'Di' : dfx.fem.Constant(self.mesh, 1.0),
+                  'De' : dfx.fem.Constant(self.mesh, 1.0),
+                  'z'  : dfx.fem.Constant(self.mesh, 1.0),
+                  'ki_init':exact_sols['K_i'],
+                  'ke_init':exact_sols['K_e'],			 
+                  'k_scaling': dfx.fem.Constant(self.mesh, 1.0),
+                  'f_k_i':src_terms['f_K_i'],
+                  'f_k_e':src_terms['f_K_e'],
+                  'J_k_e':src_terms['J_K_e'],
+                  'phi_i_e':exact_sols['phi_i'],
+                  'phi_e_e':exact_sols['phi_e'],
+                  'f_phi_i':src_terms['f_phi_i'],
+                  'f_phi_e':src_terms['f_phi_e'],
+                  'f_g_M':src_terms['f_gamma'],
+                  'f_I_M':src_terms['f_phi_K'],
+                  'name':'K',
+                  'f_i' : dfx.fem.Constant(self.mesh, 0.0),
+                  'f_e' : dfx.fem.Constant(self.mesh, 0.0)}
 
-        self.Cl = {'Di':1.0, 'De':1.0, 'z':-1.0,
-                'ki_init':init_conds['Cl_i'],
-                'ke_init':init_conds['Cl_e'],		
-                'k_scaling': 1,	  
-                'f_k_i':src_terms['f_Cl_i'],
-                'f_k_e':src_terms['f_Cl_e'],
-                'J_k_e':bndry_terms['J_Cl_e'],
-                'phi_i_e':exact_sols['phi_i_e'],
-                'phi_e_e':exact_sols['phi_e_e'],
-                'f_phi_i':src_terms['f_phi_i'],
-                'f_phi_e':src_terms['f_phi_e'],
-                'f_g_M':src_terms['f_g_M'],
-                'f_I_M':src_terms['f_I_M'],
-                'name':'Cl'}
+        self.Cl = {'Di' : dfx.fem.Constant(self.mesh, 1.0),
+                   'De' : dfx.fem.Constant(self.mesh, 1.0),
+                   'z'  : dfx.fem.Constant(self.mesh, 1.0),
+                   'ki_init':exact_sols['Cl_i'],
+                   'ke_init':exact_sols['Cl_e'],		
+                   'k_scaling': dfx.fem.Constant(self.mesh, 1.0),	  
+                   'f_k_i':src_terms['f_Cl_i'],
+                   'f_k_e':src_terms['f_Cl_e'],
+                   'J_k_e':src_terms['J_Cl_e'],
+                   'phi_i_e':exact_sols['phi_i'],
+                   'phi_e_e':exact_sols['phi_e'],
+                   'f_phi_i':src_terms['f_phi_i'],
+                   'f_phi_e':src_terms['f_phi_e'],
+                   'f_g_M':src_terms['f_gamma'],
+                   'f_I_M':src_terms['f_phi_Cl'],
+                   'name':'Cl',
+                   'f_i' : dfx.fem.Constant(self.mesh, 0.0),
+                   'f_e' : dfx.fem.Constant(self.mesh, 0.0)}
 
         # create ion list
         self.ion_list = [self.Na, self.K, self.Cl]
@@ -654,12 +625,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
     def print_errors(self):
         
-        # Get the exact solutions
-        if self.dim == 2:
-            _, exact_sols, _, _ = self.M.get_MMS_terms_KNPEMI_2D(self.t.value)
-        elif self.dim == 3:
-            _, exact_sols, _, _ = self.M.get_MMS_terms_KNPEMI_3D(self.t.value)
-
+        exact_sols = self.exact_sols
+        
         # Define integral measures
         dxi = self.dx(self.intra_tags)
         dxe = self.dx(self.extra_tag)
@@ -674,15 +641,15 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         Cl_e  = self.wh[1].sub(2)
         phi_e = self.wh[1].sub(3)
         
-        err_Na_i  = inner(Na_i  - exact_sols['Na_i_e'], Na_i   - exact_sols['Na_i_e'] ) * dxi
-        err_K_i   = inner(K_i   - exact_sols['K_i_e'] , K_i    - exact_sols['K_i_e']  ) * dxi
-        err_Cl_i  = inner(Cl_i  - exact_sols['Cl_i_e'], Cl_i   - exact_sols['Cl_i_e'] ) * dxi
-        err_phi_i = inner(phi_i - exact_sols['phi_i_e'], phi_i - exact_sols['phi_i_e']) * dxi
+        err_Na_i  = inner(Na_i  - exact_sols['Na_i'], Na_i   - exact_sols['Na_i'] ) * dxi
+        err_K_i   = inner(K_i   - exact_sols['K_i'] , K_i    - exact_sols['K_i']  ) * dxi
+        err_Cl_i  = inner(Cl_i  - exact_sols['Cl_i'], Cl_i   - exact_sols['Cl_i'] ) * dxi
+        err_phi_i = inner(phi_i - exact_sols['phi_i'], phi_i - exact_sols['phi_i']) * dxi
 
-        err_Na_e  = inner(Na_e  - exact_sols['Na_e_e'], Na_e   - exact_sols['Na_e_e'] ) * dxe
-        err_K_e   = inner(K_e   - exact_sols['K_e_e'] , K_e    - exact_sols['K_e_e']  ) * dxe
-        err_Cl_e  = inner(Cl_e  - exact_sols['Cl_e_e'], Cl_e   - exact_sols['Cl_e_e'] ) * dxe
-        err_phi_e = inner(phi_e - exact_sols['phi_e_e'], phi_e - exact_sols['phi_e_e']) * dxe
+        err_Na_e  = inner(Na_e  - exact_sols['Na_e'], Na_e   - exact_sols['Na_e'] ) * dxe
+        err_K_e   = inner(K_e   - exact_sols['K_e'] , K_e    - exact_sols['K_e']  ) * dxe
+        err_Cl_e  = inner(Cl_e  - exact_sols['Cl_e'], Cl_e   - exact_sols['Cl_e'] ) * dxe
+        err_phi_e = inner(phi_e - exact_sols['phi_e'], phi_e - exact_sols['phi_e']) * dxe
 
         # calculate local L2 error norms
         L2_err_Na_i  = dfx.fem.assemble_scalar(dfx.fem.form(err_Na_i ))
@@ -720,64 +687,69 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
         self.errors = [L2_err_Na_i, L2_err_Na_e, L2_err_K_i, L2_err_K_e, L2_err_Cl_i, L2_err_Cl_e, L2_err_phi_i, L2_err_phi_e]        
 
-    ### Default class variables ###
+    def setup_constants(self):
+        """ Set default class variables. """
+        # Physical parameters
+        self.C_M = Constant(self.mesh, dfx.default_scalar_type(0.02))  # Capacitance (F)
+        self.T   = Constant(self.mesh, dfx.default_scalar_type(300))   # Temperature (K)
+        self.F   = Constant(self.mesh, dfx.default_scalar_type(96485)) # Faraday's constant (C/mol)
+        self.R   = Constant(self.mesh, dfx.default_scalar_type(8.314)) # Gas constant (J/(K*mol))
+        self.psi = Constant(self.mesh,          
+                        dfx.default_scalar_type(    
+                            self.R.value*self.T.value/self.F.value     # Recurring variable
+                            )
+                        ) 
     
-    # Physical parameters
-    C_M = 0.02                       # capacitance (F)
-    T   = 300                        # temperature (K)
-    F   = 96485                      # Faraday's constant (C/mol)
-    R   = 8.314                      # Gas constant (J/(K*mol))
-    psi = R*T/F                      # recurring variable
-    
-    g_Na_bar  = 1200                 # Na max conductivity (S/m**2)
-    g_K_bar   = 360                  # K max conductivity (S/m**2)    
-    g_Na_leak = 2.0*0.5              # Na leak conductivity (S/m**2) (Constant)
-    g_K_leak  = 8.0*0.5              # K leak conductivity (S/m**2)
-    g_Cl_leak = 0.0                  # Cl leak conductivity (S/m**2) (Constant)
-    a_syn     = 0.002                # synaptic time constant (s)
-    g_syn_bar = 40                   # synaptic conductivity (S/m**2)
-    D_Na = 1.33e-9                   # diffusion coefficients Na (m/s^2) (Constant)
-    D_K  = 1.96e-9                   # diffusion coefficients K (m/s^2) (Constant)
-    D_Cl = 2.03e-9                   # diffusion coefficients Cl (m/s^2) (Constant)
-    V_rest  = -0.065                 # resting membrane potential (V)
+        self.g_Na_bar  = Constant(self.mesh, dfx.default_scalar_type(1200)) # Na max conductivity (S/m**2)
+        self.g_K_bar   = Constant(self.mesh, dfx.default_scalar_type(360))  # K max conductivity (S/m**2)    
+        self.g_Na_leak = Constant(self.mesh, dfx.default_scalar_type(2.0*0.5)) # Na leak conductivity (S/m**2) (Constant)
+        self.g_K_leak  = Constant(self.mesh, dfx.default_scalar_type(8.0*0.5)) # K leak conductivity (S/m**2)
+        self.g_Cl_leak = Constant(self.mesh, dfx.default_scalar_type(0.0)) # Cl leak conductivity (S/m**2) (Constant)
+        self.a_syn     = Constant(self.mesh, dfx.default_scalar_type(0.002)) # Synaptic time constant (s)
+        self.g_syn_bar = Constant(self.mesh, dfx.default_scalar_type(40)) # Synaptic conductivity (S/m**2)
+        self.D_Na = Constant(self.mesh, dfx.default_scalar_type(1.33e-9)) # Diffusion coefficients Na (m/s^2) (Constant)
+        self.D_K  = Constant(self.mesh, dfx.default_scalar_type(1.96e-9)) # Diffusion coefficients K (m/s^2) (Constant)
+        self.D_Cl = Constant(self.mesh, dfx.default_scalar_type(2.03e-9)) # diffusion coefficients Cl (m/s^2) (Constant)
+        self.V_rest  = Constant(self.mesh, dfx.default_scalar_type(-0.065)) # Resting membrane potential (V)
 
-    # Potassium buffering params
-    rho_pump = 1.115e-6			     # maximum pump rate (mol/m**2 s)
-    P_Nai = 10                       # [Na+]i threshold for Na+/K+ pump (mol/m^3)
-    P_Ke  = 1.5                      # [K+]e  threshold for Na+/K+ pump (mol/m^3)
-    k_dec = 2.9e-8				     # Decay factor for [K+]e (m/s)
+        # Potassium buffering params
+        self.rho_pump = Constant(self.mesh, dfx.default_scalar_type(1.115e-6)) # maximum pump rate (mol/m**2 s)
+        self.P_Nai = Constant(self.mesh, dfx.default_scalar_type(10))          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
+        self.P_Ke  = Constant(self.mesh, dfx.default_scalar_type(1.5))         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
+        self.k_dec = Constant(self.mesh, dfx.default_scalar_type(2.9e-8))	  # Decay factor for [K+]e (m/s)
 
-    # Initial conditions
-    phi_e_init = 0         # external potential (V) (Constant)
-    phi_i_init = -0.06774  # internal potential (V) just for visualization (Constant)
-    phi_M_init = -0.06774  # membrane potential (V)	 (Constant)
-    Na_i_init  = 12        # intracellular Na concentration (mol/m^3) (Constant)
-    Na_e_init  = 100       # extracellular Na concentration (mol/m^3) (Constant)
-    K_i_init   = 125       # intracellular K  concentration (mol/m^3) (Constant)
-    K_e_init   = 4         # extracellular K  concentration (mol/m^3) (Constant)
-    Cl_i_init  = 137       # intracellular Cl concentration (mol/m^3) (Constant)
-    Cl_e_init  = 104       # extracellular Cl concentration (mol/m^3) (Constant)
+        # Initial conditions
+        self.phi_e_init = Constant(self.mesh, dfx.default_scalar_type(0))         # External potential (V) (Constant)
+        self.phi_i_init = Constant(self.mesh, dfx.default_scalar_type(-0.06774))  # Internal potential (V) just for visualization (Constant)
+        self.phi_M_init = Constant(self.mesh, dfx.default_scalar_type(-0.06774))  # Membrane potential (V)	 (Constant)
+        self.Na_i_init  = Constant(self.mesh, dfx.default_scalar_type(12))        # Intracellular Na concentration (mol/m^3) (Constant)
+        self.Na_e_init  = Constant(self.mesh, dfx.default_scalar_type(100))       # Extracellular Na concentration (mol/m^3) (Constant)
+        self.K_i_init   = Constant(self.mesh, dfx.default_scalar_type(125))       # Intracellular K  concentration (mol/m^3) (Constant)
+        self.K_e_init   = Constant(self.mesh, dfx.default_scalar_type(4))         # Extracellular K  concentration (mol/m^3) (Constant)
+        self.Cl_i_init  = Constant(self.mesh, dfx.default_scalar_type(137))       # Intracellular Cl concentration (mol/m^3) (Constant)
+        self.Cl_e_init  = Constant(self.mesh, dfx.default_scalar_type(104))       # Extracellular Cl concentration (mol/m^3) (Constant)
 
-    # Initial values of gating variables
-    n_init_val = 0.27622914792
-    m_init_val = 0.03791834627
-    h_init_val = 0.68848921811
+        # Initial values of gating variables
+        self.n_init_val = Constant(self.mesh, dfx.default_scalar_type(0.27622914792))
+        self.m_init_val = Constant(self.mesh, dfx.default_scalar_type(0.03791834627))
+        self.h_init_val = Constant(self.mesh, dfx.default_scalar_type(0.68848921811))
 
-    # Source terms
-    Na_e_f = 0.0
-    Na_i_f = 0.0
-    K_e_f  = 0.0
-    K_i_f  = 0.0
-    Cl_e_f = 0.0
-    Cl_i_f = 0.0
+        # Source terms
+        self.Na_e_f = Constant(self.mesh, dfx.default_scalar_type(0.0))
+        self.Na_i_f = Constant(self.mesh, dfx.default_scalar_type(0.0))
+        self.K_e_f  = Constant(self.mesh, dfx.default_scalar_type(0.0))
+        self.K_i_f  = Constant(self.mesh, dfx.default_scalar_type(0.0))
+        self.Cl_e_f = Constant(self.mesh, dfx.default_scalar_type(0.0))
+        self.Cl_i_f = Constant(self.mesh, dfx.default_scalar_type(0.0))
 
-    # Ion dictionaries and list
-    Na = {'g_leak':g_Na_leak, 'Di':D_Na, 'De':D_Na, 'ki_init':Na_i_init, 'ke_init':Na_e_init, 'z':1.0,  'f_e': Na_e_f, 'f_i':Na_i_f, 'name':'Na', 'rho_p': 3*rho_pump}
-    K  = {'g_leak':g_K_leak,  'Di':D_K,  'De':D_K,  'ki_init':K_i_init,  'ke_init':K_e_init,  'z':1.0,  'f_e': K_e_f,  'f_i':K_i_f,  'name':'K' , 'rho_p':-2*rho_pump}
-    Cl = {'g_leak':g_Cl_leak, 'Di':D_Cl, 'De':D_Cl, 'ki_init':Cl_i_init, 'ke_init':Cl_e_init, 'z':-1.0, 'f_e': Cl_e_f, 'f_i':Cl_i_f, 'name':'Cl', 'rho_p':0.0}
-    ion_list = [Na, K, Cl]
-    N_ions   = len(ion_list) 
+        # Ion dictionaries and list
+        self.Na = {'g_leak':self.g_Na_leak, 'Di':self.D_Na, 'De':self.D_Na, 'ki_init':self.Na_i_init, 'ke_init':self.Na_e_init, 'z':Constant(self.mesh, 1.0),  'f_e': self.Na_e_f, 'f_i':self.Na_i_f, 'name':'Na', 'rho_p': Constant(self.mesh, dfx.default_scalar_type(3*self.rho_pump.value))}
+        self.K  = {'g_leak':self.g_K_leak,  'Di':self.D_K,  'De':self.D_K,  'ki_init':self.K_i_init,  'ke_init':self.K_e_init,  'z':Constant(self.mesh, 1.0),  'f_e': self.K_e_f,  'f_i':self.K_i_f,  'name':'K' , 'rho_p': Constant(self.mesh, dfx.default_scalar_type(-2*self.rho_pump.value))}
+        self.Cl = {'g_leak':self.g_Cl_leak, 'Di':self.D_Cl, 'De':self.D_Cl, 'ki_init':self.Cl_i_init, 'ke_init':self.Cl_e_init, 'z':Constant(self.mesh, -1.0), 'f_e': self.Cl_e_f, 'f_i':self.Cl_i_f, 'name':'Cl', 'rho_p': Constant(self.mesh, 0.0)}
+        self.ion_list = [self.Na, self.K, self.Cl]
+        self.N_ions   = len(self.ion_list) 
 
+    # Class settings
     # Mesh unit conversion factor
     mesh_conversion_factor = 1
 

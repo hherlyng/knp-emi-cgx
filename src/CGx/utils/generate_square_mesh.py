@@ -22,7 +22,6 @@ gm = dfx.mesh.GhostMode.shared_facet
 comm = MPI.COMM_WORLD
 if not os.path.exists(args.output_dir): os.mkdir(args.output_dir)
 mesh_filename = args.output_dir / f"square{N}.xdmf"
-ft_filename   = args.output_dir / f"square{N}_facets.xdmf"
 
 # Create mesh
 mesh = dfx.mesh.create_unit_square(comm, nx=N, ny=N, ghost_mode=gm)
@@ -34,8 +33,7 @@ ct.name = "ct"
 ft = mark_boundaries_square(mesh)
 ft.name = "ft"
 
-with dfx.io.XDMFFile(comm, mesh_filename, 'w') as mesh_xdmf, \
-     dfx.io.XDMFFile(comm, ft_filename, 'w') as ft_xdmf:
+with dfx.io.XDMFFile(comm, mesh_filename, 'w') as mesh_xdmf:
     mesh_xdmf.write_mesh(mesh)
     mesh_xdmf.write_meshtags(ct, x=mesh.geometry)
-    ft_xdmf.write_meshtags(ft, x=mesh.geometry)
+    mesh_xdmf.write_meshtags(ft, x=mesh.geometry)

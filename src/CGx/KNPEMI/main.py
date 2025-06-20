@@ -32,8 +32,11 @@ def main(argv=None):
 	# Create problem
 	problem = ProblemKNPEMI(args.input_file, tags, args.dt)
 	# Set ionic models
-	HH = HH_model(problem)
-	ionic_models = [HH]
+	if problem.MMS_test:
+		ionic_models = [Passive_model]
+	else:
+		HH = HH_model(problem)
+		ionic_models = [HH]
 
 	problem.init_ionic_model(ionic_models)
 
@@ -69,13 +72,18 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 	
 	problem = ProblemKNPEMI(yaml_file)
 
-	HH = HH_model(problem)
-	ionic_models = [HH]
+	# Set ionic models
+	if problem.MMS_test:
+		ionic_models = [Passive_model(problem, tags=(1, 2, 3, 4))]
+		problem.init_ionic_model(ionic_models)
+	else:
+		HH = HH_model(problem)
+		ionic_models = [HH]
+		problem.init_ionic_model(ionic_models)
 
-	problem.init_ionic_model(ionic_models)
 
 	# Create solver and solve
-	solver = SolverKNPEMI(problem, save_xdmfs=True, use_direct_solver=False, save_pngs=True, view_ksp=view_ksp)
+	solver = SolverKNPEMI(problem, save_xdmfs=True, use_direct_solver=True, save_pngs=True, view_ksp=view_ksp)
 	solver.solve()
 
 	phi_i = solver.problem.wh[0].sub(problem.N_ions)

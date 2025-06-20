@@ -130,11 +130,19 @@ class SolverKNPEMI(object):
                 _, sub_to_parent_e = p.wh[1].sub(idx).function_space.collapse()
 
                 # Set the array values at the subspace dofs
-                p.wh[0].sub(idx).x.array[sub_to_parent_i] = ion["ki_init"]
-                p.wh[1].sub(idx).x.array[sub_to_parent_e] = ion["ke_init"]
+                if p.MMS_test:
+                    p.wh[0].sub(idx).interpolate(ion["ki_init"])
+                    p.wh[1].sub(idx).interpolate(ion["ke_init"])
+                else:
+                    p.wh[0].sub(idx).x.array[sub_to_parent_i] = ion["ki_init"]
+                    p.wh[1].sub(idx).x.array[sub_to_parent_e] = ion["ke_init"]
 
-            p.wh[0].sub(p.N_ions).x.array[:] = p.phi_i_init
-            p.wh[1].sub(p.N_ions).x.array[:] = p.phi_e_init
+            if p.MMS_test:
+                p.wh[0].sub(p.N_ions).interpolate(p.phi_i_init)    
+                p.wh[1].sub(p.N_ions).interpolate(p.phi_e_init)    
+            else:
+                p.wh[0].sub(p.N_ions).x.array[:] = p.phi_i_init
+                p.wh[1].sub(p.N_ions).x.array[:] = p.phi_e_init
 
             self.ksp.setType(self.ksp_type)
             pc = self.ksp.getPC()
@@ -290,11 +298,16 @@ class SolverKNPEMI(object):
 
             # Set up the variational form
             tic = time.perf_counter()
-            p.setup_variational_form()
             setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
 
             # Assemble system matrix and RHS vector
             tic = time.perf_counter()
+            # p.stim.interpolate(p.stim_expr)
+            # g_syn_fac = p.g_syn_bar * np.exp(-np.mod(float(p.t), 0.01) / p.a_syn.value)
+            # p.stim.x.array[:] = p.stim.x.array.copy() * g_syn_fac
+            # print(p.stim.x.array)
+            p.ionic_models[0].update_gating_variables()
+            # p.setup_variational_form()
             self.assemble()
 
             # Time the assembly
@@ -357,29 +370,19 @@ class SolverKNPEMI(object):
             # Extract sub-components of solution and store them in the solution functions wh
             with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(
                 x, [p.W[0].dofmap, p.W[1].dofmap], p.restriction
-            ) as ui_ue_wrapper:
-                for ui_ue_wrapper_local, component in zip(
-                    ui_ue_wrapper, (wh[0], wh[1])
-                ):
-                    with component.x.petsc_vec.localForm() as component_local:
-                        component_local[:] = ui_ue_wrapper_local
+                ) as ui_ue_wrapper:
+                    for ui_ue_wrapper_local, component in zip(
+                        ui_ue_wrapper, (wh[0], wh[1])
+                    ):
+                        with component.x.petsc_vec.localForm() as component_local:
+                            component_local[:] = ui_ue_wrapper_local
 
             # Update previous timestep values
-            p.u_p[0].x.array[:] = wh[
-                0
-            ].x.array.copy()  # Intracellular ions and potential
-            p.u_p[1].x.array[:] = wh[
-                1
-            ].x.array.copy()  # Extracellular ions and potential
-            phi_i_p.x.array[:] = (
-                wh[0].sub(p.N_ions).collapse().x.array.copy()
-            )  # Intracellular potential
-            phi_e_p.x.array[:] = (
-                wh[1].sub(p.N_ions).collapse().x.array.copy()
-            )  # Extracellular potential
-            p.phi_M_prev.x.array[:] = (
-                phi_i_p.x.array.copy() - phi_e_p.x.array.copy()
-            )  # Membrane potential
+            p.u_p[0].x.array[:] = wh[0].x.array.copy()  # Intracellular ions and potential
+            p.u_p[1].x.array[:] = wh[1].x.array.copy()  # Extracellular ions and potential
+            phi_i_p.x.array[:] = wh[0].sub(p.N_ions).collapse().x.array.copy()  # Intracellular potential
+            phi_e_p.x.array[:] = wh[1].sub(p.N_ions).collapse().x.array.copy()  # Extracellular potential
+            p.phi_M_prev.x.array[:] = phi_i_p.x.array.copy() - phi_e_p.x.array.copy()  # Membrane potential
 
             # Write output to file and save png
             if self.save_xdmfs and (i % self.save_interval == 0):
@@ -403,6 +406,9 @@ class SolverKNPEMI(object):
 
                 # Print solver info and problem info
                 self.print_info()
+
+            if self.problem.MMS_test:
+                self.problem.print_errors()
 
             if self.save_mat:
                 if self.problem.MMS_test:
@@ -631,7 +637,7 @@ class SolverKNPEMI(object):
         self.xdmf_file.close()
 
         # Run XDMF parser to restructure the data for better visualization
-        restructure_xdmf.run(self.output_filename)
+        # restructure_xdmf.run(self.output_filename)
 
         return
 

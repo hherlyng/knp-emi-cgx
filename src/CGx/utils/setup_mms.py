@@ -5,6 +5,7 @@ import numpy as np
 import dolfinx as dfx
 import sympy as sp
 
+from basix.ufl import element
 from CGx.utils.misc import mark_boundaries_cube_MMS, mark_boundaries_square_MMS
 from sympy.utilities.lambdify import lambdify
 
@@ -289,7 +290,7 @@ class SetupMMS:
             phi_M_e,
         ]
         var_exprs = [
-            SymPyToDOLFINxExpr([x, y], time, var_func, self.dim)
+            SymPyToDOLFINxExpr([x, y], t, time, var_func, self.dim)
             for var_func in var_sym_funcs
         ]
         var_dfx_funcs = [dfx.fem.Function(V) for _ in var_sym_funcs]
@@ -300,7 +301,7 @@ class SetupMMS:
 
         # Membrane flux
         JM_e_exprs = [
-            SymPyToDOLFINxExpr([x, y], time, JMe_func, self.dim) for JMe_func in JMe_i
+            SymPyToDOLFINxExpr([x, y], t, time, JMe_func, self.dim) for JMe_func in JMe_i
         ]
         JM_e = [dfx.fem.Function(V) for _ in range(len(JM_e_exprs))]
         [JM_e[i].interpolate(JM_e_exprs[i]) for i in range(len(JM_e_exprs))]
@@ -317,7 +318,7 @@ class SetupMMS:
             f_phi_e,
         ]
         source_exprs = [
-            SymPyToDOLFINxExpr([x, y], time, source_func, self.dim)
+            SymPyToDOLFINxExpr([x, y], t, time, source_func, self.dim)
             for source_func in source_sym_funcs
         ]
         source_dfx_funcs = [dfx.fem.Function(V) for _ in source_sym_funcs]
@@ -328,14 +329,14 @@ class SetupMMS:
 
         # source term membrane flux
         f_JM_exprs = [
-            SymPyToDOLFINxExpr([x, y], time, fJM_func, self.dim) for fJM_func in fJM
+            SymPyToDOLFINxExpr([x, y], t, time, fJM_func, self.dim) for fJM_func in fJM
         ]
         f_JM = [dfx.fem.Function(V) for _ in f_JM_exprs]
         [f_JM[i].interpolate(f_JM_exprs[i]) for i in range(len(f_JM_exprs))]
 
         # source term continuity coupling condition on gamma
         f_gM_exprs = [
-            SymPyToDOLFINxExpr([x, y], time, fgM_func, self.dim) for fgM_func in fgM
+            SymPyToDOLFINxExpr([x, y], t, time, fgM_func, self.dim) for fgM_func in fgM
         ]
         f_gM = [dfx.fem.Function(V) for _ in f_gM_exprs]
         [f_gM[i].interpolate(f_gM_exprs[i]) for i in range(len(f_gM_exprs))]
@@ -343,7 +344,7 @@ class SetupMMS:
         # initial conditions concentrations
         init_sym_funcs = [Na_i_e, Na_e_e, K_i_e, K_e_e, Cl_i_e, Cl_e_e, phi_M_e]
         init_exprs = [
-            SymPyToDOLFINxExpr([x, y], time, init_func, self.dim)
+            SymPyToDOLFINxExpr([x, y], t, time, init_func, self.dim)
             for init_func in init_sym_funcs
         ]
         init_dfx_funcs = [dfx.fem.Function(V) for _ in init_sym_funcs]
@@ -353,11 +354,11 @@ class SetupMMS:
         ]
 
         # exterior boundary terms
-        P1_vec = ufl.x.petsc_vecElement("Lagrange", self.mesh.ufl_cell(), degree=1)
+        P1_vec = element("Lagrange", self.mesh.basix_cell(), degree=1, shape=(self.dim,))
         V_vec = dfx.fem.functionspace(self.mesh, element=P1_vec)
         ext_sym_funcs = [J_Na_e, J_K_e, J_Cl_e]
         ext_exprs = [
-            SymPyToDOLFINxExpr([x, y], time, ext_func, self.dim)
+            SymPyToDOLFINxExpr([x, y], t, time, ext_func, self.dim)
             for ext_func in ext_sym_funcs
         ]
         ext_dfx_funcs = [dfx.fem.Function(V_vec) for _ in ext_sym_funcs]
@@ -367,7 +368,7 @@ class SetupMMS:
         # ion channel currents
         ion_ch_sym_funcs = [I_ch_Na, I_ch_K, I_ch_Cl]
         ion_ch_exprs = [
-            SymPyToDOLFINxExpr([x, y], time, ion_ch_func, self.dim)
+            SymPyToDOLFINxExpr([x, y], t, time, ion_ch_func, self.dim)
             for ion_ch_func in ion_ch_sym_funcs
         ]
         ion_ch_funcs = [dfx.fem.Function(V) for _ in ion_ch_sym_funcs]
@@ -634,9 +635,7 @@ class SetupMMS:
         ]
 
         # exterior boundary terms
-        import ufl
-
-        P1_vec = ufl.x.petsc_vecElement("Lagrange", self.mesh.ufl_cell(), degree=1)
+        P1_vec = element("Lagrange", self.mesh.basix_cell(), degree=1, shape=(self.dim,))
         V_vec = dfx.fem.functionspace(self.mesh, element=P1_vec)
         ext_sym_funcs = [J_Na_e, J_K_e, J_Cl_e]
         ext_exprs = [
@@ -705,10 +704,10 @@ class SetupMMS:
 
 # Class for converting symbolic SymPy functions to DOLFINx expressions
 class SymPyToDOLFINxExpr:
-    def __init__(self, x, time, sp_func, dim):
+    def __init__(self, x, t, time, sp_func, dim):
         self.time = time
         self.dim = dim
-        self.f = lambdify([x[0], x[1], time], sp_func)
+        self.f = lambdify([x[0], x[1], t], sp_func)
 
     def __call__(self, x):
         return self.f(x[0], x[1], self.time)

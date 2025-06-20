@@ -10,8 +10,8 @@ from petsc4py import PETSc
 
 
 # Stimulus
-def g_syn(g_syn_bar, a_syn, t: float) -> float:
-    g = g_syn_bar * np.exp(-np.mod(t, 0.01) / a_syn)
+def g_syn(g_syn_bar, a_syn, t: dfx.fem.Constant) -> float:
+    g = g_syn_bar * ufl.exp(-np.mod(float(t), 0.01) / a_syn)
     # g = g_syn_bar
     # g = lambda x: g_syn_bar*np.exp(-np.mod(t,0.01)/a_syn)*(x[2] < 5e-4)
     # g = lambda x: g_syn_bar*(x[0] < 0.3) * (x[1] < 0.3)
@@ -29,7 +29,6 @@ def f_Kir(K_e_init, K_e, EK_init, Dphi, phi_m):
     f = ufl.sqrt(K_e / K_e_init) * A * B / (C * D)
 
     return f
-
 
 #################################
 
@@ -74,6 +73,8 @@ class Null_model(IonicModel):
 
 # I_ch = phi_M
 class Passive_model(IonicModel):
+    def __init__(self, KNPEMIx_problem, tags=None):
+        super().__init__(KNPEMIx_problem, tags)
     def _init(self):
         pass
 
@@ -109,7 +110,7 @@ class Passive_Nerst_model(IonicModel):
 
         # stimulus
         if ion["name"] == "Na" and self.stimuls:
-            ion["g_k"] += g_syn(p.g_syn_bar, p.a_syn, float(p.t))
+            ion["g_k"] += g_syn(p.g_syn_bar, p.a_syn, p.t)
 
         I_ch = ion["g_k"] * (phi_M - ion["E"])
 
@@ -263,13 +264,16 @@ class HH_model(IonicModel):
         # aliases
         p = self.problem
         ion = p.ion_list[ion_idx]
-        phi_M = p.phi_M_prev
 
         assert ion["name"] == "Na", print(
             "Only Na can have a stimulus current in the Hodgkin-Huxley model."
         )
-
-        return g_syn(p.g_syn_bar, p.a_syn, float(p.t.value)) * (phi_M - ion["E"])
+        g_syn_fac = g_syn(p.g_syn_bar, p.a_syn, p.t)
+        # V = p.phi_M_prev.function_space
+        # stim = dfx.fem.Function(V)
+        # stim_expr = dfx.fem.Expression((p.phi_M_prev - ion["E"]), V.element.interpolation_points())
+        stim = g_syn_fac * (p.phi_M_prev - ion["E"])
+        return stim#, stim_expr
 
     def update_gating_variables(self):
         tic = time.perf_counter()
@@ -284,7 +288,7 @@ class HH_model(IonicModel):
         # Set membrane potential
         with phi_M_prev.x.petsc_vec.localForm() as loc_phi_M_prev:
             V_M = 1000 * (
-                loc_phi_M_prev[:] - self.problem.V_rest
+                loc_phi_M_prev[:] - self.problem.V_rest.value
             )  # convert phi_M to mV
 
         alpha_n = 0.01e3 * (10.0 - V_M) / (np.exp((10.0 - V_M) / 10.0) - 1.0)

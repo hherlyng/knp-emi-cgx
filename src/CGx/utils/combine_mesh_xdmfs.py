@@ -1,18 +1,17 @@
-import numpy   as np
 import dolfinx as dfx
 from mpi4py.MPI import COMM_WORLD as comm
 
-mesh_input_filename  = '../../../../GC_mesh/mesh.xdmf'
-facet_input_filename = '../../../../GC_mesh/GC_mesh_facets.xdmf'
-mesh_output_filename = '../../../../GC_mesh/dolfinx_GC_mesh.xdmf'
+mesh_input_filename  = '../KNPEMI/geometries/woudschoten/5m_5c/mesh.xdmf'
+facet_input_filename = '../KNPEMI/geometries/woudschoten/5m_5c/facets.xdmf'
+mesh_output_filename = '../KNPEMI/geometries/woudschoten/5m_5c/dolfinx_mesh.xdmf'
 
 print(f"Reading mesh with cell tags from {mesh_input_filename}.")
 print(f"Reading facet tags from {facet_input_filename}.")
 with dfx.io.XDMFFile(comm, mesh_input_filename, "r") as xdmf:
-    mesh = xdmf.read_mesh(name="Grid")
+    mesh = xdmf.read_mesh(name="mesh")
     mesh.topology.create_entities(mesh.topology.dim-1) # Create facets
     mesh.topology.create_entities(mesh.topology.dim-2) # Create edges
-    ct = xdmf.read_meshtags(mesh=mesh, name="Grid") # Read cell tags
+    ct = xdmf.read_meshtags(mesh=mesh, name="mesh") # Read cell tags
     ct.name = "ct"
 
 mesh.topology.create_connectivity(mesh.topology.dim-1, mesh.topology.dim)
