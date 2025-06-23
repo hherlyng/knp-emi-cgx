@@ -47,7 +47,7 @@ class SolverKNPEMI(object):
         
         # Clear system matrix and RHS vector values to avoid accumulation
         self.A.zeroEntries()
-        self.b.array[:] = 0
+        with self.b.localForm() as loc: loc.set(0.0)
 
         # Assemble system
         multiphenicsx.fem.petsc.assemble_matrix_block(self.A, p.a, bcs=p.bcs, restriction=(p.restriction, p.restriction)) # Assemble DOLFINx matrix

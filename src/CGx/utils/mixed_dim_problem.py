@@ -281,17 +281,17 @@ class MixedDimensionalProblem(ABC):
             with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
                 # Read mesh and cell tags
                 self.mesh = xdmf.read_mesh(ghost_mode=self.ghost_mode)
-                self.subdomains = xdmf.read_meshtags(self.mesh, name="ct")
+                self.subdomains = xdmf.read_meshtags(self.mesh, name="mesh")
                 self.subdomains.name = "ct"
 
             # Create facet entities, facet-to-cell connectivity and cell-to-cell connectivity
             self.mesh.topology.create_entities(self.mesh.topology.dim-1)
             self.mesh.topology.create_connectivity(self.mesh.topology.dim-1, self.mesh.topology.dim)
-            # self.mesh.topology.create_connectivity(self.mesh.topology.dim, self.mesh.topology.dim)
+            self.mesh.topology.create_connectivity(self.mesh.topology.dim, self.mesh.topology.dim)
 
             with dfx.io.XDMFFile(MPI.COMM_WORLD, ft_file, 'r') as xdmf:
                 # Read facet tags
-                self.boundaries = xdmf.read_meshtags(self.mesh, name="ft")
+                self.boundaries = xdmf.read_meshtags(self.mesh, name="mesh")
                 self.boundaries.name = "ft"      
             
             # Scale mesh
