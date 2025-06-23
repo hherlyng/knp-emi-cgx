@@ -83,7 +83,7 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 
 
 	# Create solver and solve
-	solver = SolverKNPEMI(problem, save_xdmfs=True, use_direct_solver=True, save_pngs=True, view_ksp=view_ksp)
+	solver = SolverKNPEMI(problem, save_xdmfs=True, use_direct_solver=False, save_pngs=True, view_ksp=view_ksp)
 	solver.solve()
 
 	phi_i = solver.problem.wh[0].sub(problem.N_ions)
