@@ -255,7 +255,7 @@ class SolverKNPEMI(object):
             print('t (ms) = ', 1000 * float(t.value))               
 
             # Set up the variational form
-            tic = time.perf_counter()
+            tic = time.perf_counter()   
             p.setup_variational_form()
             setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
 

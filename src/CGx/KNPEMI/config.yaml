@@ -6,7 +6,7 @@ output_dir : './output/'
 
 # Numerical parameters 
 dt : 0.00005 # Timestep size 
-time_steps : 10 # Number of timesteps
+time_steps : 30 # Number of timesteps
 T  : 50 # Simulation end time
 
 # Problem constants (in consistent units)

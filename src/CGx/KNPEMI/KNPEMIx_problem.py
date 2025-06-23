@@ -496,9 +496,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             vke = ve[idx]       # Test function
             ke_prev = ue_p.sub(idx) # Previous solution
 
-            p00 += dt * inner(Di*grad(ki), grad(vki)) * dxi + ki*vki*dxi
-            p11 += dt * inner(De*grad(ke), grad(vke)) * dxe + ke*vke*dxe
-
             # Add contribution to total current flux
             if use_block_jacobi:
                 Ji = - Di*z/psi * ki_prev*grad(phi_i)
