@@ -134,15 +134,15 @@ class SolverKNPEMI(object):
                     p.wh[0].sub(idx).interpolate(ion["ki_init"])
                     p.wh[1].sub(idx).interpolate(ion["ke_init"])
                 else:
-                    p.wh[0].sub(idx).x.array[sub_to_parent_i] = ion["ki_init"]
-                    p.wh[1].sub(idx).x.array[sub_to_parent_e] = ion["ke_init"]
+                    p.wh[0].sub(idx).x.array[sub_to_parent_i] = ion["ki_init"].value
+                    p.wh[1].sub(idx).x.array[sub_to_parent_e] = ion["ke_init"].value
 
             if p.MMS_test:
                 p.wh[0].sub(p.N_ions).interpolate(p.phi_i_init)    
                 p.wh[1].sub(p.N_ions).interpolate(p.phi_e_init)    
             else:
-                p.wh[0].sub(p.N_ions).x.array[:] = p.phi_i_init
-                p.wh[1].sub(p.N_ions).x.array[:] = p.phi_e_init
+                p.wh[0].sub(p.N_ions).x.array[:] = p.phi_i_init.value
+                p.wh[1].sub(p.N_ions).x.array[:] = p.phi_e_init.value
 
             self.ksp.setType(self.ksp_type)
             pc = self.ksp.getPC()
@@ -307,7 +307,7 @@ class SolverKNPEMI(object):
             # p.stim.x.array[:] = p.stim.x.array.copy() * g_syn_fac
             # print(p.stim.x.array)
             p.ionic_models[0].update_gating_variables()
-            # p.setup_variational_form()
+            p.setup_variational_form()
             self.assemble()
 
             # Time the assembly

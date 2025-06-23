@@ -164,9 +164,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         if self.MMS_test:
             # Create boundary integral measure
             ds = ufl.Measure("ds", domain=self.mesh, subdomain_data=self.boundaries)
-
-        for model in self.ionic_models:
-            model._init()
         
         # Trial and test functions
         (ui, vi) = ufl.TrialFunctions(self.W[0]), ufl.TestFunctions(self.W[0])
@@ -393,7 +390,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
         L = [L0, L1]
 
-        # Convert to C++ forms
+        # Compile C++ forms
         self.a = dfx.fem.form(a, jit_options=self.jit_parameters)
         self.L = dfx.fem.form(L, jit_options=self.jit_parameters)
         
@@ -454,9 +451,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             vke = ve[idx]       # Test function
             ke_prev = ue_p.sub(idx) # Previous solution
 
-            p00 += dt * inner(Di*grad(ki), grad(vki)) * dxi + ki*vki*dxi
-            p11 += dt * inner(De*grad(ke), grad(vke)) * dxe + ke*vke*dxe
-
             # Add contribution to total current flux
             if use_block_jacobi:
                 Ji = - Di*z/psi * ki_prev*grad(phi_i)
@@ -483,7 +477,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         P = [[p00, None],
              [None, p11]]
 
-        # Convert to C++ form
+        # Compile C++ form
         self.P = dfx.fem.form(P, jit_options=self.jit_parameters)
 
     def setup_MMS_params(self):

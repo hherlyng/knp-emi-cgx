@@ -202,7 +202,7 @@ class HH_model(IonicModel):
         p = self.problem
 
         # update gating variables
-        if np.isclose(float(p.t), 0):
+        if np.isclose(float(p.t.value), 0):
             G, _ = p.V.sub(p.N_ions).collapse()  # Gating function finite element space
             p.n = dfx.fem.Function(G)
             p.m = dfx.fem.Function(G)
