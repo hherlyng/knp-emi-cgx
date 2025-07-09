@@ -2,7 +2,7 @@
 problem_type : "KNP-EMI"
 
 # Input and output directorie
-input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/geometries/GC/'
+input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/geometries/GC/20m/100c/'
 output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/20m/100c/'
 
 # Numerical parameters 
@@ -19,9 +19,9 @@ physical_constants:
 C_M : 0.02 # membrane capacitance
 
 # Mesh and meshtags files 
-mesh_file      : "20m/100c/mesh.xdmf"
-cell_tag_file  : "20m/100c/mesh.xdmf"
-facet_tag_file : "20m/100c/facets.xdmf"
+mesh_file      : "mesh.xdmf"
+cell_tag_file  : "mesh.xdmf"
+facet_tag_file : "facets.xdmf"
 mesh_conversion_factor: 1e-9
 
 ics_tags  : [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,

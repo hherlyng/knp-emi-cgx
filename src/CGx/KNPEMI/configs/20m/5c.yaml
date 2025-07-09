@@ -2,7 +2,7 @@
 problem_type : "KNP-EMI"
 
 # Input and output directorie
-input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/geometries/GC/'
+input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/geometries/GC/20m/5c/'
 output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/20m/5c/'
 
 # Numerical parameters 
@@ -19,9 +19,9 @@ physical_constants:
 C_M : 0.02 # membrane capacitance
 
 # Mesh and meshtags files 
-mesh_file      : "20m/5c/mesh.xdmf"
-cell_tag_file  : "20m/5c/mesh.xdmf"
-facet_tag_file : "20m/5c/facets.xdmf"
+mesh_file      : "5c/mesh.xdmf"
+cell_tag_file  : "5c/mesh.xdmf"
+facet_tag_file : "5c/facets.xdmf"
 mesh_conversion_factor: 1e-9
 
 ics_tags  : [2, 3, 4, 5, 6] # Intracellular space cell tags
