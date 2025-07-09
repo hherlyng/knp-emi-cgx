@@ -1,13 +1,13 @@
-# KNP-EMI Config File using EMIx Grand Challenge meshes (meshes created by Marius Causemann)
+# KNP-EMI Config File
 problem_type : "KNP-EMI"
 
-# Input and output directories
-input_dir  : './geometries/GC/'
-output_dir : './output/GC/'
+# Input and output directorie
+input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/geometries/GC/20m/1000c/'
+output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/20m/1000c/'
 
 # Numerical parameters 
 dt : 0.00005 # Timestep size 
-time_steps : 100 # Number of timesteps
+time_steps : 500 # Number of timesteps
 #T  : 50 # Simulation end time
 
 # Problem constants (in consistent units)
@@ -19,17 +19,18 @@ physical_constants:
 C_M : 0.02 # membrane capacitance
 
 # Mesh and meshtags files 
-mesh_file      : "separated.xdmf"
-cell_tag_file  : "separated.xdmf"
-facet_tag_file : "separated_tags.xdmf"
+mesh_file      : "mesh.xdmf"
+cell_tag_file  : "mesh.xdmf"
+facet_tag_file : "facets.xdmf"
+mesh_conversion_factor: 1e-9
 
-mesh_conversion_factor : 1e-9
-
-ics_tags  : [2, 3, 4, 5, 6] # Intracellular space cell tags
+ics_tags  : !range [2, 1002] # Intracellular space cell tags 
 ecs_tags  : [1] # Extracellular space cell tags
-boundary_tags : [11, 12, 13, 14, 15, 16] # Boundary facet tags
-membrane_tags : [2, 3, 4, 5, 6] # Membrane (interface) facet tags
-stimulus_tags : [2, 5] # Membrane facet tags of the cells being stimulated
+boundary_tags : !range [10001, 11002] # Boundary facet tags
+membrane_tags : !range [2, 1002] # Membrane (interface) facet tags
+stimulus_tags : [] # Membrane facet tags of the cells being stimulated
+
+source_terms : "ion_injection"
 
 #ion_species:
 #  Na : 
@@ -54,7 +55,6 @@ stimulus_tags : [2, 5] # Membrane facet tags of the cells being stimulated
   #    # 5 : 0.7
 
 
-# boundary_conditions: []
 
 # ionic_membrane_models:
 #   5 : 

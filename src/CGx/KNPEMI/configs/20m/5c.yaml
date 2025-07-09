@@ -1,0 +1,67 @@
+# KNP-EMI Config File
+problem_type : "KNP-EMI"
+
+# Input and output directorie
+input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/geometries/GC/'
+output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/20m/5c/'
+
+# Numerical parameters 
+dt : 0.00005 # Timestep size 
+time_steps : 500 # Number of timesteps
+#T  : 50 # Simulation end time
+
+# Problem constants (in consistent units)
+physical_constants:
+  T : 300   # Temperature [K]
+  F : 96485 # Faraday constant [C/mol]
+  R : 8.314 # Gas constant [J/(K*mol)]
+
+C_M : 0.02 # membrane capacitance
+
+# Mesh and meshtags files 
+mesh_file      : "20m/5c/mesh.xdmf"
+cell_tag_file  : "20m/5c/mesh.xdmf"
+facet_tag_file : "20m/5c/facets.xdmf"
+mesh_conversion_factor: 1e-9
+
+ics_tags  : [2, 3, 4, 5, 6] # Intracellular space cell tags
+ecs_tags  : [1] # Extracellular space cell tags
+boundary_tags : [11, 12, 13, 14, 15, 16] # Boundary facet tags
+membrane_tags : [2, 3, 4, 5, 6] # Membrane (interface) facet tags
+stimulus_tags : [] # Membrane facet tags of the cells being stimulated
+
+source_terms : "ion_injection"
+
+#ion_species:
+#  Na : 
+  #   valence : 1
+  #   diffusivity : 0.2
+  #   #initial :     
+  #     ics : 0.4 # varying by ics/ecs
+  #     ecs : 0.8
+  #   #source: "t < 2 ? 2.1 : 0.0" # c expressions as in old fenics,
+  #                               # with access to x (spatial) and t for time
+
+  # K :
+  #   valence : 1
+  #   diffusivity : 0.2
+  #   initial : "input/concentration_K.xdmf" # read in from .xdmf file (map from cell to value)
+  # Cl :
+  #   valence : -1
+  #   diffusivity : 0.2
+  #   initial : 
+  #     ics : 0.4
+  #     ecs : 0.3
+  #    # 5 : 0.7
+
+
+
+# ionic_membrane_models:
+#   5 : 
+#     model: HH.ode
+#     parameters : 
+#       beta : 3.2
+#     stimuli:
+#       Na : 3.2
+#     initial_potential: 1
+#   "1-4" : "Leak" 

@@ -2,14 +2,16 @@ import os
 import ufl
 import time
 import yaml
+import pathlib
 import collections.abc
 
+import numpy   as np
 import dolfinx as dfx
 
 from abc            import ABC, abstractmethod
 from mpi4py         import MPI
 from petsc4py       import PETSc
-from CGx.utils.misc import flatten_list, mark_boundaries_cube_MMS, mark_boundaries_square_MMS, mark_subdomains_cube, mark_subdomains_square
+from CGx.utils.misc import flatten_list, mark_boundaries_cube_MMS, mark_boundaries_square_MMS, mark_subdomains_cube, mark_subdomains_square, range_constructor
 
 print = PETSc.Sys.Print
 
@@ -39,6 +41,7 @@ class MixedDimensionalProblem(ABC):
         self.init()
         self.setup_spaces()
         self.setup_boundary_conditions()
+        self.setup_source_terms()
 
         # Initialize time
         self.t  = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(0.0))
@@ -51,11 +54,13 @@ class MixedDimensionalProblem(ABC):
 
     def read_config_file(self, config_file: yaml.__file__):
         
+        yaml.add_constructor("!range", range_constructor)
+
         # Read input yaml file
         with open(config_file, 'r') as file:
             try:
                 # load config dictionary from .yaml file
-                config = yaml.safe_load(file)
+                config = yaml.load(file, Loader=yaml.FullLoader)
             except yaml.YAMLError as e:
                 print(e)
 
@@ -69,14 +74,8 @@ class MixedDimensionalProblem(ABC):
         if 'output_dir' in config:
             self.output_dir = config['output_dir']
             if not os.path.isdir(self.output_dir):
-                print('Output directory ' + self.output_dir + ' does not exist. Creating the directory in the current working directory.')
-                if self.output_dir.startswith('./'):
-                    os.mkdir(self.output_dir)
-                elif self.output_dir.startswith('/'):    
-                    os.mkdir('.' + self.output_dir)
-                else:
-                    os.mkdir('./' + self.output_dir)
-                
+                print('Output directory ' + self.output_dir + ' does not exist. Creating the directory .')
+                pathlib.Path(self.output_dir).mkdir(parents=True, exist_ok=True)
         else:
             # Set output directory to a new folder in current directory
             if not os.path.isdir('./output'): os.mkdir('./output')
@@ -115,7 +114,7 @@ class MixedDimensionalProblem(ABC):
         # Set mesh tags
         tags = dict()
         if 'ics_tags' in config:
-            tags['intra'] = config['ics_tags']            
+            tags['intra'] = config['ics_tags'] 
         else:
             raise RuntimeError('Provide ics_tags (intracellular space tags) field in input file.')
         
@@ -200,6 +199,9 @@ class MixedDimensionalProblem(ABC):
         else:
             if config['problem_type']=='KNP-EMI':
                 print('Using default ionic species: {Na, K, Cl}.')
+        
+        if 'source_terms' in config:
+            self.source_terms = config['source_terms']
 
     def parse_tags(self, tags: dict):
 
@@ -313,6 +315,102 @@ class MixedDimensionalProblem(ABC):
         # Integral measures for the domain
         self.dx = ufl.Measure("dx", domain=self.mesh, subdomain_data=self.subdomains) # Volume integral measure
         self.dS = ufl.Measure("dS", domain=self.mesh, subdomain_data=self.boundaries) # Facet integral measure
+
+        # Find the point on the first cell's membrane
+        # that lies closest to the center point of the mesh.
+        # The membrane potential will be measured in this point.
+        # First, calculate the center point of the mesh
+        xx, yy, zz = [self.mesh.geometry.x[:, i] for i in range(self.mesh.geometry.dim)]
+        x_c = (xx.max() + xx.min()) / 2
+        y_c = (yy.max() + yy.min()) / 2
+        z_c = (zz.max() + zz.min()) / 2
+        center_point = np.array([x_c, y_c, z_c])
+
+        # Find all membrane vertices of the cell
+        gamma_facets = self.boundaries.find(self.gamma_tags[0])
+        gamma_vertices = dfx.mesh.compute_incident_entities(
+                                                        self.mesh.topology,
+                                                        gamma_facets,
+                                                        self.mesh.topology.dim-1,
+                                                        0
+        )
+        gamma_vertices = np.unique(gamma_vertices)
+        gamma_coords = self.mesh.geometry.x[gamma_vertices]
+
+        # Find the vertex that lies closest to the center of the mesh
+        distances = np.sum((gamma_coords - center_point)**2, axis=1)
+        if len(distances)>0:
+            # Rank has points to evaluate
+            argmin_local = np.argmin(distances)
+            min_dist_local = distances[argmin_local]
+            min_vertex = gamma_vertices[argmin_local]
+        else:
+            # Set distance to infinity and placeholder vertex
+            min_dist_local = np.inf
+            min_vertex = -1
+        # Communicate to find the vertex with minimal distance
+        # from the center point
+        min_eval = (min_dist_local, self.comm.rank)
+        reduced = self.comm.allreduce(min_eval, op=MPI.MINLOC)
+        self.owner_rank_membrane_vertex = reduced[1]
+
+        if self.comm.rank==self.owner_rank_membrane_vertex:
+            # Set the measurement point
+            self.min_point = self.mesh.geometry.x[min_vertex]
+            print("Phi m measurement point: ", self.min_point)
+
+            # Find the cell that contains the vertex and store
+            # the owning process
+            bb_tree = dfx.geometry.bb_tree(self.mesh, self.mesh.topology.dim)
+            cell_candidates = dfx.geometry.compute_collisions_points(bb_tree, self.min_point)
+            colliding_cells = dfx.geometry.compute_colliding_cells(self.mesh, cell_candidates, self.min_point)
+            cc = colliding_cells.links(0)[0]
+            self.membrane_cell = np.array(cc)
+            
+
+        if self.source_terms=="ion_injection":
+            def injection_site_marker_function(x, tol=1e-14):
+            
+                lower_bound = lambda x, i, bound: x[i] >= bound - tol
+                upper_bound = lambda x, i, bound: x[i] <= bound + tol
+
+                return (
+                    lower_bound(x, 0, self.x_L)
+                    & lower_bound(x, 1, self.y_L)
+                    & lower_bound(x, 2, self.z_L)
+                    & upper_bound(x, 0, self.x_U)
+                    & upper_bound(x, 1, self.y_U)
+                    & upper_bound(x, 2, self.z_U)
+                )
+
+            # Initialize ion injection region 
+            delta = 1000*self.mesh_conversion_factor
+            self.x_L = (x_c - delta) 
+            self.y_L = (y_c - delta)
+            self.z_L = (z_c - delta)
+            self.x_U = (x_c + delta)
+            self.y_U = (y_c + delta)
+            self.z_U = (z_c + delta)
+
+            # Find injection site cells and compute the
+            # volume of that region
+            self.injection_cells  = dfx.mesh.locate_entities(self.mesh,
+                                                            self.mesh.topology.dim,
+                                                            injection_site_marker_function)
+            ct = dfx.mesh.meshtags(self.mesh,
+                                self.mesh.topology.dim,
+                                self.injection_cells,
+                                np.full_like(self.injection_cells, 1, dtype=np.int32)
+                                )
+            self.dx_inj = ufl.Measure("dx", domain=self.mesh, subdomain_data=ct)
+            self.injection_volume = self.comm.allreduce(
+                                        dfx.fem.assemble_scalar(
+                                            dfx.fem.form(
+                                                1.0 * self.dx_inj(1)
+                                            )
+                                        ), 
+                                        op=MPI.SUM
+                                    )
     
     @abstractmethod
     def init(self):
@@ -326,5 +424,10 @@ class MixedDimensionalProblem(ABC):
 
     @abstractmethod
     def setup_boundary_conditions(self):
+        # Abstract method that must be implemented by concrete subclasses.
+        pass
+    
+    @abstractmethod
+    def setup_source_terms(self):
         # Abstract method that must be implemented by concrete subclasses.
         pass

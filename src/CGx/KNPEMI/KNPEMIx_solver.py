@@ -404,45 +404,24 @@ class SolverKNPEMI(object):
         """
 
         p = self.problem # For ease of notation
-
-        phi_M_space = p.phi_M_prev.function_space # Membrane electric potential
         
-        # Get indices of the membrane (gamma) facets that are being stimulated
-        if len(p.stimulus_tags) > 1:
-            # Not all cells are stimulated
-            list_of_indices = [p.boundaries.find(tag) for tag in p.stimulus_tags]
-            facets_gamma = np.array([], dtype=np.int32)
-            for  l in list_of_indices:
-                facets_gamma = np.concatenate((facets_gamma, l))
-        elif len(p.gamma_tags) > 1:
-            list_of_indices = [p.boundaries.find(tag) for tag in p.gamma_tags]
-            facets_gamma = np.array([], dtype=np.int32)
-            for l in list_of_indices:
-                facets_gamma = np.concatenate((facets_gamma, l))
-        else:
-            facets_gamma = p.boundaries.values==p.gamma_tags[0]
-        dofs_gamma   = dfx.fem.locate_dofs_topological(phi_M_space, p.mesh.topology.dim-1, facets_gamma) # The dofs of the gamma facets that are being stimulated 
-        self.point_to_plot = dofs_gamma[0] # Choose one of the dofs as the point for plotting the membrane potential 
-        
-        self.v_t = []
-        self.v_t.append(1000 * p.phi_M_prev.x.array[self.point_to_plot]) # Converted to mV
         self.out_v_string = self.out_file_prefix + 'v.png'
-
+        self.v_t = []
         if hasattr(p, 'n'):
             # Gating variables are a part of the problem
             self.n_t = []
             self.m_t = []
             self.h_t = []
-
-            with p.n.x.petsc_vec.localForm() as local_n, \
-                 p.m.x.petsc_vec.localForm() as local_m, \
-                 p.h.x.petsc_vec.localForm() as local_h:
-            
-                self.n_t.append(local_n[self.point_to_plot])
-                self.m_t.append(local_m[self.point_to_plot])
-                self.h_t.append(local_h[self.point_to_plot])
-
             self.out_gate_string = self.out_file_prefix + 'gating.png'
+
+        if self.comm.rank==p.owner_rank_membrane_vertex:
+            self.v_t.append(1000 * p.phi_M_prev.eval(x=p.min_point, cells=p.membrane_cell)) # Converted to mV
+
+            if hasattr(p, 'n'):
+                self.n_t.append(p.n.eval(x=p.min_point, cells=p.membrane_cell))
+                self.m_t.append(p.m.eval(x=p.min_point, cells=p.membrane_cell))
+                self.h_t.append(p.h.eval(x=p.min_point, cells=p.membrane_cell))
+
             
     def save_png(self):
         """ Save data for the .png output of the membrane electric potential, and the gating variables if 
@@ -450,13 +429,13 @@ class SolverKNPEMI(object):
 
         p = self.problem
 
-        self.v_t.append(1000 * p.phi_M_prev.x.array[self.point_to_plot]) # Converted to mV
-        
-        if hasattr(p, 'n'):
-            with p.n.x.petsc_vec.localForm() as local_n, p.m.x.petsc_vec.localForm() as local_m, p.h.x.petsc_vec.localForm() as local_h:
-                self.n_t.append(local_n[self.point_to_plot])
-                self.m_t.append(local_m[self.point_to_plot])
-                self.h_t.append(local_h[self.point_to_plot])
+        if self.comm.rank==p.owner_rank_membrane_vertex:
+            self.v_t.append(1000 * p.phi_M_prev.eval(x=p.min_point, cells=p.membrane_cell)) # Converted to mV
+            
+            if hasattr(p, 'n'):
+                self.n_t.append(p.n.eval(x=p.min_point, cells=p.membrane_cell))
+                self.m_t.append(p.m.eval(x=p.min_point, cells=p.membrane_cell))
+                self.h_t.append(p.h.eval(x=p.min_point, cells=p.membrane_cell))
 
     def print_figures(self):
         """ Output .png plot of:
@@ -469,26 +448,27 @@ class SolverKNPEMI(object):
 
         """
 
-        # Aliases
-        dt = float(self.problem.dt.value)
-        time_steps = self.time_steps
+        if self.comm.rank==self.problem.owner_rank_membrane_vertex:
+            # Aliases
+            dt = float(self.problem.dt.value)
+            time_steps = self.time_steps
 
-        # Save plot of membrane potential
-        plt.figure(0)        
-        plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.v_t)
-        plt.xlabel('Time (ms)')
-        plt.ylabel('Membrane potential (mV)')
-        plt.savefig(self.out_v_string)
-
-		# save plot of gating variables
-        if hasattr(self.problem, 'n'):
-            plt.figure(1)
-            plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.n_t, label='n')
-            plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.m_t, label='m')
-            plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.h_t, label='h')
-            plt.legend()
+            # Save plot of membrane potential
+            plt.figure(0)        
+            plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.v_t)
             plt.xlabel('Time (ms)')
-            plt.savefig(self.out_gate_string)
+            plt.ylabel('Membrane potential (mV)')
+            plt.savefig(self.out_v_string)
+
+            # save plot of gating variables
+            if hasattr(self.problem, 'n'):
+                plt.figure(1)
+                plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.n_t, label='n')
+                plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.m_t, label='m')
+                plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.h_t, label='h')
+                plt.legend()
+                plt.xlabel('Time (ms)')
+                plt.savefig(self.out_gate_string)
 
         # Save iteration history
         if not self.direct_solver:
@@ -551,7 +531,7 @@ class SolverKNPEMI(object):
         self.xdmf_file.close()
         
         # Run XDMF parser to restructure the data for better visualization
-        restructure_xdmf.run(self.output_filename)
+        # restructure_xdmf.run(self.output_filename)
 
         return
     

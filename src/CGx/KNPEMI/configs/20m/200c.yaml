@@ -1,0 +1,33 @@
+# KNP-EMI Config File
+problem_type : "KNP-EMI"
+
+# Input and output directorie
+input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/geometries/GC/5m/200c/'
+output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/5m/200c/'
+
+# Numerical parameters 
+dt : 0.00005 # Timestep size 
+time_steps : 500 # Number of timesteps
+#T  : 50 # Simulation end time
+
+# Problem constants (in consistent units)
+physical_constants:
+  T : 300   # Temperature [K]
+  F : 96485 # Faraday constant [C/mol]
+  R : 8.314 # Gas constant [J/(K*mol)]
+
+C_M : 0.02 # membrane capacitance
+
+# Mesh and meshtags files 
+mesh_file      : "mesh.xdmf"
+cell_tag_file  : "mesh.xdmf"
+facet_tag_file : "facets.xdmf"
+mesh_conversion_factor: 1e-9
+
+ics_tags  : !range [2, 202]  # Intracellular space cell tags
+ecs_tags  : [1] # Extracellular space cell tags
+boundary_tags : !range [1001, 2002]  # Boundary facet tags
+membrane_tags : !range [2, 202] # Membrane (interface) facet tags
+stimulus_tags : [] # Membrane facet tags of the cells being stimulated
+
+source_terms : "ion_injection"

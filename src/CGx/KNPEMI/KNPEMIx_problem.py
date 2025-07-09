@@ -117,6 +117,25 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
         self.bcs = bce
 
+    def setup_source_terms(self):
+        """ Initialize source term functions. """
+
+        Ve_K,  _ = self.W[1].sub(1).collapse()
+        Ve_Cl, _ = self.W[1].sub(2).collapse()
+        f_e_K  = dfx.fem.Function(Ve_K)
+        f_e_Cl = dfx.fem.Function(Ve_Cl)
+        
+        injection_dofs_K  = dfx.fem.locate_dofs_topological(Ve_K,  self.mesh.topology.dim, self.injection_cells)
+        injection_dofs_Cl = dfx.fem.locate_dofs_topological(Ve_Cl, self.mesh.topology.dim, self.injection_cells)
+        vol = self.injection_volume
+        I = 5e-9 # Iontophoresis current of 5 nA
+        mol_rate = I / (1*self.F) # [mol/s]
+        src_term = mol_rate / vol # [mol/L/s = M/s]
+        f_e_K.x.array[injection_dofs_K]   = src_term
+        f_e_Cl.x.array[injection_dofs_Cl] = src_term
+
+        self.ion_list[1]['f_e'] = f_e_K
+        self.ion_list[2]['f_e'] = f_e_Cl
 
     def setup_constants(self, dt: float):
         """ Initialize constants as dolfinx.fem.Constant objects to reduce total compilation time. """
@@ -381,9 +400,9 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             J_phi_e += z*Je
 
             # Source terms
-            L0 += inner(ion['f_i'], vki) * dxi
-            L1 += inner(ion['f_e'], vke) * dxe
-            
+            L0 += dt * inner(ion['f_i'], vki) * dxi
+            L1 += dt * inner(ion['f_e'], vke) * dxe
+
             if self.MMS_test:
                 # Define outward normal on exterior boundary (\partial\Omega)
                 n_outer = ufl.FacetNormal(self.mesh)
