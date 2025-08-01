@@ -60,13 +60,19 @@ def main_yaml(yaml_file="config.yaml", view_input=None):
 	
 	problem = ProblemKNPEMI(yaml_file)
 
+	# Set ionic models
 	HH = HH_model(problem)
 	ionic_models = [HH]
 
 	problem.init_ionic_model(ionic_models)
 
 	# Create solver and solve
-	solver = SolverKNPEMI(problem, view_input=view_input, save_xdmfs=True, use_direct_solver=False, save_pngs=True)
+	solver = SolverKNPEMI(problem,
+						  view_input=view_input,
+						  save_xdmfs=True,
+						  use_direct_solver=False,
+						  save_pngs=True,
+						  save_cpoints=True)
 	solver.solve()
 
 	phi_i = solver.problem.wh[0].sub(problem.N_ions)

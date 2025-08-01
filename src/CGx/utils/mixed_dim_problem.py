@@ -13,6 +13,7 @@ from mpi4py         import MPI
 from petsc4py       import PETSc
 from CGx.utils.misc import flatten_list, mark_boundaries_cube_MMS, mark_boundaries_square_MMS, mark_subdomains_cube, mark_subdomains_square, range_constructor
 
+pprint = print
 print = PETSc.Sys.Print
 
 class MixedDimensionalProblem(ABC):
@@ -54,7 +55,7 @@ class MixedDimensionalProblem(ABC):
 
     def read_config_file(self, config_file: yaml.__file__):
         
-        yaml.add_constructor("!range", range_constructor)
+        yaml.add_constructor("!range", range_constructor) # Add reading range of cell tags
 
         # Read input yaml file
         with open(config_file, 'r') as file:
@@ -256,7 +257,8 @@ class MixedDimensionalProblem(ABC):
     
         # Check that all intracellular space tags are present in some ionic model
         for model in self.ionic_models:
-            ionic_tags.append(model.tags)
+            for tag in model.tags:
+                ionic_tags.append(tag)
         
         ionic_tags = sorted(flatten_list(ionic_tags))
         gamma_tags = sorted(flatten_list([self.gamma_tags]))
@@ -321,13 +323,19 @@ class MixedDimensionalProblem(ABC):
         # The membrane potential will be measured in this point.
         # First, calculate the center point of the mesh
         xx, yy, zz = [self.mesh.geometry.x[:, i] for i in range(self.mesh.geometry.dim)]
-        x_c = (xx.max() + xx.min()) / 2
-        y_c = (yy.max() + yy.min()) / 2
-        z_c = (zz.max() + zz.min()) / 2
-        center_point = np.array([x_c, y_c, z_c])
+        x_min = self.comm.allreduce(xx.min(), op=MPI.MIN)
+        x_max = self.comm.allreduce(xx.max(), op=MPI.MAX)
+        y_min = self.comm.allreduce(yy.min(), op=MPI.MIN)
+        y_max = self.comm.allreduce(yy.max(), op=MPI.MAX)
+        z_min = self.comm.allreduce(zz.min(), op=MPI.MIN)
+        z_max = self.comm.allreduce(zz.max(), op=MPI.MAX)
+        x_c = (x_max + x_min) / 2
+        y_c = (y_max + y_min) / 2
+        z_c = (z_max + z_min) / 2
+        mesh_center = np.array([x_c, y_c, z_c])
 
         # Find all membrane vertices of the cell
-        gamma_facets = self.boundaries.find(self.gamma_tags[0])
+        gamma_facets = self.boundaries.find(self.gamma_tags[-1]) # Always take the tag of the largest cell
         gamma_vertices = dfx.mesh.compute_incident_entities(
                                                         self.mesh.topology,
                                                         gamma_facets,
@@ -337,8 +345,8 @@ class MixedDimensionalProblem(ABC):
         gamma_vertices = np.unique(gamma_vertices)
         gamma_coords = self.mesh.geometry.x[gamma_vertices]
 
-        # Find the vertex that lies closest to the center of the mesh
-        distances = np.sum((gamma_coords - center_point)**2, axis=1)
+        # Find the vertex that lies closest to the cell's centroid
+        distances = np.sum((gamma_coords - mesh_center)**2, axis=1)
         if len(distances)>0:
             # Rank has points to evaluate
             argmin_local = np.argmin(distances)
@@ -357,7 +365,7 @@ class MixedDimensionalProblem(ABC):
         if self.comm.rank==self.owner_rank_membrane_vertex:
             # Set the measurement point
             self.min_point = self.mesh.geometry.x[min_vertex]
-            print("Phi m measurement point: ", self.min_point)
+            pprint("Phi m measurement point: ", self.min_point, flush=True)
 
             # Find the cell that contains the vertex and store
             # the owning process

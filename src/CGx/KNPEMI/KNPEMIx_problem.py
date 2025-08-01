@@ -49,6 +49,23 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         self.u_p[0].name = "intra"
         self.u_p[1].name = "extra"
 
+        # Setup checkpoint output files
+        self.u_out_i = []
+        self.u_out_e = []
+        for idx, ion in enumerate(self.ion_list):
+            intra_func = self.u_p[0].sub(idx).collapse()
+            intra_func.name = f"{ion["name"]}_i"
+            self.u_out_i.append(intra_func)
+            extra_func = self.u_p[1].sub(idx).collapse()
+            extra_func.name = f"{ion["name"]}_e"
+            self.u_out_e.append(extra_func)
+        phi_i = self.u_p[0].sub(self.N_ions).collapse()
+        phi_i.name = "phi_i"
+        self.u_out_i.append(phi_i)
+        phi_e = self.u_p[1].sub(self.N_ions).collapse()
+        phi_e.name = "phi_e"
+        self.u_out_e.append(phi_e)
+
         print("Creating mesh restrictions ...")
 
         ### Restrictions
@@ -128,7 +145,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         injection_dofs_K  = dfx.fem.locate_dofs_topological(Ve_K,  self.mesh.topology.dim, self.injection_cells)
         injection_dofs_Cl = dfx.fem.locate_dofs_topological(Ve_Cl, self.mesh.topology.dim, self.injection_cells)
         vol = self.injection_volume
-        I = 5e-9 # Iontophoresis current of 5 nA
+        I = 5e-9 # Ion injection current of 5 nA
         mol_rate = I / (1*self.F) # [mol/s]
         src_term = mol_rate / vol # [mol/L/s = M/s]
         f_e_K.x.array[injection_dofs_K]   = src_term
@@ -521,7 +538,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                 Je = - De*z/psi * ke_prev*grad(phi_e)
             else:
                 Ji = - Di*grad(ki) - Di*z/psi * ki_prev*grad(phi_i)
-                Je = - De*grad(ke) - De*z/psi * ki_prev*grad(phi_e)
+                Je = - De*grad(ke) - De*z/psi * ke_prev*grad(phi_e)
             
             # Add contribution to total flux
             J_phi_i += z*Ji
@@ -789,9 +806,9 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     Cl_i_f = 0.0
 
     # Ion dictionaries and list
-    Na = {'g_leak':g_Na_leak, 'Di':D_Na, 'De':D_Na, 'ki_init':Na_i_init, 'ke_init':Na_e_init, 'z':1.0,  'f_e': Na_e_f, 'f_i':Na_i_f, 'name':'Na', 'rho_p': 3*rho_pump}
-    K  = {'g_leak':g_K_leak,  'Di':D_K,  'De':D_K,  'ki_init':K_i_init,  'ke_init':K_e_init,  'z':1.0,  'f_e': K_e_f,  'f_i':K_i_f,  'name':'K' , 'rho_p':-2*rho_pump}
-    Cl = {'g_leak':g_Cl_leak, 'Di':D_Cl, 'De':D_Cl, 'ki_init':Cl_i_init, 'ke_init':Cl_e_init, 'z':-1.0, 'f_e': Cl_e_f, 'f_i':Cl_i_f, 'name':'Cl', 'rho_p':0.0}
+    Na = {'g_leak':g_Na_leak, 'Di':D_Na, 'De':D_Na, 'ki_init':Na_i_init, 'ke_init':Na_e_init, 'z':1.0,  'f_e': Na_e_f, 'f_i':Na_i_f, 'name':'Na'}
+    K  = {'g_leak':g_K_leak,  'Di':D_K,  'De':D_K,  'ki_init':K_i_init,  'ke_init':K_e_init,  'z':1.0,  'f_e': K_e_f,  'f_i':K_i_f,  'name':'K' }
+    Cl = {'g_leak':g_Cl_leak, 'Di':D_Cl, 'De':D_Cl, 'ki_init':Cl_i_init, 'ke_init':Cl_e_init, 'z':-1.0, 'f_e': Cl_e_f, 'f_i':Cl_i_f, 'name':'Cl'}
     ion_list = [Na, K, Cl]
     N_ions   = len(ion_list) 
 

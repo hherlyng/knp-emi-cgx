@@ -63,8 +63,8 @@ boundary_tags : [1001, 1002, 1003, 1004, 1005, 1106, 1007, 1008, 1009, 1010,
                  1161, 1162, 1163, 1164, 1165, 1166, 1167, 1168, 1169, 1170,
                  1171, 1172, 1173, 1174, 1175, 1176, 1177, 1178, 1179, 1180,
                  1181, 1182, 1183, 1184, 1185, 1186, 1187, 1188, 1189, 1190,
-                 1191, 1192, 1193, 1194, 1195, 1196, 1197, 1198, 1199, 2000,
-                 2001] # Boundary facet tags
+                 1191, 1192, 1193, 1194, 1195, 1196, 1197, 1198, 1199, 1200,
+                 1201] # Boundary facet tags
 membrane_tags : [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
                  16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
                  28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
@@ -87,37 +87,3 @@ membrane_tags : [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
 stimulus_tags : [] # Membrane facet tags of the cells being stimulated
 
 source_terms : "ion_injection"
-
-#ion_species:
-#  Na : 
-  #   valence : 1
-  #   diffusivity : 0.2
-  #   #initial :     
-  #     ics : 0.4 # varying by ics/ecs
-  #     ecs : 0.8
-  #   #source: "t < 2 ? 2.1 : 0.0" # c expressions as in old fenics,
-  #                               # with access to x (spatial) and t for time
-
-  # K :
-  #   valence : 1
-  #   diffusivity : 0.2
-  #   initial : "input/concentration_K.xdmf" # read in from .xdmf file (map from cell to value)
-  # Cl :
-  #   valence : -1
-  #   diffusivity : 0.2
-  #   initial : 
-  #     ics : 0.4
-  #     ecs : 0.3
-  #    # 5 : 0.7
-
-
-
-# ionic_membrane_models:
-#   5 : 
-#     model: HH.ode
-#     parameters : 
-#       beta : 3.2
-#     stimuli:
-#       Na : 3.2
-#     initial_potential: 1
-#   "1-4" : "Leak" 

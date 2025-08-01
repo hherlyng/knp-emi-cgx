@@ -86,14 +86,14 @@ class Passive_model(IonicModel):
 		return I_ch
 
 
-# I_ch = g*(phi_M - E) + stimuls
-class Passive_Nerst_model(IonicModel):
+# I_ch = g*(phi_M - E) + stimulus
+class Passive_Nernst_model(IonicModel):
 
-	def __init__(self, KNPEMIx_problem, tags=None, stimuls=True):
+	def __init__(self, KNPEMIx_problem, tags=None, stimulus=True):
 
 		super().__init__(KNPEMIx_problem, tags)
 
-		self.stimuls = stimuls
+		self.stimulus = stimulus
 
 	def __str__(self):
 		return f'Passive'
@@ -112,7 +112,7 @@ class Passive_Nerst_model(IonicModel):
 		ion['g_k'] = ion['g_leak']
 
 		# stimulus
-		if ion['name'] == 'Na' and self.stimuls:
+		if ion['name'] == 'Na' and self.stimulus:
 			ion['g_k'] += g_syn(p.g_syn_bar, p.a_syn, float(p.t)) 
 
 		I_ch = ion['g_k']*(phi_M - ion['E'])
@@ -122,72 +122,89 @@ class Passive_Nerst_model(IonicModel):
 
 # Ionic K pump
 class Passive_K_pump_model(IonicModel):
+    """ Written by Pietro Benedusi. """
 
-	# -k_dec * ([K]e − [K]e_0) both for K and Na
-	use_decay_currents = False			
+    # potassium buffering parameters
+    rho_pump = 1.115e-6	# Maximum pump rate (mol/m**2 s)
+    P_Nai = 10          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
+    P_Ke  = 1.5         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
+    k_dec = 2.9e-8		# Decay factor for [K+]e (m/s)
 
-	def __str__(self):
-		if self.use_decay_currents:
-			return f'Passive with K pump and decay currents'
-		else:
-			return f'Passive with K pump'
+    # -k_dec * ([K]e − [K]e_0) both for K and Na
+    use_decay_currents = False
 
-
-	def _init(self):
-
-		# aliases		
-		p = self.problem
-
-		ui_p  = p.u_p[0]
-		ue_p  = p.u_p[1]
-		P_Nai = p.P_Nai
-		P_Ke  = p.P_Ke
-
-		self.pump_coeff = ui_p.sub(0)**1.5/(ui_p.sub(0)**1.5 + P_Nai**1.5) * (ue_p.sub(1)/(ue_p.sub(1) + P_Ke))			
-		
-
-	def _eval(self, ion_idx):
-
-		# aliases		
-		p = self.problem
-		
-		phi_M = p.phi_M_prev		
-		ue_p  = p.u_p[1]
-		F     = p.F
-		ion   = p.ion_list[ion_idx]
-		z     = ion['z' ]
-		K_e_init = p.K_e_init
-
-		# leak currents
-		ion['g_k'] = ion['g_leak']
-			
-		# f kir coeff	
-		if ion['name'] == 'K':
-
-			EK_init = (p.psi/z)*ufl.ln(K_e_init/p.K_i_init)			
-			Dphi  = phi_M - ion['E']
-			f_kir = f_Kir(K_e_init, ue_p.sub(ion_idx), EK_init, Dphi, phi_M)
-
-		else:
-			f_kir = 1
-
-		I_ch = f_kir*ion['g_k']*(phi_M - ion['E']) + F*z*ion['rho_p']*self.pump_coeff
-
-		if self.use_decay_currents:
-			if ion['name'] == 'K' or ion['name'] == 'Na':
-				I_ch -= F*z*p.k_dec*(ue_p.sub(1) - K_e_init)  
-		
-		return I_ch
-
-
-# Hodgkin–Huxley + stimuls
-class HH_model(IonicModel):
-
-    def __init__(self, KNPEMIx_problem, tags=None, stimuls: bool=True, use_Rush_Lar: bool=True, time_steps_ODE: int=25):
+    def __init__(self, KNPEMIx_problem, tags=None):
 
         super().__init__(KNPEMIx_problem, tags)
 
-        self.stimuls = stimuls
+        # init pump constants
+        for ion in self.problem.ion_list:
+            if ion['name'] == 'Na':
+                ion['rho_p'] =  3 * self.rho_pump
+            elif ion['name'] == 'K':
+                ion['rho_p'] = -2 * self.rho_pump
+            elif ion['name'] == 'Cl':
+                ion['rho_p'] = 0.0			
+
+    def __str__(self):
+        if self.use_decay_currents:
+            return f'Passive with K pump and decay currents'
+        else:
+            return f'Passive with K pump'
+
+
+    def _init(self):
+
+        # aliases		
+        p = self.problem
+
+        ui_p  = p.u_p[0]
+        ue_p  = p.u_p[1]
+
+        self.pump_coeff = ui_p.sub(0)**1.5/(ui_p.sub(0)**1.5 + self.P_Nai**1.5) * (ue_p.sub(1)/(ue_p.sub(1) + self.P_Ke))			
+        
+
+    def _eval(self, ion_idx):
+
+        # aliases		
+        p = self.problem
+        
+        phi_M = p.phi_M_prev		
+        ue_p  = p.u_p[1]
+        F     = p.F
+        ion   = p.ion_list[ion_idx]
+        z     = ion['z']
+
+        # leak currents
+        ion['g_k'] = ion['g_leak']
+            
+        # f kir coeff	
+        if ion['name'] == 'K':
+
+            EK_init = (p.psi/z)*ufl.ln(p.K_e_init/p.K_i_init)			
+            Dphi  = phi_M - ion['E']
+            f_kir = f_Kir(p.K_e_init, ue_p.sub(ion_idx), EK_init, Dphi, phi_M)
+
+        else:
+            f_kir = 1
+
+        I_ch = f_kir*ion['g_k']*(phi_M - ion['E']) + F*z*ion['rho_p']*self.pump_coeff
+
+        if self.use_decay_currents:
+            if ion['name'] == 'K' or ion['name'] == 'Na':
+                I_ch -= F*z*self.k_dec*(ue_p.sub(1) - p.K_e_init)  
+        
+        return I_ch
+
+
+# Hodgkin–Huxley + stimulus
+class HH_model(IonicModel):
+
+    def __init__(self, KNPEMIx_problem, tags=None, stimulus: bool=True, use_Rush_Lar: bool=True, time_steps_ODE: int=25):
+
+        super().__init__(KNPEMIx_problem, tags)
+
+        self.stimulus = stimulus
         self.use_Rush_Lar = use_Rush_Lar
         self.time_steps_ODE = time_steps_ODE
 

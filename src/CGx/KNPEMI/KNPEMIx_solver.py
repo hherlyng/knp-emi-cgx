@@ -4,6 +4,7 @@ import multiphenicsx.fem.petsc
 
 import numpy             as np
 import dolfinx           as dfx
+import adios4dolfinx     as a4d
 import matplotlib.pyplot as plt
 
 from mpi4py         import MPI
@@ -17,7 +18,8 @@ print = PETSc.Sys.Print # Enables printing only on rank 0 when running in parall
 class SolverKNPEMI(object):
 
     def __init__(self, problem: ProblemKNPEMI, view_input, use_direct_solver: bool=True,
-                 save_xdmfs: bool=False, save_pngs: bool=False, save_mat: bool=False):
+                 save_xdmfs: bool=False, save_pngs: bool=False, save_cpoints: bool=False,
+                 save_mat: bool=False):
         """ Constructor. """
 
         self.problem    = problem                 # The KNP-EMI problem
@@ -26,6 +28,7 @@ class SolverKNPEMI(object):
         self.direct_solver = use_direct_solver    # Set direct solver/iterative solver option
         self.save_xdmfs = save_xdmfs              # Option to save .xdmf output 
         self.save_pngs  = save_pngs               # Option to save .png  output
+        self.save_cpoints = save_cpoints
         self.save_mat   = save_mat                # Option to save the system matrix
         self.out_file_prefix = problem.output_dir # The output file directory
         self.view_input = view_input
@@ -36,6 +39,7 @@ class SolverKNPEMI(object):
         # Initialize output files
         if save_xdmfs : self.init_xdmf_savefile()
         if save_pngs  : self.init_png_savefile()
+        if save_cpoints : self.init_checkpoint_file()
 
         # Perform only a single timestep when saving system matrix
         if self.save_mat: self.time_steps = 1
@@ -59,7 +63,7 @@ class SolverKNPEMI(object):
         """ Assemble the preconditioner matrix. """
         
         p = self.problem # For ease of notation
-
+        print("Assembling preconditioner ...")
         if not p.dirichlet_bcs:
             P_assembled = multiphenicsx.fem.petsc.assemble_matrix_block(p.P, bcs=[], restriction=(p.restriction, p.restriction))
         else:
@@ -119,44 +123,54 @@ class SolverKNPEMI(object):
 
             if self.pc_type=="fieldsplit":
 
-                # aliases
-                Wi = p.W[0]
-                We = p.W[1]
+                # # aliases
+                # Wi = p.W[0]
+                # We = p.W[1]
 
-                is0 = PETSc.IS().createGeneral(Wi.sub(0).dofmap.list)
-                is1 = PETSc.IS().createGeneral(Wi.sub(1).dofmap.list)
-                is2 = PETSc.IS().createGeneral(Wi.sub(2).dofmap.list)
-                is3 = PETSc.IS().createGeneral(Wi.sub(3).dofmap.list)
-                is4 = PETSc.IS().createGeneral(We.sub(0).dofmap.list)
-                is5 = PETSc.IS().createGeneral(We.sub(1).dofmap.list)
-                is6 = PETSc.IS().createGeneral(We.sub(2).dofmap.list)
-                is7 = PETSc.IS().createGeneral(We.sub(3).dofmap.list)
+                # # Collapse subspaces to get dofmaps
+                # _, Wi0_to_Wi = Wi.sub(0).collapse()
+                # _, Wi1_to_Wi = Wi.sub(1).collapse()
+                # _, Wi2_to_Wi = Wi.sub(2).collapse()
+                # _, Wi3_to_Wi = Wi.sub(3).collapse()
+                # _, We0_to_We = We.sub(0).collapse()
+                # _, We1_to_We = We.sub(1).collapse()
+                # _, We2_to_We = We.sub(2).collapse()
+                # _, We3_to_We = We.sub(3).collapse()
 
-                fields = [('0', is0), ('1', is1), ('2', is2), ('3', is3),('4', is4), ('5', is5),('6', is6), ('7', is7)]
-                pc.setFieldSplitIS(*fields)
+                # is0 = PETSc.IS().createGeneral(Wi0_to_Wi)
+                # is1 = PETSc.IS().createGeneral(Wi1_to_Wi)
+                # is2 = PETSc.IS().createGeneral(Wi2_to_Wi)
+                # is3 = PETSc.IS().createGeneral(Wi3_to_Wi)
+                # is4 = PETSc.IS().createGeneral(We0_to_We)
+                # is5 = PETSc.IS().createGeneral(We1_to_We)
+                # is6 = PETSc.IS().createGeneral(We2_to_We)
+                # is7 = PETSc.IS().createGeneral(We3_to_We)
+
+                # fields = [('0', is0), ('1', is1), ('2', is2), ('3', is3),('4', is4), ('5', is5),('6', is6), ('7', is7)]
+                # pc.setFieldSplitIS(*fields)
 
                 ksp_solver = 'preonly'
                 P_inv      = 'hypre'
 
-                opts.set('pc_fieldsplit_type', 'additive')
+                opts.setValue('pc_fieldsplit_type', 'additive')
 
-                opts.set('fieldsplit_0_ksp_type', ksp_solver)
-                opts.set('fieldsplit_1_ksp_type', ksp_solver)
-                opts.set('fieldsplit_2_ksp_type', ksp_solver)
-                opts.set('fieldsplit_3_ksp_type', ksp_solver)
-                opts.set('fieldsplit_4_ksp_type', ksp_solver)
-                opts.set('fieldsplit_5_ksp_type', ksp_solver)
-                opts.set('fieldsplit_6_ksp_type', ksp_solver)
-                opts.set('fieldsplit_7_ksp_type', ksp_solver)
+                opts.setValue('fieldsplit_0_ksp_type', ksp_solver)
+                opts.setValue('fieldsplit_1_ksp_type', ksp_solver)
+                opts.setValue('fieldsplit_2_ksp_type', ksp_solver)
+                opts.setValue('fieldsplit_3_ksp_type', ksp_solver)
+                opts.setValue('fieldsplit_4_ksp_type', ksp_solver)
+                opts.setValue('fieldsplit_5_ksp_type', ksp_solver)
+                opts.setValue('fieldsplit_6_ksp_type', ksp_solver)
+                opts.setValue('fieldsplit_7_ksp_type', ksp_solver)
 
-                opts.set('fieldsplit_0_pc_type',  P_inv)				
-                opts.set('fieldsplit_1_pc_type',  P_inv)
-                opts.set('fieldsplit_2_pc_type',  P_inv)
-                opts.set('fieldsplit_3_pc_type',  P_inv)
-                opts.set('fieldsplit_4_pc_type',  P_inv)
-                opts.set('fieldsplit_5_pc_type',  P_inv)
-                opts.set('fieldsplit_6_pc_type',  P_inv)
-                opts.set('fieldsplit_7_pc_type',  P_inv)
+                opts.setValue('fieldsplit_0_pc_type',  P_inv)				
+                opts.setValue('fieldsplit_1_pc_type',  P_inv)
+                opts.setValue('fieldsplit_2_pc_type',  P_inv)
+                opts.setValue('fieldsplit_3_pc_type',  P_inv)
+                opts.setValue('fieldsplit_4_pc_type',  P_inv)
+                opts.setValue('fieldsplit_5_pc_type',  P_inv)
+                opts.setValue('fieldsplit_6_pc_type',  P_inv)
+                opts.setValue('fieldsplit_7_pc_type',  P_inv)
             
             opts.setValue('ksp_converged_reason', None)
             opts.setValue('ksp_rtol',      self.ksp_rtol)
@@ -326,6 +340,7 @@ class SolverKNPEMI(object):
 
             # Write output to file and save png
             if self.save_xdmfs and (i % self.save_interval == 0) : self.save_xdmf()
+            if self.save_cpoints and (i % self.save_interval == 0) : self.save_checkpoint(i+1)
             if self.save_pngs: self.save_png()
 
             if i == self.time_steps - 1:
@@ -337,6 +352,11 @@ class SolverKNPEMI(object):
                 if self.save_xdmfs:
                     self.close_xdmf()
                     print("\nXDMF output saved in ", self.out_file_prefix)
+
+                if self.save_cpoints:
+                    print("\nCheckpoints saved in ", self.out_file_prefix)
+                
+                self.save_data()
 
                 print("\nTotal setup time:", setup_timer)
                 print("Total assembly time:", sum(self.assembly_time))
@@ -523,6 +543,32 @@ class SolverKNPEMI(object):
             self.xdmf_file.write_function(self.problem.u_p[1].sub(idx), float(self.problem.t.value))
 
         return
+    
+    def init_checkpoint_file(self):
+        """ Initialize checkpointing of solution functions. """
+        p = self.problem
+        self.cpoint_filename = filename = self.out_file_prefix + "checkpoints"
+        a4d.write_mesh(filename, p.mesh)
+        a4d.write_meshtags(filename, p.mesh, meshtags=p.subdomains)
+        a4d.write_meshtags(filename, p.mesh, meshtags=p.boundaries)
+        for idx in range(p.N_ions+1):
+            p.u_out_i[idx].interpolate(p.u_p[0].sub(idx))
+            p.u_out_e[idx].interpolate(p.u_p[1].sub(idx))
+            a4d.write_function(filename=filename, u=p.u_out_i[idx], time=0)
+            a4d.write_function(filename=filename, u=p.u_out_e[idx], time=0)
+
+        return
+    
+    def save_checkpoint(self, i: int):
+        """ Write solution to checkpoint file. """
+        p = self.problem
+        for idx in range(p.N_ions+1):
+            p.u_out_i[idx].interpolate(p.u_p[0].sub(idx))
+            p.u_out_e[idx].interpolate(p.u_p[1].sub(idx))
+            a4d.write_function(filename=self.cpoint_filename, u=p.u_out_i[idx], time=i)
+            a4d.write_function(filename=self.cpoint_filename, u=p.u_out_e[idx], time=i)
+
+        return
 
     def close_xdmf(self):
         """ Close .xdmf files. """
@@ -534,12 +580,20 @@ class SolverKNPEMI(object):
         # restructure_xdmf.run(self.output_filename)
 
         return
-    
+
+    def save_data(self):
+        """ Save .npy data files. """
+
+        if self.comm.rank==self.problem.owner_rank_membrane_vertex:
+            np.save(self.problem.output_dir+"phi_m.npy", np.array(self.v_t))
+
+        return
+
     # Default iterative solver parameters
     ksp_rtol           = 1e-6
     ksp_max_it         = 1000	
-    ksp_type           = 'gmres'
-    pc_type            = 'hypre'
+    ksp_type           = 'gmres' # cg
+    pc_type            = 'hypre' # lu, fieldsplit, hypre
     norm_type          = 'preconditioned'
     max_amg_iter       = 1
     use_P_mat          = True # use P as preconditioner?
