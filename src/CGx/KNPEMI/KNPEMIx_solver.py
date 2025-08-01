@@ -13,6 +13,7 @@ from CGx.utils      import restructure_xdmf
 from CGx.utils.misc import dump
 from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
 
+pprint = print
 print = PETSc.Sys.Print # Enables printing only on rank 0 when running in parallel
 
 class SolverKNPEMI(object):
@@ -40,6 +41,7 @@ class SolverKNPEMI(object):
         if save_xdmfs : self.init_xdmf_savefile()
         if save_pngs  : self.init_png_savefile()
         if save_cpoints : self.init_checkpoint_file()
+        if problem.point_evaluation : self.init_point_data()
 
         # Perform only a single timestep when saving system matrix
         if self.save_mat: self.time_steps = 1
@@ -342,8 +344,9 @@ class SolverKNPEMI(object):
             if self.save_xdmfs and (i % self.save_interval == 0) : self.save_xdmf()
             if self.save_cpoints and (i % self.save_interval == 0) : self.save_checkpoint(i+1)
             if self.save_pngs: self.save_png()
+            if p.point_evaluation: self.save_point_data(i+1)
 
-            if i == self.time_steps - 1:
+            if i == self.time_steps-1:
                 # Last timestep, consolidate output files
                 if self.save_pngs:
                     self.print_figures()
@@ -457,6 +460,44 @@ class SolverKNPEMI(object):
                 self.m_t.append(p.m.eval(x=p.min_point, cells=p.membrane_cell))
                 self.h_t.append(p.h.eval(x=p.min_point, cells=p.membrane_cell))
 
+    def init_point_data(self):
+        
+        p = self.problem
+
+        num_vars = p.N_ions+1
+        self.ics_point_values = np.zeros((self.time_steps+1, num_vars))
+        self.ecs_point_values = np.zeros((self.time_steps+1, num_vars))
+
+        if len(p.ics_cell)>0:
+            # Process owns ICS cell
+            u_subs = p.u_p[0].split()
+            for j in range(num_vars):
+                self.ics_point_values[0, j] = u_subs[j].eval(p.ics_point, p.ics_cell)
+            
+        if len(p.ecs_cell)>0:
+            # Process owns ECS cell
+            u_subs = p.u_p[1].split()
+            for j in range(num_vars):
+                self.ecs_point_values[0, j] = u_subs[j].eval(p.ecs_point, p.ecs_cell)
+
+    def save_point_data(self, i: int):
+        """ Save function values evaluated in two points (one in ICS and one in the ECS)
+            at time index i. """
+
+        p = self.problem
+
+        if len(p.ics_cell)>0:
+            # Process owns ICS cell
+            u_subs = p.u_p[0].split()
+            for j in range(p.N_ions+1):
+                self.ics_point_values[i, j] = u_subs[j].eval(p.ics_point, p.ics_cell)
+            
+        if len(p.ecs_cell)>0:
+            # Process owns ECS cell
+            u_subs = p.u_p[1].split()
+            for j in range(p.N_ions+1):
+                self.ecs_point_values[i, j] = u_subs[j].eval(p.ecs_point, p.ecs_cell)
+    
     def print_figures(self):
         """ Output .png plot of:
         - the membrane potential
@@ -582,10 +623,16 @@ class SolverKNPEMI(object):
         return
 
     def save_data(self):
-        """ Save .npy data files. """
+        """ Save numpy data. """
 
         if self.comm.rank==self.problem.owner_rank_membrane_vertex:
             np.save(self.problem.output_dir+"phi_m.npy", np.array(self.v_t))
+
+        if self.problem.point_evaluation:
+            if len(self.problem.ics_cell)>0:
+                np.save(self.problem.output_dir+"ics_point_values.npy", self.ics_point_values)
+            if len(self.problem.ecs_cell)>0:
+                np.save(self.problem.output_dir+"ecs_point_values.npy", self.ecs_point_values)
 
         return
 

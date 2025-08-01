@@ -204,6 +204,13 @@ class MixedDimensionalProblem(ABC):
         if 'source_terms' in config:
             self.source_terms = config['source_terms']
 
+        if 'point_evaluation' in config:
+            self.point_evaluation = True
+            self.ics_point = np.array(config['point_evaluation']['ics_point'])*self.mesh_conversion_factor
+            self.ecs_point = np.array(config['point_evaluation']['ecs_point'])*self.mesh_conversion_factor
+        else:
+            self.point_evaluation = False
+
     def parse_tags(self, tags: dict):
 
         allowed_tags = {'intra', 'extra', 'membrane', 'boundary'}
@@ -419,6 +426,22 @@ class MixedDimensionalProblem(ABC):
                                         ), 
                                         op=MPI.SUM
                                     )
+        if self.point_evaluation:
+            # Initialize cell placeholders
+            self.ics_cell = np.array([], dtype=np.int32)
+            self.ecs_cell = np.array([], dtype=np.int32)
+            # Find cells for point evaluation of function
+            bb_tree = dfx.geometry.bb_tree(self.mesh, self.mesh.topology.dim)
+            cell_candidates = dfx.geometry.compute_collisions_points(bb_tree, self.ics_point)
+            colliding_cells = dfx.geometry.compute_colliding_cells(self.mesh, cell_candidates, self.ics_point)
+            if len(colliding_cells.links(0))>0:
+                cc = colliding_cells.links(0)[0]
+                self.ics_cell = np.array([cc], dtype=np.int32)
+            cell_candidates = dfx.geometry.compute_collisions_points(bb_tree, self.ecs_point)
+            colliding_cells = dfx.geometry.compute_colliding_cells(self.mesh, cell_candidates, self.ecs_point)
+            if len(colliding_cells.links(0))>0:
+                cc = colliding_cells.links(0)[0]
+                self.ecs_cell = np.array([cc], dtype=np.int32)
     
     @abstractmethod
     def init(self):
