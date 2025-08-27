@@ -96,43 +96,50 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
         print('Setting up boundary conditions ...')
         
-        We = self.W[1] # Ease notation
+        Wi = self.W[0]
+        We = self.W[1]
 
         # Add Dirichlet boundary conditions on exterior boundary
-        bce = []
+        bcs = []
 
         if self.dirichlet_bcs:
+            
+            facets_boundary = self.boundaries.find(self.boundary_tag[0])
 
-            facets_boundary = self.boundaries.indices[self.boundaries.values==self.boundary_tag]
+            # First round in for-loop is for intracellular variables
+            ion_suffix = 'i'
+            init_phi = self.phi_i_init
+            for W in [Wi, We]:
+                # BCs for concentrations
+                for idx, ion in enumerate(self.ion_list):
 
-            # BCs for concentrations
-            for idx, ion in enumerate(self.ion_list):
+                    W_ion, _ = W.sub(idx).collapse()
+                    func = dfx.fem.Function(W_ion)
+                    if self.MMS_test:
+                        func.interpolate(ion[f'k{ion_suffix}_init'])
+                    else:
+                        func.x.array[:] = ion[f'k{ion_suffix}_init']
 
-                We_ion, _ = We.sub(idx).collapse()
-                func = dfx.fem.Function(We_ion)
+                    dofs = dfx.fem.locate_dofs_topological((W.sub(idx), W_ion), self.boundaries.dim, facets_boundary)
+                    bcs.append(dfx.fem.dirichletbc(func, dofs, W.sub(idx)))
+
+                # Electric potential in extracellular space
+                W_phi, _ = W.sub(self.N_ions).collapse()
+                func = dfx.fem.Function(W_phi)
+
                 if self.MMS_test:
-                    func.interpolate(ion['ke_init'])
+                    func.interpolate(init_phi)
                 else:
-                    func.x.array[:] = ion['ke_init']
+                    func.x.array[:] = init_phi
+                    
+                dofs = dfx.fem.locate_dofs_topological((W.sub(self.N_ions), W_phi), self.boundaries.dim, facets_boundary)
+                bcs.append(dfx.fem.dirichletbc(func, dofs, W.sub(self.N_ions)))
 
-                dofs = dfx.fem.locate_dofs_topological((We.sub(idx), We_ion), self.boundaries.dim, facets_boundary)
-                bc   = dfx.fem.dirichletbc(func, dofs, We.sub(idx))
-                bce.append(bc)
+                # Next round in for-loop is for extracellular variables
+                ion_suffix = 'e'
+                init_phi = self.phi_e_init
 
-            # Electric potential in extracellular space
-            W_phi, _ = We.sub(self.N_ions).collapse()
-            func = dfx.fem.Function(W_phi)
-
-            if self.MMS_test:
-                func.interpolate(self.phi_e_init)
-            else:
-                func.x.array[:] = self.phi_e_init
-
-            dofs = dfx.fem.locate_dofs_topological((We.sub(self.N_ions), W_phi), self.boundaries.dim, facets_boundary)
-            bc   = dfx.fem.dirichletbc(func, dofs, We.sub(self.N_ions))
-            bce.append(bc)
-
-        self.bcs = bce
+        self.bcs = bcs
 
     def setup_source_terms(self):
         """ Initialize source term functions. """
@@ -270,7 +277,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         # init ionic models
         for model in self.ionic_models:
             model._init()
-        
+            
         # Trial and test functions
         (ui, vi) = ufl.TrialFunctions(self.W[0]), ufl.TestFunctions(self.W[0])
         (ue, ve) = ufl.TrialFunctions(self.W[1]), ufl.TestFunctions(self.W[1])
@@ -765,15 +772,15 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     
     g_Na_bar  = 1200                 # Na max conductivity (S/m**2)
     g_K_bar   = 360                  # K max conductivity (S/m**2)    
-    g_Na_leak = 2.0*0.5              # Na leak conductivity (S/m**2) (Constant)
-    g_K_leak  = 8.0*0.5              # K leak conductivity (S/m**2)
-    g_Cl_leak = 0.0                  # Cl leak conductivity (S/m**2) (Constant)
+    g_Na_leak = 0.3031505823020331              # Na leak conductivity (S/m**2) (Constant)
+    g_K_leak  = 3.525783341569649              # K leak conductivity (S/m**2)
+    g_Cl_leak = 0.2                  # Cl leak conductivity (S/m**2) (Constant)
     a_syn     = 0.002                # synaptic time constant (s)
     g_syn_bar = 40                   # synaptic conductivity (S/m**2)
     D_Na = 1.33e-9                   # diffusion coefficients Na (m/s^2) (Constant)
     D_K  = 1.96e-9                   # diffusion coefficients K (m/s^2) (Constant)
     D_Cl = 2.03e-9                   # diffusion coefficients Cl (m/s^2) (Constant)
-    V_rest  = -0.065                 # resting membrane potential (V)
+    V_rest  = -0.065                # resting membrane potential (V)
 
     # Potassium buffering params
     rho_pump = 1.115e-6			     # maximum pump rate (mol/m**2 s)
@@ -783,20 +790,20 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
     # Initial conditions
     phi_e_init = 0         # external potential (V) (Constant)
-    phi_i_init = -0.06774  # internal potential (V) just for visualization (Constant)
-    phi_M_init = -0.06774  # membrane potential (V)	 (Constant)
-    Na_i_init  = 12        # intracellular Na concentration (mol/m^3) (Constant)
-    Na_e_init  = 100       # extracellular Na concentration (mol/m^3) (Constant)
-    K_i_init   = 125       # intracellular K  concentration (mol/m^3) (Constant)
+    phi_M_init = -0.0716732217 # membrane potential (V)	 (Constant)
+    phi_i_init = phi_M_init  # intracellular potential (V) just for visualization (Constant)
+    Na_i_init  = 18        # intracellular Na concentration (mol/m^3) (Constant)
+    Na_e_init  = 120       # extracellular Na concentration (mol/m^3) (Constant)
+    K_i_init   = 80        # intracellular K  concentration (mol/m^3) (Constant)
     K_e_init   = 4         # extracellular K  concentration (mol/m^3) (Constant)
-    Cl_i_init  = 137       # intracellular Cl concentration (mol/m^3) (Constant)
-    Cl_e_init  = 104       # extracellular Cl concentration (mol/m^3) (Constant)
+    Cl_i_init  = 7         # intracellular Cl concentration (mol/m^3) (Constant)
+    Cl_e_init  = 112       # extracellular Cl concentration (mol/m^3) (Constant)
 
     # Initial values of gating variables
-    n_init_val = 0.27622914792
-    m_init_val = 0.03791834627
-    h_init_val = 0.68848921811
-
+    n_init_val = 0.22209816561687493
+    m_init_val = 0.023466487181227985
+    h_init_val = 0.7968864764292402
+    
     # Source terms
     Na_e_f = 0.0
     Na_i_f = 0.0
@@ -821,5 +828,5 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     # Verification flag
     MMS_test        = False
 
-    # Boundary condition type (only on phi, the electric potential)
+    # Boundary condition type 
     dirichlet_bcs   = False

@@ -37,5 +37,5 @@ ft.name = "ft"
 with dfx.io.XDMFFile(comm, mesh_filename, 'w') as mesh_xdmf, \
      dfx.io.XDMFFile(comm, ft_filename, 'w') as ft_xdmf:
     mesh_xdmf.write_mesh(mesh)
-    mesh_xdmf.write_meshtags(ct, x=mesh.geometry)
-    ft_xdmf.write_meshtags(ft, x=mesh.geometry)
+    mesh_xdmf.write_meshtags(ct, mesh.geometry)
+    ft_xdmf.write_meshtags(ft, mesh.geometry)

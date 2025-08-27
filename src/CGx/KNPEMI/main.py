@@ -61,8 +61,9 @@ def main_yaml(yaml_file="config.yaml", view_input=None):
 	problem = ProblemKNPEMI(yaml_file)
 
 	# Set ionic models
-	HH = HH_model(problem)
-	ionic_models = [HH]
+	HH = HH_model(problem, use_Rush_Lar=True, stimulus=True)
+	ATP = ATPPump(problem)
+	ionic_models = [HH, ATP]
 
 	problem.init_ionic_model(ionic_models)
 

@@ -42,7 +42,7 @@ class MixedDimensionalProblem(ABC):
         self.init()
         self.setup_spaces()
         self.setup_boundary_conditions()
-        self.setup_source_terms()
+        if self.source_terms=="ion_injection": self.setup_source_terms()
 
         # Initialize time
         self.t  = dfx.fem.Constant(self.mesh, dfx.default_scalar_type(0.0))
@@ -265,7 +265,8 @@ class MixedDimensionalProblem(ABC):
         # Check that all intracellular space tags are present in some ionic model
         for model in self.ionic_models:
             for tag in model.tags:
-                ionic_tags.append(tag)
+                if tag not in ionic_tags:
+                    ionic_tags.append(tag)
         
         ionic_tags = sorted(flatten_list(ionic_tags))
         gamma_tags = sorted(flatten_list([self.gamma_tags]))
@@ -329,16 +330,21 @@ class MixedDimensionalProblem(ABC):
         # that lies closest to the center point of the mesh.
         # The membrane potential will be measured in this point.
         # First, calculate the center point of the mesh
-        xx, yy, zz = [self.mesh.geometry.x[:, i] for i in range(self.mesh.geometry.dim)]
+        if self.mesh.geometry.dim==3:
+            xx, yy, zz = [self.mesh.geometry.x[:, i] for i in range(self.mesh.geometry.dim)]
+            z_min = self.comm.allreduce(zz.min(), op=MPI.MIN)
+            z_max = self.comm.allreduce(zz.max(), op=MPI.MAX)
+            z_c = (z_max + z_min) / 2
+        else:
+            xx, yy = [self.mesh.geometry.x[:, i] for i in range(self.mesh.geometry.dim)]
+            z_c = 0.0
         x_min = self.comm.allreduce(xx.min(), op=MPI.MIN)
         x_max = self.comm.allreduce(xx.max(), op=MPI.MAX)
         y_min = self.comm.allreduce(yy.min(), op=MPI.MIN)
         y_max = self.comm.allreduce(yy.max(), op=MPI.MAX)
-        z_min = self.comm.allreduce(zz.min(), op=MPI.MIN)
-        z_max = self.comm.allreduce(zz.max(), op=MPI.MAX)
+        
         x_c = (x_max + x_min) / 2
         y_c = (y_max + y_min) / 2
-        z_c = (z_max + z_min) / 2
         mesh_center = np.array([x_c, y_c, z_c])
 
         # Find all membrane vertices of the cell
@@ -382,7 +388,6 @@ class MixedDimensionalProblem(ABC):
             cc = colliding_cells.links(0)[0]
             self.membrane_cell = np.array(cc)
             
-
         if self.source_terms=="ion_injection":
             def injection_site_marker_function(x, tol=1e-14):
             
@@ -399,7 +404,8 @@ class MixedDimensionalProblem(ABC):
                 )
 
             # Initialize ion injection region 
-            delta = 1000*self.mesh_conversion_factor
+            domain_scale = x_max - x_min
+            delta = domain_scale / 10
             self.x_L = (x_c - delta) 
             self.y_L = (y_c - delta)
             self.z_L = (z_c - delta)

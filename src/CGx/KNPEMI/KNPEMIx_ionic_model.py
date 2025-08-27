@@ -196,11 +196,44 @@ class Passive_K_pump_model(IonicModel):
         
         return I_ch
 
+class ATPPump(IonicModel):
+
+    def __init__(self, KNPEMIx_problem, tags=None):
+
+        super().__init__(KNPEMIx_problem, tags)
+
+    def __str__(self):
+        return "Na/K/ATPase pump"
+    
+    def _init(self):	
+        
+        if np.isclose(self.problem.t.value, 0): 
+            self.I_hat = 0.18 # Maximum pump strength [A/m^2]
+            self.m_K = 3 # ECS K+ pump threshold [mM]
+            self.m_Na = 12 # ICS Na+ pump threshold [mM]
+
+    def _eval(self, ion_idx: int):
+
+        p = self.problem
+        ion   = p.ion_list[ion_idx]
+        c_Na_i = p.u_p[0].sub(0)
+        c_K_e = p.u_p[1].sub(1)
+
+        par_1 = 1 + self.m_K/c_K_e
+        par_2 = 1 + self.m_Na/c_Na_i
+        I_ATP = self.I_hat / (par_1**2 * par_2**3)
+
+        if ion["name"]=="Na":
+            return 3*I_ATP
+        elif ion["name"]=="K":
+            return -2*I_ATP        
+        else:
+            return 0.0
 
 # Hodgkin–Huxley + stimulus
 class HH_model(IonicModel):
 
-    def __init__(self, KNPEMIx_problem, tags=None, stimulus: bool=True, use_Rush_Lar: bool=True, time_steps_ODE: int=25):
+    def __init__(self, KNPEMIx_problem, tags=None, stimulus: bool=False, use_Rush_Lar: bool=True, time_steps_ODE: int=25):
 
         super().__init__(KNPEMIx_problem, tags)
 
@@ -210,7 +243,7 @@ class HH_model(IonicModel):
 
 
     def __str__(self):
-        return f'Hodgkin-Huxley'
+        return 'Hodgkin-Huxley'
 
     def _init(self):	
 

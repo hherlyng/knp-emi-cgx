@@ -336,9 +336,10 @@ class SolverKNPEMI(object):
             # Update previous timestep values
             p.u_p[0].x.array[:] = wh[0].x.array.copy() # Intracellular ions and potential
             p.u_p[1].x.array[:] = wh[1].x.array.copy() # Extracellular ions and potential
-            phi_i_p.x.array[:]  = wh[0].sub(p.N_ions).collapse().x.array.copy() # Intracellular potential
-            phi_e_p.x.array[:]  = wh[1].sub(p.N_ions).collapse().x.array.copy() # Extracellular potential
-            p.phi_M_prev.x.array[:] = phi_i_p.x.array.copy() - phi_e_p.x.array.copy() # Membrane potential      
+            # phi_i_p.x.array[:]  = wh[0].sub(p.N_ions).collapse().x.array.copy() # Intracellular potential
+            # phi_e_p.x.array[:]  = wh[1].sub(p.N_ions).collapse().x.array.copy() # Extracellular potential
+            p.phi_M_prev.x.array[:] = wh[0].sub(p.N_ions).collapse().x.array.copy() - wh[1].sub(p.N_ions).collapse().x.array.copy() # Membrane potential      
+            # p.phi_M_prev.x.array[:] = phi_i_p.x.array.copy() - phi_e_p.x.array.copy() # Membrane potential      
 
             # Write output to file and save png
             if self.save_xdmfs and (i % self.save_interval == 0) : self.save_xdmf()
@@ -527,6 +528,9 @@ class SolverKNPEMI(object):
                 plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.n_t, label='n')
                 plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.m_t, label='m')
                 plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.h_t, label='h')
+                pprint("Final n: ", self.n_t[-1], flush=True)
+                pprint("Final m: ", self.m_t[-1], flush=True)
+                pprint("Final h: ", self.h_t[-1], flush=True)
                 plt.legend()
                 plt.xlabel('Time (ms)')
                 plt.savefig(self.out_gate_string)
