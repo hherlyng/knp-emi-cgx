@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 figsize = [12, 8]
 
 k = 1 # Finite element degree
-dim = 5
-N_cells = [5]#, 25, 50, 100, 200]
+dim = 10
+N_cells = [10]#, 25, 50, 100, 200]
 # N_cells = [5, 10, 25, 50]
 timestep = 5e-5
 output_dir = f"/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/{dim}m/"

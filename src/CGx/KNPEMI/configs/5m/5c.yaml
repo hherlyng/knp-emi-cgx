@@ -7,7 +7,7 @@ output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/5m/5c/'
 
 # Numerical parameters 
 dt : 0.00005 # Timestep size 
-time_steps : 500 # Number of timesteps
+time_steps : 50 # Number of timesteps
 #T  : 50 # Simulation end time
 
 # Problem constants (in consistent units)
@@ -34,4 +34,4 @@ source_terms : "ion_injection"
 
 point_evaluation :
   ics_point : [3805, 2316, 3535]
-  ecs_point : [2634, 2478, 2413]
+  ecs_point : [1725, 3760, 3142]

@@ -2,11 +2,11 @@
 problem_type : "KNP-EMI"
 
 # Input and output directories
-output_dir : './output/'
+output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/'
 
 # Numerical parameters 
-dt : 0.00005 # Timestep size 
-time_steps : 30 # Number of timesteps
+dt : 0.00000625 # Timestep size 
+time_steps : 10 # Number of timesteps
 T  : 50 # Simulation end time
 
 # Problem constants (in consistent units)
@@ -18,46 +18,18 @@ physical_constants:
 C_M : 0.02 # membrane capacitance
 
 # Mesh and meshtags files 
-mesh_file      : "geometries/square32.xdmf"
-cell_tag_file  : "geometries/square32.xdmf"
-facet_tag_file : "geometries/square32.xdmf"
+mesh_file      : "geometries/square64.xdmf"
+cell_tag_file  : "geometries/square64.xdmf"
+facet_tag_file : "geometries/square64_facets.xdmf"
+
+mesh_conversion_factor: 1e-6
 
 ics_tags  : [1] # Intracellular space cell tags
 ecs_tags  : [2] # Extracellular space cell tags
 boundary_tags : [3] # Boundary facet tags
 membrane_tags : [4] # Membrane (interface) facet tags
+stimulus_tags : []
 
-#ion_species:
-#  Na : 
-  #   valence : 1
-  #   diffusivity : 0.2
-  #   #initial :     
-  #     ics : 0.4 # varying by ics/ecs
-  #     ecs : 0.8
-  #   #source: "t < 2 ? 2.1 : 0.0" # c expressions as in old fenics,
-  #                               # with access to x (spatial) and t for time
-
-  # K :
-  #   valence : 1
-  #   diffusivity : 0.2
-  #   initial : "input/concentration_K.xdmf" # read in from .xdmf file (map from cell to value)
-  # Cl :
-  #   valence : -1
-  #   diffusivity : 0.2
-  #   initial : 
-  #     ics : 0.4
-  #     ecs : 0.3
-  #    # 5 : 0.7
-
-
-# boundary_conditions: []
-
-# ionic_membrane_models:
-#   5 : 
-#     model: HH.ode
-#     parameters : 
-#       beta : 3.2
-#     stimuli:
-#       Na : 3.2
-#     initial_potential: 1
-#   "1-4" : "Leak" 
+point_evaluation :
+  ics_point : [0.5, 0.5, 0.0]
+  ecs_point : [0.1, 0.1, 0.0]

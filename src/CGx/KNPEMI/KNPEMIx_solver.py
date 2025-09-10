@@ -641,7 +641,7 @@ class SolverKNPEMI(object):
         return
 
     # Default iterative solver parameters
-    ksp_rtol           = 1e-6
+    ksp_rtol           = 1e-7
     ksp_max_it         = 1000	
     ksp_type           = 'gmres' # cg
     pc_type            = 'hypre' # lu, fieldsplit, hypre

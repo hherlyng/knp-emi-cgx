@@ -4,14 +4,14 @@ import time
 import yaml
 import pathlib
 import collections.abc
-
 import numpy   as np
 import dolfinx as dfx
 
-from abc            import ABC, abstractmethod
-from mpi4py         import MPI
-from petsc4py       import PETSc
-from CGx.utils.misc import flatten_list, mark_boundaries_cube_MMS, mark_boundaries_square_MMS, mark_subdomains_cube, mark_subdomains_square, range_constructor
+from abc             import ABC, abstractmethod
+from mpi4py          import MPI
+from petsc4py        import PETSc
+from CGx.utils.misc  import flatten_list, mark_boundaries_cube_MMS, mark_boundaries_square_MMS, mark_subdomains_cube, mark_subdomains_square, range_constructor
+from scipy.integrate import odeint
 
 pprint = print
 print = PETSc.Sys.Print
@@ -42,6 +42,7 @@ class MixedDimensionalProblem(ABC):
         self.init()
         self.setup_spaces()
         self.setup_boundary_conditions()
+        self.find_steady_state_initial_conditions()
         if self.source_terms=="ion_injection": self.setup_source_terms()
 
         # Initialize time
@@ -203,6 +204,8 @@ class MixedDimensionalProblem(ABC):
         
         if 'source_terms' in config:
             self.source_terms = config['source_terms']
+        else:
+            self.source_terms = None
 
         if 'point_evaluation' in config:
             self.point_evaluation = True
@@ -326,7 +329,7 @@ class MixedDimensionalProblem(ABC):
         self.dx = ufl.Measure("dx", domain=self.mesh, subdomain_data=self.subdomains) # Volume integral measure
         self.dS = ufl.Measure("dS", domain=self.mesh, subdomain_data=self.boundaries) # Facet integral measure
 
-        # Find the point on the first cell's membrane
+        # Find the point on the largest cell's membrane
         # that lies closest to the center point of the mesh.
         # The membrane potential will be measured in this point.
         # First, calculate the center point of the mesh
@@ -355,7 +358,8 @@ class MixedDimensionalProblem(ABC):
                                                         self.mesh.topology.dim-1,
                                                         0
         )
-        gamma_vertices = np.unique(gamma_vertices)
+        num_local_gamma_vertices = self.mesh.topology.index_map(0).size_local
+        gamma_vertices = np.unique(gamma_vertices)[gamma_vertices < num_local_gamma_vertices]
         gamma_coords = self.mesh.geometry.x[gamma_vertices]
 
         # Find the vertex that lies closest to the cell's centroid
@@ -448,6 +452,200 @@ class MixedDimensionalProblem(ABC):
             if len(colliding_cells.links(0))>0:
                 cc = colliding_cells.links(0)[0]
                 self.ecs_cell = np.array([cc], dtype=np.int32)
+
+    def find_steady_state_initial_conditions(self):
+        
+        print("Solving ODE system to find steady-state initial conditions ...")
+
+        # Calculate volumes and membrane surface area
+        vol_i = self.comm.allreduce(
+                                dfx.fem.assemble_scalar(
+                                    dfx.fem.form(1*self.dx(self.intra_tags))
+                                    ),
+                                    op=MPI.SUM
+                                    ) # [m^3]
+        vol_e = self.comm.allreduce(
+                                dfx.fem.assemble_scalar(
+                                    dfx.fem.form(1*self.dx(self.extra_tag))
+                                    ),
+                                    op=MPI.SUM
+                                    ) # [m^3]
+        area_g = self.comm.allreduce(
+                                dfx.fem.assemble_scalar(
+                                    dfx.fem.form(1*self.dS(self.gamma_tags))
+                                    ),
+                                    op=MPI.SUM
+                                    ) # [m^2]
+        print(f"{vol_i=}")
+        print(f"{vol_e=}")
+        print(f"{area_g=}")
+
+        if self.comm.rank==0:
+            # Define constants
+            R = self.R # Gas constant [J/(mol*K)]
+            F = self.F # Faraday's constant [C/mol]
+            T = self.T # Temperature [K]
+            C_m = self.C_M # Membrane capacitance
+            z_Na = 1 # Valence sodium
+            z_K  = 1 # Valence potassium
+            z_Cl = -1 # Valence chloride
+            g_Na_bar  = self.g_Na_bar                 # Na max conductivity (S/m**2)
+            g_K_bar   = self.g_K_bar                  # K max conductivity (S/m**2)    
+            g_Na_leak = self.g_Na_leak              # Na leak conductivity (S/m**2) (Constant)
+            g_K_leak  = self.g_K_leak              # K leak conductivity (S/m**2)
+            g_Cl_leak = self.g_Cl_leak                  # Cl leak conductivity (S/m**2) (Constant)
+            phi_rest = self.V_rest  # Resting potential [V]
+
+            # ATP pump
+            I_hat = 0.18 # Maximum pump strength [A/m^2]
+            m_K = 3 # ECS K+ pump threshold [mM]
+            m_Na = 12 # ICS Na+ pump threshold [mM]
+
+            # Cotransporters
+            S_KCC2 = 0.0034
+            S_NKCC1 = 0.023
+
+            # Define initial condition guesses
+            Na_i_0 = 40 # [Mm]
+            Na_e_0 = 90 # [Mm]
+            K_i_0 = 80 # [Mm]
+            K_e_0 = 4 # [Mm]
+            Cl_i_0 = 7 # [Mm]
+            Cl_e_0 = 112 # [Mm]
+            phi_m_0 = -0.067 # [V]
+            n_0 = 0.3 
+            m_0 = 0.05
+            h_0 = 0.65
+
+            # Hodgkin-Huxley parameters
+            alpha_n = lambda V_m: 0.01e3 * (10.-V_m) / (np.exp((10. - V_m)/10.) - 1.)
+            beta_n  = lambda V_m: 0.125e3 * np.exp(-V_m/80.)
+            alpha_m = lambda V_m: 0.1e3 * (25. - V_m) / (np.exp((25. - V_m)/10.) - 1)
+            beta_m  = lambda V_m: 4.e3 * np.exp(-V_m/18.)
+            alpha_h = lambda V_m: 0.07e3 * np.exp(-V_m/20.)
+            beta_h  = lambda V_m: 1.e3 / (np.exp((30. - V_m)/10.) + 1)
+
+            # Nernst potential
+            E = lambda z_k, c_ki, c_ke: R*T/(z_k*F) * np.log(c_ke/c_ki)
+
+            # ATP current
+            par_1 = lambda K_e: 1 + m_K/K_e
+            par_2 = lambda Na_i: 1 + m_Na/Na_i
+            I_ATP = lambda Na_i, K_e: I_hat / (par_1(K_e)**2 * par_2(Na_i)**3)
+
+            # Cotransporter currents
+            I_KCC2 = lambda K_i, K_e, Cl_i, Cl_e: S_KCC2 * np.log((K_i * Cl_i)/(K_e*Cl_e))
+            I_NKCC1 = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: S_NKCC1 * 1 / (1 + np.exp(16 - K_e)) * np.log((Na_i * K_i * Cl_i**2)/(Na_e * K_e * Cl_e**2))
+
+            def rhs(x, t, args):
+                # Extract gating variables at current timestep
+                n = x[7]; m = x[8]; h = x[9]
+
+                # Extract membrane potential and concentrations at previous timestep
+                phi_m_ = args[0]; Na_i_ = args[1]; Na_e_ = args[2]; K_i_ = args[3]; K_e_ = args[4]; Cl_i_ = args[5]; Cl_e_ = args[6]
+                
+                # Define potential used in gating variable expressions
+                phi_m_gating = (phi_m_ - phi_rest)*1e3 # Relative potential with unit correction
+
+                # Calculate Nernst potentials
+                E_Na = E(z_Na, Na_i_, Na_e_)
+                E_K  = E(z_K, K_i_, K_e_)
+                E_Cl = E(z_Cl, Cl_i_, Cl_e_)
+
+                # Calculate ionic currents
+                I_Na = (g_Na_leak + g_Na_bar * m**3 * h) * (phi_m_ - E_Na) + 3*I_ATP(Na_i_, K_e_) + I_NKCC1(Na_i_, Na_e_, K_i_, K_e_, Cl_i_, Cl_e_)
+                I_K = (g_K_leak + g_K_bar * n**4)* (phi_m_ - E_K) - 2*I_ATP(Na_i_, K_e_) + I_NKCC1(Na_i_, Na_e_, K_i_, K_e_, Cl_i_, Cl_e_) + I_KCC2(K_i_, K_e_, Cl_i_, Cl_e_)
+                I_Cl = g_Cl_leak * (phi_m_ - E_Cl) - 2*I_NKCC1(Na_i_, Na_e_, K_i_, K_e_, Cl_i_, Cl_e_) - I_KCC2(K_i_, K_e_, Cl_i_, Cl_e_)
+                I_ion = I_Na + I_K + I_Cl # Total current
+
+                # Define right-hand expressions
+                rhs_phi = -1/C_m * I_ion
+                rhs_Na_i = -I_Na * area_g / vol_i
+                rhs_Na_e =  I_Na * area_g / vol_e
+                rhs_K_i = -I_K * area_g / vol_i
+                rhs_K_e =  I_K * area_g / vol_e
+                rhs_Cl_i = -I_Cl * area_g / vol_i
+                rhs_Cl_e =  I_Cl * area_g / vol_e
+                rhs_n = alpha_n(phi_m_gating) * (1 - n) - beta_n(phi_m_gating) * n
+                rhs_m = alpha_m(phi_m_gating) * (1 - m) - beta_m(phi_m_gating) * m
+                rhs_h = alpha_h(phi_m_gating) * (1 - h) - beta_h(phi_m_gating) * h
+
+                return [rhs_phi, rhs_Na_i, rhs_Na_e, rhs_K_i, rhs_K_e, -rhs_Cl_i, -rhs_Cl_e, rhs_n, rhs_m, rhs_h]
+
+            timestep = 1e-6
+            max_time = 1
+            num_timesteps = int(max_time / timestep)
+            times = np.linspace(0, max_time, num_timesteps+1)
+
+            init = [phi_m_0, Na_i_0, Na_e_0, K_i_0, K_e_0, Cl_i_0, Cl_e_0, n_0, m_0, h_0]
+            sol_ = init
+
+            # Prepare plotting
+            var_names = ['phi_m', 'Na_i', 'Na_e', 'K_i', 'K_e', 'Cl_i', 'Cl_e', 'n', 'm', 'h']
+
+            for t, dt in zip(times, np.diff(times)):
+            
+                if t > 0:
+                    init = sol_[-1]
+
+                sol = odeint(lambda x, t: rhs(x, t, args=init[:-3]), init, [t, t+dt])
+
+                if np.allclose(sol[0], sol[-1], rtol=1e-12):
+                    # Current solution equals previous solution
+                    print("Steady state reached.")
+                    break
+
+                sol_ = sol # Update initial condition
+
+                # Checks
+                if np.isclose(t, max_time):
+                    print("Max time reached without finding steady state. Exiting.")
+                    break
+
+                if any(np.isnan(sol[-1])):
+                    print("NaN values in solution. Exiting.")
+                    break
+
+            sol = sol[-1]
+            for i in range(len(sol)):
+                print(f"{sol[i]:.15f}")
+
+            phi_M_init_val = sol[0]
+            Na_i_init_val = sol[1]
+            Na_e_init_val = sol[2]
+            K_i_init_val = sol[3]
+            K_e_init_val = sol[4]
+            Cl_i_init_val = sol[5]
+            Cl_e_init_val = sol[6]
+            n_init_val = sol[7]
+            m_init_val = sol[8]
+            h_init_val = sol[9]
+        else:
+            # Placeholders on non-root processes
+            phi_M_init_val = None
+            Na_i_init_val = None
+            Na_e_init_val = None
+            K_i_init_val = None
+            K_e_init_val = None
+            Cl_i_init_val = None
+            Cl_e_init_val = None
+            n_init_val = None
+            m_init_val = None
+            h_init_val = None
+
+        # Communicate initial values from root process
+        self.phi_M_init = self.comm.bcast(phi_M_init_val, root=0)
+        self.Na_i_init = self.comm.bcast(Na_i_init_val, root=0)
+        self.Na_e_init = self.comm.bcast(Na_e_init_val, root=0)
+        self.K_i_init = self.comm.bcast(K_i_init_val, root=0)
+        self.K_e_init = self.comm.bcast(K_e_init_val, root=0)
+        self.Cl_i_init = self.comm.bcast(Cl_i_init_val, root=0)
+        self.Cl_e_init = self.comm.bcast(Cl_e_init_val, root=0)
+        self.n_init_val = self.comm.bcast(n_init_val, root=0)
+        self.m_init_val = self.comm.bcast(m_init_val, root=0)
+        self.h_init_val = self.comm.bcast(h_init_val, root=0)            
+
+        print("Initial conditions set.")
     
     @abstractmethod
     def init(self):

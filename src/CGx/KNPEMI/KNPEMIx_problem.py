@@ -772,9 +772,9 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     
     g_Na_bar  = 1200                 # Na max conductivity (S/m**2)
     g_K_bar   = 360                  # K max conductivity (S/m**2)    
-    g_Na_leak = 0.3031505823020331              # Na leak conductivity (S/m**2) (Constant)
-    g_K_leak  = 3.525783341569649              # K leak conductivity (S/m**2)
-    g_Cl_leak = 0.2                  # Cl leak conductivity (S/m**2) (Constant)
+    g_Na_leak = 1.0              # Na leak conductivity (S/m**2) (Constant)
+    g_K_leak  = 4.0              # K leak conductivity (S/m**2)
+    g_Cl_leak = 0.25                 # Cl leak conductivity (S/m**2) (Constant)
     a_syn     = 0.002                # synaptic time constant (s)
     g_syn_bar = 40                   # synaptic conductivity (S/m**2)
     D_Na = 1.33e-9                   # diffusion coefficients Na (m/s^2) (Constant)
@@ -788,22 +788,79 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     P_Ke  = 1.5                      # [K+]e  threshold for Na+/K+ pump (mol/m^3)
     k_dec = 2.9e-8				     # Decay factor for [K+]e (m/s)
 
+    # HH + ATP + Cotransporters
     # Initial conditions
-    phi_e_init = 0         # external potential (V) (Constant)
-    phi_M_init = -0.0716732217 # membrane potential (V)	 (Constant)
+
+    # # Unit square
+    # phi_M_init = -0.066817831631245 # membrane potential (V)	 (Constant)
+    # phi_i_init = phi_M_init  # intracellular potential (V) just for visualization (Constant)
+    # phi_e_init = 0.0         # external potential (V) (Constant)
+
+    # Na_i_init  = 48.093785429263470        # intracellular Na concentration (mol/m^3) (Constant)
+    # Na_e_init  = 109.968738190247123       # extracellular Na concentration (mol/m^3) (Constant)
+    # K_i_init   = 79.495771046028807        # intracellular K  concentration (mol/m^3) (Constant)
+    # K_e_init   = 4.168076317990064         # extracellular K  concentration (mol/m^3) (Constant)
+    # Cl_i_init  = 7.442617475023728        # intracellular Cl concentration (mol/m^3) (Constant)
+    # Cl_e_init  = 111.852460841659322   # extracellular Cl concentration (mol/m^3) (Constant)
+
+    # # Initial values of gating variables
+    # n_init_val = 0.290225733310237
+    # m_init_val = 0.042627601555044
+    # h_init_val = 0.657945794679294   
+
+    # mu = 10, N = 10
+    phi_M_init = -0.066465112546585 # membrane potential (V)	 (Constant)
     phi_i_init = phi_M_init  # intracellular potential (V) just for visualization (Constant)
-    Na_i_init  = 18        # intracellular Na concentration (mol/m^3) (Constant)
-    Na_e_init  = 120       # extracellular Na concentration (mol/m^3) (Constant)
-    K_i_init   = 80        # intracellular K  concentration (mol/m^3) (Constant)
-    K_e_init   = 4         # extracellular K  concentration (mol/m^3) (Constant)
-    Cl_i_init  = 7         # intracellular Cl concentration (mol/m^3) (Constant)
-    Cl_e_init  = 112       # extracellular Cl concentration (mol/m^3) (Constant)
+    phi_e_init = 0.0         # external potential (V) (Constant)
+
+    Na_i_init  = 44.025137383586404        # intracellular Na concentration (mol/m^3) (Constant)
+    Na_e_init  = 91.594680807306901       # extracellular Na concentration (mol/m^3) (Constant)
+    K_i_init   = 79.708564476974033        # intracellular K  concentration (mol/m^3) (Constant)
+    K_e_init   = 4.318089350829993         # extracellular K  concentration (mol/m^3) (Constant)
+    Cl_i_init  = 7.562956147339781        # intracellular Cl concentration (mol/m^3) (Constant)
+    Cl_e_init  = 111.385557554568578   # extracellular Cl concentration (mol/m^3) (Constant)
 
     # Initial values of gating variables
-    n_init_val = 0.22209816561687493
-    m_init_val = 0.023466487181227985
-    h_init_val = 0.7968864764292402
+    n_init_val = 0.295484091091823
+    m_init_val = 0.044471264479422
+    h_init_val = 0.646269680544548   
     
+    # # HH + ATP
+    # # Initial conditions
+    # phi_e_init = 0.0         # external potential (V) (Constant)
+    # phi_M_init = -0.066813820684751 # membrane potential (V)	 (Constant)
+    # phi_i_init = phi_M_init  # intracellular potential (V) just for visualization (Constant)
+
+    # Na_i_init  = 48.248514870537960        # intracellular Na concentration (mol/m^3) (Constant)
+    # Na_e_init  = 109.917161709819084       # extracellular Na concentration (mol/m^3) (Constant)
+    # K_i_init   = 79.540175569411389        # intracellular K  concentration (mol/m^3) (Constant)
+    # K_e_init   = 4.153274810195573         # extracellular K  concentration (mol/m^3) (Constant)
+    # Cl_i_init  = 7.0        # intracellular Cl concentration (mol/m^3) (Constant)
+    # Cl_e_init  = 112.0       # extracellular Cl concentration (mol/m^3) (Constant)
+
+    # # Initial values of gating variables
+    # n_init_val = 0.290285330347256
+    # m_init_val = 0.042648167664035
+    # h_init_val = 0.657813845649656    
+
+    # HH only:       
+    # # Initial conditions
+    # phi_e_init = 0.016463537289022653         # external potential (V) (Constant)
+    # # phi_M_init = -6.52443885e-02 # membrane potential (V)	 (Constant)
+    # phi_i_init = -0.04878085122676572  # intracellular potential (V) just for visualization (Constant)
+    # phi_M_init = phi_i_init - phi_e_init
+    # Na_i_init  = 3.04730602e+02        # intracellular Na concentration (mol/m^3) (Constant)
+    # Na_e_init  = 2.44231326e+01       # extracellular Na concentration (mol/m^3) (Constant)
+    # K_i_init   = 7.41672365e+01        # intracellular K  concentration (mol/m^3) (Constant)
+    # K_e_init   = 5.94425451e+00         # extracellular K  concentration (mol/m^3) (Constant)
+    # Cl_i_init  = 7         # intracellular Cl concentration (mol/m^3) (Constant)
+    # Cl_e_init  = 112       # extracellular Cl concentration (mol/m^3) (Constant)
+
+    # # Initial values of gating variables
+    # n_init_val = 3.13937759e-01
+    # m_init_val = 5.14268886e-02
+    # h_init_val = 6.04726150e-01               
+
     # Source terms
     Na_e_f = 0.0
     Na_i_f = 0.0

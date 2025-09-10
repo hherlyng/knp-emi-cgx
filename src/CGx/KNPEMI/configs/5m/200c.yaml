@@ -90,4 +90,4 @@ source_terms : "ion_injection"
 
 point_evaluation :
   ics_point : [3805, 2316, 3535]
-  ecs_point : [2634, 2478, 2413]
+  ecs_point : [1725, 3760, 3142]

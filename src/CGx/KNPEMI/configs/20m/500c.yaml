@@ -2,8 +2,8 @@
 problem_type : "KNP-EMI"
 
 # Input and output directorie
-input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/geometries/GC/10m/10c/'
-output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/10m/10c/'
+input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/geometries/GC/20m/500c/'
+output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/20m/500c/'
 
 # Numerical parameters 
 dt : 0.00005 # Timestep size 
@@ -24,14 +24,14 @@ cell_tag_file  : "mesh.xdmf"
 facet_tag_file : "facets.xdmf"
 mesh_conversion_factor: 1e-9
 
-ics_tags  : [2, 3, 4, 5, 6, 7, 8, 9, 10, 11] # Intracellular space cell tags
+ics_tags  : !range [2, 502]  # Intracellular space cell tags
 ecs_tags  : [1] # Extracellular space cell tags
-boundary_tags : [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111] # Boundary facet tags
-membrane_tags : [2, 3, 4, 5, 6, 7, 8, 9, 10, 11] # Membrane (interface) facet tags
-stimulus_tags : [] # Membrane facet tags of the cells being stimulated
+boundary_tags : !range [1001, 1502]  # Boundary facet tags
+membrane_tags : !range [2, 502] # Membrane (interface) facet tags
+stimulus_tags : !range [2, 502] # Membrane facet tags of the cells being stimulated
 
 # source_terms : "ion_injection"
 
 point_evaluation :
-  ics_point : [3037, 5387, 6380]
-  ecs_point : [3037, 4285, 7265]
+  ics_point : [3805, 2316, 3535]
+  ecs_point : [3595, 7263, 13844]

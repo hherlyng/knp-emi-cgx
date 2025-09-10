@@ -7,6 +7,7 @@ from CGx.KNPEMI.KNPEMIx_solver  import SolverKNPEMI
 from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
 from CGx.KNPEMI.KNPEMIx_ionic_model import *
 
+pprint = print
 print = petsc4py.PETSc.Sys.Print
 
 def main(argv=None):
@@ -61,9 +62,10 @@ def main_yaml(yaml_file="config.yaml", view_input=None):
 	problem = ProblemKNPEMI(yaml_file)
 
 	# Set ionic models
-	HH = HH_model(problem, use_Rush_Lar=True, stimulus=True)
+	HH = HH_model(problem, use_Rush_Lar=True, stimulus=False)
 	ATP = ATPPump(problem)
-	ionic_models = [HH, ATP]
+	CT = Cotransporters(problem)
+	ionic_models = [HH, ATP, CT]
 
 	problem.init_ionic_model(ionic_models)
 

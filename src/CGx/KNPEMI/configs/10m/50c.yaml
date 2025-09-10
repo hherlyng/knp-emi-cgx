@@ -32,3 +32,7 @@ membrane_tags : !range [2, 52] # Membrane (interface) facet tags
 stimulus_tags : [] # Membrane facet tags of the cells being stimulated
 
 source_terms : "ion_injection"
+
+point_evaluation :
+  ics_point : [3037, 5387, 6380]
+  ecs_point : [3037, 4285, 7265]

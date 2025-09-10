@@ -196,6 +196,49 @@ class Passive_K_pump_model(IonicModel):
         
         return I_ch
 
+
+class Cotransporters(IonicModel):
+
+    def __init__(self, KNPEMIx_problem, tags=None):
+         
+         super().__init__(KNPEMIx_problem, tags)
+
+    def __str__(self):
+         return "KCC2/NKCC1 Cotransporters"
+
+    def _init(self):	
+        
+        if np.isclose(self.problem.t.value, 0): 
+            # Maximum cotransporter strengths [A/m^2]
+            self.S_KCC2 = 0.0034
+            self.S_NKCC1 = 0.023
+
+        else:
+            pass
+
+    def _eval(self, ion_idx: int):
+
+        p = self.problem
+        ion   = p.ion_list[ion_idx]
+        c_Na_i = p.u_p[0].sub(0)
+        c_Na_e = p.u_p[1].sub(0)
+        c_K_i = p.u_p[0].sub(1)
+        c_K_e = p.u_p[1].sub(1)
+        c_Cl_i = p.u_p[0].sub(2)
+        c_Cl_e = p.u_p[1].sub(2)
+
+        I_KCC2 = self.S_KCC2 * ufl.ln((c_K_i * c_Cl_i)/(c_K_e*c_Cl_e))
+        I_NKCC1 = (self.S_NKCC1 * 1 / (1 + ufl.exp(16 - c_K_e))
+                * ufl.ln((c_Na_i * c_K_i * c_Cl_i**2)/(c_Na_e * c_K_e * c_Cl_e**2)))
+
+        if ion["name"]=="Na":
+            return I_NKCC1
+        elif ion["name"]=="K":
+            return I_NKCC1 + I_KCC2
+        else:
+            return -(2*I_NKCC1 + I_KCC2)
+
+
 class ATPPump(IonicModel):
 
     def __init__(self, KNPEMIx_problem, tags=None):
@@ -211,6 +254,8 @@ class ATPPump(IonicModel):
             self.I_hat = 0.18 # Maximum pump strength [A/m^2]
             self.m_K = 3 # ECS K+ pump threshold [mM]
             self.m_Na = 12 # ICS Na+ pump threshold [mM]
+        else:
+            pass
 
     def _eval(self, ion_idx: int):
 

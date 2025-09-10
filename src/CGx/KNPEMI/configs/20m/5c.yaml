@@ -32,36 +32,6 @@ stimulus_tags : [] # Membrane facet tags of the cells being stimulated
 
 source_terms : "ion_injection"
 
-#ion_species:
-#  Na : 
-  #   valence : 1
-  #   diffusivity : 0.2
-  #   #initial :     
-  #     ics : 0.4 # varying by ics/ecs
-  #     ecs : 0.8
-  #   #source: "t < 2 ? 2.1 : 0.0" # c expressions as in old fenics,
-  #                               # with access to x (spatial) and t for time
-
-  # K :
-  #   valence : 1
-  #   diffusivity : 0.2
-  #   initial : "input/concentration_K.xdmf" # read in from .xdmf file (map from cell to value)
-  # Cl :
-  #   valence : -1
-  #   diffusivity : 0.2
-  #   initial : 
-  #     ics : 0.4
-  #     ecs : 0.3
-  #    # 5 : 0.7
-
-
-
-# ionic_membrane_models:
-#   5 : 
-#     model: HH.ode
-#     parameters : 
-#       beta : 3.2
-#     stimuli:
-#       Na : 3.2
-#     initial_potential: 1
-#   "1-4" : "Leak" 
+point_evaluation :
+  ics_point : [3805, 2316, 3535]
+  ecs_point : [3595, 7263, 13844]
