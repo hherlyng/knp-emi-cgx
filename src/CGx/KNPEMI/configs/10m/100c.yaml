@@ -28,7 +28,7 @@ ics_tags  : !range [2, 102] # Intracellular space cell tags
 ecs_tags  : [1] # Extracellular space cell tags
 boundary_tags : !range [1001, 1102] # Boundary facet tags
 membrane_tags : !range [2, 102] # Membrane (interface) facet tags
-stimulus_tags : !range [2, 102] # Membrane facet tags of the cells being stimulated
+stimulus_tags : [] #!range [2, 102] # Membrane facet tags of the cells being stimulated
 
 # source_terms : "ion_injection"
 
