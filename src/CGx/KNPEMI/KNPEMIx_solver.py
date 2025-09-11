@@ -108,13 +108,25 @@ class SolverKNPEMI(object):
 
             # Set initial guess
             for idx, ion in enumerate(p.ion_list):
-                # Get dof mapping between subspace and parent space
-                _, sub_to_parent_i = p.wh[0].sub(idx).function_space.collapse()
-                _, sub_to_parent_e = p.wh[1].sub(idx).function_space.collapse()
+                if p.glia_tags is None:
+                    # Get dof mapping between subspace and parent space
+                    _, sub_to_parent_i = p.wh[0].sub(idx).function_space.collapse()
+                    _, sub_to_parent_e = p.wh[1].sub(idx).function_space.collapse()
 
-                # Set the array values at the subspace dofs 
-                p.wh[0].sub(idx).x.array[sub_to_parent_i] = ion['ki_init']
-                p.wh[1].sub(idx).x.array[sub_to_parent_e] = ion['ke_init']
+                    # Set the array values at the subspace dofs 
+                    p.wh[0].sub(idx).x.array[sub_to_parent_i] = ion['ki_init']
+                    p.wh[1].sub(idx).x.array[sub_to_parent_e] = ion['ke_init']
+                else:
+                    # Get dof mapping between subspace and parent space
+                    W_ion_i, sub_to_parent_i = p.wh[0].sub(idx).function_space.collapse()
+                    neuron_dofs = dfx.fem.locate_dofs_topological((p.W[0].sub(idx), W_ion_i), p.subdomains.dim, p.neuron_cells)
+                    glia_dofs   = dfx.fem.locate_dofs_topological((p.W[0].sub(idx), W_ion_i), p.subdomains.dim, p.glia_cells)
+                    _, sub_to_parent_e = p.wh[1].sub(idx).function_space.collapse()
+                    
+                    # Set the array values at the subspace dofs 
+                    p.wh[0].sub(idx).x.array[np.intersect1d(sub_to_parent_i, neuron_dofs[0])] = ion['ki_init_n']
+                    p.wh[0].sub(idx).x.array[np.intersect1d(sub_to_parent_i, glia_dofs[0])]   = ion['ki_init_g']
+                    p.wh[1].sub(idx).x.array[sub_to_parent_e] = ion['ke_init']
 
             self.ksp.setType(self.ksp_type)
             pc = self.ksp.getPC()

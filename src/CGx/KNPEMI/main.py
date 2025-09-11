@@ -21,7 +21,7 @@ def main_yaml(yaml_file="config.yaml", view_input=None):
 	KirNa = KirNaKPumpModel(problem, tags=problem.glia_tags)
 	GlialCT = GlialCotransporters(problem, tags=problem.glia_tags)
 
-	ionic_models = [HH, ATP, NeuronalCT]#, KirNa, GlialCT]
+	ionic_models = [HH, ATP, NeuronalCT, GlialCT] # KirNa
 
 	problem.init_ionic_model(ionic_models)
 
