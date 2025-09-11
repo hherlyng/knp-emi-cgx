@@ -363,20 +363,11 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                     # Add contribution to total channel current
                     I_ch[gamma_tag] += ion['I_ch'][gamma_tag]
             
-        if np.isclose(t.value, 0.0):
-            # First timestep
+        if np.isclose(t.value, 0.0): # First timestep
             # Set phi_e and phi_i just for visualization
             if self.MMS_test:
                 ui_p.sub(self.N_ions).interpolate(self.phi_i_init)
                 ue_p.sub(self.N_ions).interpolate(self.phi_e_init)
-            else:
-                # Get dof mapping between subspace and parent space
-                _, sub_to_parent_i = ui_p.sub(self.N_ions).function_space.collapse()
-                _, sub_to_parent_e = ue_p.sub(self.N_ions).function_space.collapse()
-                
-                # Set the array values at the subspace dofs 
-                ui_p.sub(self.N_ions).x.array[sub_to_parent_i] = self.phi_i_init
-                ue_p.sub(self.N_ions).x.array[sub_to_parent_e] = self.phi_e_init
         
         # Initialize variational form block entries
         a00 = 0; a01 = 0; L0 = 0

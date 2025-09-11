@@ -106,7 +106,7 @@ class SolverKNPEMI(object):
         else:
             print("Setting up iterative solver ...")
 
-            # set initial guess
+            # Set initial guess
             for idx, ion in enumerate(p.ion_list):
                 # Get dof mapping between subspace and parent space
                 _, sub_to_parent_i = p.wh[0].sub(idx).function_space.collapse()
@@ -115,9 +115,6 @@ class SolverKNPEMI(object):
                 # Set the array values at the subspace dofs 
                 p.wh[0].sub(idx).x.array[sub_to_parent_i] = ion['ki_init']
                 p.wh[1].sub(idx).x.array[sub_to_parent_e] = ion['ke_init']
-            
-            p.wh[0].sub(p.N_ions).x.array[:] = p.phi_i_init
-            p.wh[1].sub(p.N_ions).x.array[:] = p.phi_e_init
 
             self.ksp.setType(self.ksp_type)
             pc = self.ksp.getPC()
