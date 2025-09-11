@@ -18,11 +18,11 @@ def g_syn(g_syn_bar, a_syn, t: float) -> float:
     return g
 
 # Kir-function used in ionic pump (Halnes et al. 2013(?))
-def f_Kir(K_e_init, K_e, EK_init, Dphi, phi_m):
+def f_Kir(K_e_init, K_e, E_K_init, delta_phi, phi_m):
 
-    A = 1 + ufl.exp(18.4/42.4)
-    B = 1 + ufl.exp(-(0.1186 + EK_init) / 0.0441)
-    C = 1 + ufl.exp((Dphi + 0.0185) / 0.0425)
+    A = 1 + ufl.exp(0.433)
+    B = 1 + ufl.exp(-(0.1186 + E_K_init) / 0.0441)
+    C = 1 + ufl.exp((delta_phi + 0.0185) / 0.0425)
     D = 1 + ufl.exp(-(0.1186 + phi_m) / 0.0441)
 
     f = ufl.sqrt(K_e / K_e_init) * A*B / (C*D)
@@ -90,8 +90,8 @@ class KirNaKPumpModel(IonicModel):
 
     # Potassium buffering parameters
     rho_pump = 1.12e-6	# Maximum pump rate (mol/m**2 s)
-    P_Nai = 10          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
-    P_Ke  = 1.5         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
+    P_Na_i = 10          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
+    P_K_e  = 1.5         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
     k_dec = 2.9e-8		# Decay factor for [K+]e (m/s)
 
     # -k_dec * ([K]e − [K]e_0) both for K and Na
@@ -101,20 +101,12 @@ class KirNaKPumpModel(IonicModel):
 
         super().__init__(KNPEMIx_problem, tags)
 
-        # Initialize pump constants
-        for ion in self.problem.ion_list:
-            if ion['name'] == 'Na':
-                ion['rho_p'] =  3 * self.rho_pump
-            elif ion['name'] == 'K':
-                ion['rho_p'] = -2 * self.rho_pump
-            elif ion['name'] == 'Cl':
-                ion['rho_p'] = 0.0			
+        # Initial potassium Nernst potential
+        p = KNPEMIx_problem
+        self.E_K_init = p.psi*ufl.ln(p.K_e_init/p.K_i_g_init)	
 
     def __str__(self):
-        if self.use_decay_currents:
-            return f'Passive with K pump and decay currents'
-        else:
-            return f'Passive with K pump'
+        return f'Inward-rectifying K current passive model with Na/K/ATPase pump'
 
     def _init(self):
 
@@ -123,8 +115,11 @@ class KirNaKPumpModel(IonicModel):
         ui_p = p.u_p[0]
         ue_p = p.u_p[1]
 
-        self.pump_coeff = (ui_p.sub(0)**1.5/(ui_p.sub(0)**1.5 + self.P_Nai**1.5)
-                        * (ue_p.sub(1)/(ue_p.sub(1) + self.P_Ke)))
+        self.pump_coeff = (
+                        1.0 / (1.0 + (self.P_Na_i/ui_p.sub(0))**(3/2))
+                    * (1.0 / (1.0 + self.P_K_e/ue_p.sub(1)))
+                    * self.rho_pump
+                        )
         
     def _eval(self, ion_idx):
 
@@ -135,24 +130,20 @@ class KirNaKPumpModel(IonicModel):
         F     = p.F
         ion   = p.ion_list[ion_idx]
         z     = ion['z']
-
-        # Leak currents
-        ion['g_k'] = ion['g_leak_g']
             
         # f_kir function	
         if ion['name'] == 'K':
             
-            # Kir-Na variable
-            EK_init = (p.psi/z)*ufl.ln(p.K_e_init/p.K_i_init)			
-            Dphi  = phi_m - ion['E']
-            f_kir = f_Kir(p.K_e_init, ue_p.sub(ion_idx), EK_init, Dphi, phi_m)
+            # Kir-Na variable		
+            delta_phi  = phi_m - ion['E']
+            f_kir = f_Kir(p.K_e_init, ue_p.sub(ion_idx), self.E_K_init, delta_phi, phi_m)
             
             # ATP pump current
             I_ATP = -2*F*z*self.pump_coeff
 
         else:
             # Kir-Na variable
-            f_kir = 1
+            f_kir = 1.0
 
             # ATP pump current
             if ion['name'] == 'Na':
@@ -160,7 +151,7 @@ class KirNaKPumpModel(IonicModel):
             else:
                 I_ATP = 0.0
 
-        I_ch = f_kir*ion['g_k']*(phi_m - ion['E']) + I_ATP
+        I_ch = f_kir*ion['g_leak_g']*(phi_m - ion['E']) + I_ATP
 
         if self.use_decay_currents:
             if ion['name'] == 'K' or ion['name'] == 'Na':

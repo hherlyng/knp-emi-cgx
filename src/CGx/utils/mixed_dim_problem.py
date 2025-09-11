@@ -719,13 +719,13 @@ class MixedDimensionalProblem(ABC):
             # Kir-Na and Na/K pump mechanisms
             E_K_0 = E(z_K, K_i_0, K_e_0)
             A = 1 + np.exp(0.433)
-            B = 1 + np.exp(-(0.1186 + E_K_0))
+            B = 1 + np.exp(-(0.1186 + E_K_0) / 0.0441)
             C = lambda delta_phi_K: 1 + np.exp((delta_phi_K + 0.0185)/0.0425)
             D = lambda phi_m: 1 + np.exp(-(0.1186 + phi_m)/0.0441)
 
             rho_pump = self.rho_pump	 # Maximum pump rate (mol/m**2 s)
-            P_Na_i = self.P_Nai          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
-            P_K_e  = self.P_Ke         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
+            P_Na_i = self.P_Na_i          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
+            P_K_e  = self.P_K_e         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
 
             # Pump expression
             I_glia_pump = lambda Na_i, K_e: rho_pump*F * (1 / (1 + (P_Na_i/Na_i)**(3/2))) * (1 / (1 + P_K_e/K_e))

@@ -800,8 +800,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
     # Potassium buffering params [Halnes et al. 2013]
     rho_pump = 1.12e-6			     # maximum pump rate (mol/m**2 s)
-    P_Nai = 10                       # [Na+]i threshold for Na+/K+ pump (mol/m^3)
-    P_Ke  = 1.5                      # [K+]e  threshold for Na+/K+ pump (mol/m^3)
+    P_Na_i = 10                       # [Na+]i threshold for Na+/K+ pump (mol/m^3)
+    P_K_e  = 1.5                      # [K+]e  threshold for Na+/K+ pump (mol/m^3)
     k_dec = 2.9e-8				     # Decay factor for [K+]e (m/s)
 
     # Initial conditions
