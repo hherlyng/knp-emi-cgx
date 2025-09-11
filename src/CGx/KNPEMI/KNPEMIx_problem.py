@@ -108,7 +108,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
             # First round in for-loop is for intracellular variables
             ion_suffix = 'i'
-            init_phi = self.phi_i_init
+            init_phi = self.phi_m_init
             for W in [Wi, We]:
                 # BCs for concentrations
                 for idx, ion in enumerate(self.ion_list):
@@ -137,7 +137,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
                 # Next round in for-loop is for extracellular variables
                 ion_suffix = 'e'
-                init_phi = self.phi_e_init
+                init_phi = 0.0
 
         self.bcs = bcs
 
@@ -192,11 +192,22 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
         # Set initial membrane potential
         if np.isclose(t.value, 0.0):
-            self.phi_M_prev = dfx.fem.Function(phi_space)
+            self.phi_m_prev = dfx.fem.Function(phi_space)
             if self.MMS_test:
-                self.phi_M_prev.interpolate(self.phi_M_init)
+                self.phi_m_prev.interpolate(self.phi_m_init)
             else:
-                self.phi_M_prev.x.array[:] = self.phi_M_init
+                if self.glia_tags is None:
+                    # Only neuronal cells
+                    self.phi_m_prev.x.array[:] = self.phi_m_init
+                else:
+                    # Both neuronal and glial cells
+                    neuron_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.neuron_tags]))
+                    glia_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.glia_tags]))
+                    neuron_dofs = dfx.fem.locate_dofs_topological(phi_space, self.mesh.topology.dim, neuron_cells)
+                    glia_dofs = dfx.fem.locate_dofs_topological(phi_space, self.mesh.topology.dim, glia_cells)
+
+                    self.phi_m_prev.x.array[neuron_dofs] = self.phi_m_n_init
+                    self.phi_m_prev.x.array[glia_dofs] = self.phi_m_g_init
         
         print("Setting up variational form ...")
 
@@ -416,8 +427,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
             # Ionic channels
             for gamma_tag in self.gamma_tags:
-                L0 -= (dt*I_ch_k[gamma_tag] - alpha_i('-')*C_M*self.phi_M_prev) / (F*z) * vki('-') * dS(gamma_tag)
-                L1 += (dt*I_ch_k[gamma_tag] - alpha_e('-')*C_M*self.phi_M_prev) / (F*z) * vke('-') * dS(gamma_tag)
+                L0 -= (dt*I_ch_k[gamma_tag] - alpha_i('-')*C_M*self.phi_m_prev) / (F*z) * vki('-') * dS(gamma_tag)
+                L1 += (dt*I_ch_k[gamma_tag] - alpha_e('-')*C_M*self.phi_m_prev) / (F*z) * vke('-') * dS(gamma_tag)
 
             # Add contributions to total current flux
             J_phi_i += z*Ji
@@ -456,8 +467,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         a10 -= (C_M/(F*dt)) * inner(phi_i('-'), vphi_e('-')) * dS 
         
         for gamma_tag in self.gamma_tags:
-            L0  -= (1/F) * (I_ch[gamma_tag] - C_M*self.phi_M_prev/dt) * vphi_i('-') * dS(gamma_tag)
-            L1  += (1/F) * (I_ch[gamma_tag] - C_M*self.phi_M_prev/dt) * vphi_e('-') * dS(gamma_tag)
+            L0  -= (1/F) * (I_ch[gamma_tag] - C_M*self.phi_m_prev/dt) * vphi_i('-') * dS(gamma_tag)
+            L1  += (1/F) * (I_ch[gamma_tag] - C_M*self.phi_m_prev/dt) * vphi_e('-') * dS(gamma_tag)
         
         if self.MMS_test:
             # Phi source terms
@@ -591,7 +602,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             src_terms, exact_sols, init_conds, bndry_terms = self.M.get_MMS_terms_KNPEMI_3D(0.0)
         
         # initial values
-        self.phi_M_init = init_conds['phi_M']   # membrane potential (V)
+        self.phi_m_init = init_conds['phi_m']   # membrane potential (V)
         self.phi_i_init = exact_sols['phi_i_e'] # internal potential (V) just for visualization
         self.phi_e_init = exact_sols['phi_e_e'] # external potential (V) just for visualization
 
@@ -770,96 +781,40 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     R   = 8.314                      # Gas constant (J/(K*mol))
     psi = R*T/F                      # recurring variable
     
-    g_Na_bar  = 1200                 # Na max conductivity (S/m**2)
-    g_K_bar   = 360                  # K max conductivity (S/m**2)    
-    g_Na_leak = 1.0              # Na leak conductivity (S/m**2) (Constant)
-    g_K_leak  = 4.0              # K leak conductivity (S/m**2)
-    g_Cl_leak = 0.25                 # Cl leak conductivity (S/m**2) (Constant)
-    a_syn     = 0.002                # synaptic time constant (s)
-    g_syn_bar = 40                   # synaptic conductivity (S/m**2)
-    D_Na = 1.33e-9                   # diffusion coefficients Na (m/s^2) (Constant)
-    D_K  = 1.96e-9                   # diffusion coefficients K (m/s^2) (Constant)
-    D_Cl = 2.03e-9                   # diffusion coefficients Cl (m/s^2) (Constant)
-    V_rest  = -0.065                # resting membrane potential (V)
+    g_Na_bar    = 1200                 # Na max conductivity (S/m**2)
+    g_K_bar     = 360                  # K max conductivity (S/m**2)    
+    g_Na_leak   = 1.0              # Na leak conductivity (S/m**2) (Constant)
+    g_Na_leak_g = 1.0              # Na leak conductivity (S/m**2) (Constant)
+    g_K_leak    = 4.0              # K leak conductivity (S/m**2)
+    g_K_leak_g  = 16.96
+    g_Cl_leak   = 0.25                  # Cl leak conductivity (S/m**2) (Constant)
+    g_Cl_leak_g = 0.5
+    a_syn       = 0.002                 # synaptic time constant (s)
+    g_syn_bar   = 40                    # synaptic conductivity (S/m**2)
+    D_Na        = 1.33e-9               # diffusion coefficients Na (m/s^2) (Constant)
+    D_K         = 1.96e-9               # diffusion coefficients K (m/s^2) (Constant)
+    D_Cl        = 2.03e-9               # diffusion coefficients Cl (m/s^2) (Constant)
+    phi_rest    = -0.065                # resting membrane potential (V)
 
-    # Potassium buffering params
-    rho_pump = 1.115e-6			     # maximum pump rate (mol/m**2 s)
+    # Potassium buffering params [Halnes et al. 2013]
+    rho_pump = 1.12e-6			     # maximum pump rate (mol/m**2 s)
     P_Nai = 10                       # [Na+]i threshold for Na+/K+ pump (mol/m^3)
     P_Ke  = 1.5                      # [K+]e  threshold for Na+/K+ pump (mol/m^3)
     k_dec = 2.9e-8				     # Decay factor for [K+]e (m/s)
 
-    # HH + ATP + Cotransporters
     # Initial conditions
-
-    # # Unit square
-    # phi_M_init = -0.066817831631245 # membrane potential (V)	 (Constant)
-    # phi_i_init = phi_M_init  # intracellular potential (V) just for visualization (Constant)
-    # phi_e_init = 0.0         # external potential (V) (Constant)
-
-    # Na_i_init  = 48.093785429263470        # intracellular Na concentration (mol/m^3) (Constant)
-    # Na_e_init  = 109.968738190247123       # extracellular Na concentration (mol/m^3) (Constant)
-    # K_i_init   = 79.495771046028807        # intracellular K  concentration (mol/m^3) (Constant)
-    # K_e_init   = 4.168076317990064         # extracellular K  concentration (mol/m^3) (Constant)
-    # Cl_i_init  = 7.442617475023728        # intracellular Cl concentration (mol/m^3) (Constant)
-    # Cl_e_init  = 111.852460841659322   # extracellular Cl concentration (mol/m^3) (Constant)
-
-    # # Initial values of gating variables
-    # n_init_val = 0.290225733310237
-    # m_init_val = 0.042627601555044
-    # h_init_val = 0.657945794679294   
-
-    # mu = 10, N = 10
-    phi_M_init = -0.066465112546585 # membrane potential (V)	 (Constant)
-    phi_i_init = phi_M_init  # intracellular potential (V) just for visualization (Constant)
-    phi_e_init = 0.0         # external potential (V) (Constant)
-
-    Na_i_init  = 44.025137383586404        # intracellular Na concentration (mol/m^3) (Constant)
-    Na_e_init  = 91.594680807306901       # extracellular Na concentration (mol/m^3) (Constant)
-    K_i_init   = 79.708564476974033        # intracellular K  concentration (mol/m^3) (Constant)
-    K_e_init   = 4.318089350829993         # extracellular K  concentration (mol/m^3) (Constant)
-    Cl_i_init  = 7.562956147339781        # intracellular Cl concentration (mol/m^3) (Constant)
-    Cl_e_init  = 111.385557554568578   # extracellular Cl concentration (mol/m^3) (Constant)
-
-    # Initial values of gating variables
-    n_init_val = 0.295484091091823
-    m_init_val = 0.044471264479422
-    h_init_val = 0.646269680544548   
-    
-    # # HH + ATP
-    # # Initial conditions
-    # phi_e_init = 0.0         # external potential (V) (Constant)
-    # phi_M_init = -0.066813820684751 # membrane potential (V)	 (Constant)
-    # phi_i_init = phi_M_init  # intracellular potential (V) just for visualization (Constant)
-
-    # Na_i_init  = 48.248514870537960        # intracellular Na concentration (mol/m^3) (Constant)
-    # Na_e_init  = 109.917161709819084       # extracellular Na concentration (mol/m^3) (Constant)
-    # K_i_init   = 79.540175569411389        # intracellular K  concentration (mol/m^3) (Constant)
-    # K_e_init   = 4.153274810195573         # extracellular K  concentration (mol/m^3) (Constant)
-    # Cl_i_init  = 7.0        # intracellular Cl concentration (mol/m^3) (Constant)
-    # Cl_e_init  = 112.0       # extracellular Cl concentration (mol/m^3) (Constant)
-
-    # # Initial values of gating variables
-    # n_init_val = 0.290285330347256
-    # m_init_val = 0.042648167664035
-    # h_init_val = 0.657813845649656    
-
-    # HH only:       
-    # # Initial conditions
-    # phi_e_init = 0.016463537289022653         # external potential (V) (Constant)
-    # # phi_M_init = -6.52443885e-02 # membrane potential (V)	 (Constant)
-    # phi_i_init = -0.04878085122676572  # intracellular potential (V) just for visualization (Constant)
-    # phi_M_init = phi_i_init - phi_e_init
-    # Na_i_init  = 3.04730602e+02        # intracellular Na concentration (mol/m^3) (Constant)
-    # Na_e_init  = 2.44231326e+01       # extracellular Na concentration (mol/m^3) (Constant)
-    # K_i_init   = 7.41672365e+01        # intracellular K  concentration (mol/m^3) (Constant)
-    # K_e_init   = 5.94425451e+00         # extracellular K  concentration (mol/m^3) (Constant)
-    # Cl_i_init  = 7         # intracellular Cl concentration (mol/m^3) (Constant)
-    # Cl_e_init  = 112       # extracellular Cl concentration (mol/m^3) (Constant)
-
-    # # Initial values of gating variables
-    # n_init_val = 3.13937759e-01
-    # m_init_val = 5.14268886e-02
-    # h_init_val = 6.04726150e-01               
+    phi_m_init = -0.067 # Membrane potential (V)	 (Constant)
+    phi_i_init = phi_m_init # Intracellular potential (V)	 (Constant)
+    phi_e_init = 0.0     # Extracellular potential (V)	 (Constant)
+    Na_i_init  = 40        # intracellular Na concentration (mol/m^3) (Constant)
+    Na_e_init  = 90       # extracellular Na concentration (mol/m^3) (Constant)
+    K_i_init   = 80        # intracellular K  concentration (mol/m^3) (Constant)
+    K_e_init   = 4         # extracellular K  concentration (mol/m^3) (Constant)
+    Cl_i_init  = 7        # intracellular Cl concentration (mol/m^3) (Constant)
+    Cl_e_init  = 112   # extracellular Cl concentration (mol/m^3) (Constant)
+    n_init_val = 0.3 # Gating variable
+    m_init_val = 0.05 # Gating variable
+    h_init_val = 0.65 # Gating variable
 
     # Source terms
     Na_e_f = 0.0
@@ -870,9 +825,9 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     Cl_i_f = 0.0
 
     # Ion dictionaries and list
-    Na = {'g_leak':g_Na_leak, 'Di':D_Na, 'De':D_Na, 'ki_init':Na_i_init, 'ke_init':Na_e_init, 'z':1.0,  'f_e': Na_e_f, 'f_i':Na_i_f, 'name':'Na'}
-    K  = {'g_leak':g_K_leak,  'Di':D_K,  'De':D_K,  'ki_init':K_i_init,  'ke_init':K_e_init,  'z':1.0,  'f_e': K_e_f,  'f_i':K_i_f,  'name':'K' }
-    Cl = {'g_leak':g_Cl_leak, 'Di':D_Cl, 'De':D_Cl, 'ki_init':Cl_i_init, 'ke_init':Cl_e_init, 'z':-1.0, 'f_e': Cl_e_f, 'f_i':Cl_i_f, 'name':'Cl'}
+    Na = {'g_leak':g_Na_leak, 'g_leak_g':g_Na_leak_g, 'Di':D_Na, 'De':D_Na, 'ki_init':Na_i_init, 'ke_init':Na_e_init, 'z':1.0,  'f_e': Na_e_f, 'f_i':Na_i_f, 'name':'Na'}
+    K  = {'g_leak':g_K_leak, 'g_leak_g':g_K_leak_g, 'Di':D_K,  'De':D_K,  'ki_init':K_i_init,  'ke_init':K_e_init,  'z':1.0,  'f_e': K_e_f,  'f_i':K_i_f,  'name':'K' }
+    Cl = {'g_leak':g_Cl_leak, 'g_leak_g':g_Cl_leak_g, 'Di':D_Cl, 'De':D_Cl, 'ki_init':Cl_i_init, 'ke_init':Cl_e_init, 'z':-1.0, 'f_e': Cl_e_f, 'f_i':Cl_i_f, 'name':'Cl'}
     ion_list = [Na, K, Cl]
     N_ions   = len(ion_list) 
 

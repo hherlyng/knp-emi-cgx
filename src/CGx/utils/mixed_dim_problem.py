@@ -40,9 +40,9 @@ class MixedDimensionalProblem(ABC):
 
         # Perform FEM setup
         self.init()
+        self.find_steady_state_initial_conditions()
         self.setup_spaces()
         self.setup_boundary_conditions()
-        self.find_steady_state_initial_conditions()
         if self.source_terms=="ion_injection": self.setup_source_terms()
 
         # Initialize time
@@ -128,6 +128,9 @@ class MixedDimensionalProblem(ABC):
         else:
             # All cells are stimulated
             self.stimulus_tags = tags['membrane']
+        if 'glia_tags' in config:
+            tags['glia'] = config['glia_tags']
+            tags['neuron'] = [tag for tag in config['membrane_tags'] if tag not in config['glia_tags']]
 
         # Parse the tags
         self.parse_tags(tags=tags)
@@ -154,8 +157,8 @@ class MixedDimensionalProblem(ABC):
         # Verification test flag
         if 'MMS_test' in config: self.MMS_test = config['MMS_test']
 
-        # Initial membrane potential (default -0.06774 Volts)
-        if 'phi_M_init' in config: self.phi_M_init = config['phi_M_init']
+        # Initial membrane potential
+        if 'phi_m_init' in config: self.phi_m_init = config['phi_m_init']
 
         # Set electrical conductivities (for EMI)
         if 'sigma_i' in config: self.sigma_i = config['sigma_i']
@@ -216,7 +219,7 @@ class MixedDimensionalProblem(ABC):
 
     def parse_tags(self, tags: dict):
 
-        allowed_tags = {'intra', 'extra', 'membrane', 'boundary'}
+        allowed_tags = {'intra', 'extra', 'membrane', 'boundary', 'glia', 'neuron'}
 
         tags_set = set(tags.keys())
 
@@ -246,6 +249,14 @@ class MixedDimensionalProblem(ABC):
         else:
             print('Setting default: membrane tag = intra tag.')
             self.gamma_tags = self.intra_tags
+
+        if 'glia' in tags_set:
+            self.glia_tags = tags['glia']
+            self.neuron_tags = [tag for tag in tags['membrane'] if tag not in tags['glia']]
+        else:
+            print('Setting default: all membrane tags = neuron tags')
+            self.glia_tags = None
+            self.neuron_tags = self.gamma_tags
         
         if 'boundary' in tags_set:
             self.boundary_tag = tags['boundary']
@@ -257,6 +268,8 @@ class MixedDimensionalProblem(ABC):
         if isinstance(self.extra_tag, int) or isinstance(self.extra_tag, list): self.extra_tag = tuple(self.extra_tag,)
         if isinstance(self.boundary_tag, int) or isinstance(self.boundary_tag, list): self.boundary_tag = tuple(self.boundary_tag,)
         if isinstance(self.gamma_tags, int) or isinstance(self.gamma_tags, list): self.gamma_tags = tuple(self.gamma_tags,)
+        if isinstance(self.glia_tags, int) or isinstance(self.glia_tags, list): self.glia_tags = tuple(self.glia_tags,)
+        if isinstance(self.neuron_tags, int) or isinstance(self.neuron_tags, list): self.neuron_tags = tuple(self.neuron_tags,)
 
     def init_ionic_model(self, ionic_models):
 
@@ -457,193 +470,435 @@ class MixedDimensionalProblem(ABC):
         
         print("Solving ODE system to find steady-state initial conditions ...")
 
-        # Calculate volumes and membrane surface area
-        vol_i = self.comm.allreduce(
-                                dfx.fem.assemble_scalar(
-                                    dfx.fem.form(1*self.dx(self.intra_tags))
-                                    ),
-                                    op=MPI.SUM
-                                    ) # [m^3]
-        vol_e = self.comm.allreduce(
-                                dfx.fem.assemble_scalar(
-                                    dfx.fem.form(1*self.dx(self.extra_tag))
-                                    ),
-                                    op=MPI.SUM
-                                    ) # [m^3]
-        area_g = self.comm.allreduce(
-                                dfx.fem.assemble_scalar(
-                                    dfx.fem.form(1*self.dS(self.gamma_tags))
-                                    ),
-                                    op=MPI.SUM
-                                    ) # [m^2]
-        print(f"{vol_i=}")
-        print(f"{vol_e=}")
-        print(f"{area_g=}")
+        # Set constants
+        R = self.R # Gas constant [J/(mol*K)]
+        F = self.F # Faraday's constant [C/mol]
+        T = self.T # Temperature [K]
+        C_m = self.C_M # Membrane capacitance
+        z_Na =  1 # Valence sodium
+        z_K  =  1 # Valence potassium
+        z_Cl = -1 # Valence chloride
+        g_Na_bar  = self.g_Na_bar                 # Na max conductivity (S/m**2)
+        g_K_bar   = self.g_K_bar                  # K max conductivity (S/m**2)    
+        g_Na_leak = self.g_Na_leak              # Na leak conductivity (S/m**2) (Constant)
+        g_Na_leak_g = self.g_Na_leak_g              # Na leak conductivity (S/m**2) (Constant)
+        g_K_leak  = self.g_K_leak              # K leak conductivity (S/m**2)
+        g_K_leak_g  = self.g_K_leak_g              # K leak conductivity (S/m**2)
+        g_Cl_leak = self.g_Cl_leak                  # Cl leak conductivity (S/m**2) (Constant)
+        g_Cl_leak_g = self.g_Cl_leak_g                  # Cl leak conductivity (S/m**2) (Constant)
+        phi_rest = self.phi_rest  # Resting potential [V]
 
-        if self.comm.rank==0:
-            # Define constants
-            R = self.R # Gas constant [J/(mol*K)]
-            F = self.F # Faraday's constant [C/mol]
-            T = self.T # Temperature [K]
-            C_m = self.C_M # Membrane capacitance
-            z_Na = 1 # Valence sodium
-            z_K  = 1 # Valence potassium
-            z_Cl = -1 # Valence chloride
-            g_Na_bar  = self.g_Na_bar                 # Na max conductivity (S/m**2)
-            g_K_bar   = self.g_K_bar                  # K max conductivity (S/m**2)    
-            g_Na_leak = self.g_Na_leak              # Na leak conductivity (S/m**2) (Constant)
-            g_K_leak  = self.g_K_leak              # K leak conductivity (S/m**2)
-            g_Cl_leak = self.g_Cl_leak                  # Cl leak conductivity (S/m**2) (Constant)
-            phi_rest = self.V_rest  # Resting potential [V]
+        # Define timespan for ODE solver
+        timestep = 1e-6
+        max_time = 1
+        num_timesteps = int(max_time / timestep)
+        times = np.linspace(0, max_time, num_timesteps+1)
 
-            # ATP pump
-            I_hat = 0.18 # Maximum pump strength [A/m^2]
-            m_K = 3 # ECS K+ pump threshold [mM]
-            m_Na = 12 # ICS Na+ pump threshold [mM]
+        # Define initial condition guesses
+        Na_i_0 = 40 # [Mm]
+        Na_e_0 = 90 # [Mm]
+        K_i_0 = 80 # [Mm]
+        K_e_0 = 4 # [Mm]
+        Cl_i_0 = 7 # [Mm]
+        Cl_e_0 = 112 # [Mm]
+        phi_m_0 = -0.067 # [V]
+        phi_m_0_g = -0.085 # [V]
+        n_0 = 0.3 
+        m_0 = 0.05
+        h_0 = 0.65
 
-            # Cotransporters
-            S_KCC2 = 0.0034
-            S_NKCC1 = 0.023
+        # ATP pump
+        I_hat = 0.18 # Maximum pump strength [A/m^2]
+        m_K = 3 # ECS K+ pump threshold [mM]
+        m_Na = 12 # ICS Na+ pump threshold [mM]
 
-            # Define initial condition guesses
-            Na_i_0 = 40 # [Mm]
-            Na_e_0 = 90 # [Mm]
-            K_i_0 = 80 # [Mm]
-            K_e_0 = 4 # [Mm]
-            Cl_i_0 = 7 # [Mm]
-            Cl_e_0 = 112 # [Mm]
-            phi_m_0 = -0.067 # [V]
-            n_0 = 0.3 
-            m_0 = 0.05
-            h_0 = 0.65
+        # Cotransporters
+        S_KCC2 = 0.0034
+        S_NKCC1 = 0.023
 
-            # Hodgkin-Huxley parameters
-            alpha_n = lambda V_m: 0.01e3 * (10.-V_m) / (np.exp((10. - V_m)/10.) - 1.)
-            beta_n  = lambda V_m: 0.125e3 * np.exp(-V_m/80.)
-            alpha_m = lambda V_m: 0.1e3 * (25. - V_m) / (np.exp((25. - V_m)/10.) - 1)
-            beta_m  = lambda V_m: 4.e3 * np.exp(-V_m/18.)
-            alpha_h = lambda V_m: 0.07e3 * np.exp(-V_m/20.)
-            beta_h  = lambda V_m: 1.e3 / (np.exp((30. - V_m)/10.) + 1)
+        # Hodgkin-Huxley parameters
+        alpha_n = lambda V_m: 0.01e3 * (10.-V_m) / (np.exp((10. - V_m)/10.) - 1.)
+        beta_n  = lambda V_m: 0.125e3 * np.exp(-V_m/80.)
+        alpha_m = lambda V_m: 0.1e3 * (25. - V_m) / (np.exp((25. - V_m)/10.) - 1)
+        beta_m  = lambda V_m: 4.e3 * np.exp(-V_m/18.)
+        alpha_h = lambda V_m: 0.07e3 * np.exp(-V_m/20.)
+        beta_h  = lambda V_m: 1.e3 / (np.exp((30. - V_m)/10.) + 1)
 
-            # Nernst potential
-            E = lambda z_k, c_ki, c_ke: R*T/(z_k*F) * np.log(c_ke/c_ki)
+        # Nernst potential
+        E = lambda z_k, c_ki, c_ke: R*T/(z_k*F) * np.log(c_ke/c_ki)
 
-            # ATP current
-            par_1 = lambda K_e: 1 + m_K/K_e
-            par_2 = lambda Na_i: 1 + m_Na/Na_i
-            I_ATP = lambda Na_i, K_e: I_hat / (par_1(K_e)**2 * par_2(Na_i)**3)
+        # ATP current
+        par_1 = lambda K_e: 1 + m_K/K_e
+        par_2 = lambda Na_i: 1 + m_Na/Na_i
+        I_ATP = lambda Na_i, K_e: I_hat / (par_1(K_e)**2 * par_2(Na_i)**3)
 
-            # Cotransporter currents
-            I_KCC2 = lambda K_i, K_e, Cl_i, Cl_e: S_KCC2 * np.log((K_i * Cl_i)/(K_e*Cl_e))
-            I_NKCC1 = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: S_NKCC1 * 1 / (1 + np.exp(16 - K_e)) * np.log((Na_i * K_i * Cl_i**2)/(Na_e * K_e * Cl_e**2))
+        # Cotransporter currents
+        I_KCC2 = lambda K_i, K_e, Cl_i, Cl_e: S_KCC2 * np.log((K_i * Cl_i)/(K_e*Cl_e))
+        I_NKCC1_n = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: S_NKCC1 * 1 / (1 + np.exp(16 - K_e)) * np.log((Na_i * K_i * Cl_i**2)/(Na_e * K_e * Cl_e**2))
 
-            def rhs(x, t, args):
-                # Extract gating variables at current timestep
-                n = x[7]; m = x[8]; h = x[9]
 
-                # Extract membrane potential and concentrations at previous timestep
-                phi_m_ = args[0]; Na_i_ = args[1]; Na_e_ = args[2]; K_i_ = args[3]; K_e_ = args[4]; Cl_i_ = args[5]; Cl_e_ = args[6]
+        if self.glia_tags is None:
+            # Only neuronal intracellular space
+            vol_i = self.comm.allreduce(
+                                    dfx.fem.assemble_scalar(
+                                        dfx.fem.form(1*self.dx(self.intra_tags))
+                                        ),
+                                        op=MPI.SUM
+                                        ) # [m^3]
+            vol_e = self.comm.allreduce(
+                                    dfx.fem.assemble_scalar(
+                                        dfx.fem.form(1*self.dx(self.extra_tag))
+                                        ),
+                                        op=MPI.SUM
+                                        ) # [m^3]
+            area_g = self.comm.allreduce(
+                                    dfx.fem.assemble_scalar(
+                                        dfx.fem.form(1*self.dS(self.gamma_tags))
+                                        ),
+                                        op=MPI.SUM
+                                        ) # [m^2]
+            print(f"{vol_i=}")
+            print(f"{vol_e=}")
+            print(f"{area_g=}")
+
+            if self.comm.rank==0:
+
+                def two_compartment_rhs(x, t, args):
+                    """ Right-hand side of ODE system for two-compartment system (neuron + ECS). """
+                    # Extract gating variables at current timestep
+                    n = x[7]; m = x[8]; h = x[9]
+
+                    # Extract membrane potential and concentrations at previous timestep
+                    phi_m_ = args[0]; Na_i_ = args[1]; Na_e_ = args[2]; K_i_ = args[3]; K_e_ = args[4]; Cl_i_ = args[5]; Cl_e_ = args[6]
+                    
+                    # Define potential used in gating variable expressions
+                    phi_m_gating = (phi_m_ - phi_rest)*1e3 # Relative potential with unit correction
+
+                    # Calculate Nernst potentials
+                    E_Na = E(z_Na, Na_i_, Na_e_)
+                    E_K  = E(z_K, K_i_, K_e_)
+                    E_Cl = E(z_Cl, Cl_i_, Cl_e_)
+
+                    # Calculate ionic currents
+                    I_Na = (g_Na_leak + g_Na_bar * m**3 * h) * (phi_m_ - E_Na) + 3*I_ATP(Na_i_, K_e_) + I_NKCC1_n(Na_i_, Na_e_, K_i_, K_e_, Cl_i_, Cl_e_)
+                    I_K = (g_K_leak + g_K_bar * n**4)* (phi_m_ - E_K) - 2*I_ATP(Na_i_, K_e_) + I_NKCC1_n(Na_i_, Na_e_, K_i_, K_e_, Cl_i_, Cl_e_) + I_KCC2(K_i_, K_e_, Cl_i_, Cl_e_)
+                    I_Cl = g_Cl_leak * (phi_m_ - E_Cl) - 2*I_NKCC1_n(Na_i_, Na_e_, K_i_, K_e_, Cl_i_, Cl_e_) - I_KCC2(K_i_, K_e_, Cl_i_, Cl_e_)
+                    I_ion = I_Na + I_K + I_Cl # Total current
+
+                    # Define right-hand expressions
+                    rhs_phi = -1/C_m * I_ion
+                    rhs_Na_i = -I_Na * area_g / vol_i
+                    rhs_Na_e =  I_Na * area_g / vol_e
+                    rhs_K_i = -I_K * area_g / vol_i
+                    rhs_K_e =  I_K * area_g / vol_e
+                    rhs_Cl_i = -I_Cl * area_g / vol_i
+                    rhs_Cl_e =  I_Cl * area_g / vol_e
+                    rhs_n = alpha_n(phi_m_gating) * (1 - n) - beta_n(phi_m_gating) * n
+                    rhs_m = alpha_m(phi_m_gating) * (1 - m) - beta_m(phi_m_gating) * m
+                    rhs_h = alpha_h(phi_m_gating) * (1 - h) - beta_h(phi_m_gating) * h
+
+                    return [rhs_phi, rhs_Na_i, rhs_Na_e, rhs_K_i, rhs_K_e, -rhs_Cl_i, -rhs_Cl_e, rhs_n, rhs_m, rhs_h]
+
+                init = [phi_m_0, Na_i_0, Na_e_0, K_i_0, K_e_0, Cl_i_0, Cl_e_0, n_0, m_0, h_0]
+                sol_ = init
+
+                for t, dt in zip(times, np.diff(times)):
                 
-                # Define potential used in gating variable expressions
-                phi_m_gating = (phi_m_ - phi_rest)*1e3 # Relative potential with unit correction
+                    if t > 0:
+                        init = sol_[-1]
 
-                # Calculate Nernst potentials
-                E_Na = E(z_Na, Na_i_, Na_e_)
-                E_K  = E(z_K, K_i_, K_e_)
-                E_Cl = E(z_Cl, Cl_i_, Cl_e_)
+                    sol = odeint(lambda x, t: two_compartment_rhs(x, t, args=init[:-3]), init, [t, t+dt])
 
-                # Calculate ionic currents
-                I_Na = (g_Na_leak + g_Na_bar * m**3 * h) * (phi_m_ - E_Na) + 3*I_ATP(Na_i_, K_e_) + I_NKCC1(Na_i_, Na_e_, K_i_, K_e_, Cl_i_, Cl_e_)
-                I_K = (g_K_leak + g_K_bar * n**4)* (phi_m_ - E_K) - 2*I_ATP(Na_i_, K_e_) + I_NKCC1(Na_i_, Na_e_, K_i_, K_e_, Cl_i_, Cl_e_) + I_KCC2(K_i_, K_e_, Cl_i_, Cl_e_)
-                I_Cl = g_Cl_leak * (phi_m_ - E_Cl) - 2*I_NKCC1(Na_i_, Na_e_, K_i_, K_e_, Cl_i_, Cl_e_) - I_KCC2(K_i_, K_e_, Cl_i_, Cl_e_)
-                I_ion = I_Na + I_K + I_Cl # Total current
+                    if np.allclose(sol[0], sol[-1], rtol=1e-12):
+                        # Current solution equals previous solution
+                        print("Steady state reached.")
+                        break
 
-                # Define right-hand expressions
-                rhs_phi = -1/C_m * I_ion
-                rhs_Na_i = -I_Na * area_g / vol_i
-                rhs_Na_e =  I_Na * area_g / vol_e
-                rhs_K_i = -I_K * area_g / vol_i
-                rhs_K_e =  I_K * area_g / vol_e
-                rhs_Cl_i = -I_Cl * area_g / vol_i
-                rhs_Cl_e =  I_Cl * area_g / vol_e
-                rhs_n = alpha_n(phi_m_gating) * (1 - n) - beta_n(phi_m_gating) * n
-                rhs_m = alpha_m(phi_m_gating) * (1 - m) - beta_m(phi_m_gating) * m
-                rhs_h = alpha_h(phi_m_gating) * (1 - h) - beta_h(phi_m_gating) * h
+                    sol_ = sol # Update initial condition
 
-                return [rhs_phi, rhs_Na_i, rhs_Na_e, rhs_K_i, rhs_K_e, -rhs_Cl_i, -rhs_Cl_e, rhs_n, rhs_m, rhs_h]
+                    # Checks
+                    if np.isclose(t, max_time):
+                        print("Max time reached without finding steady state. Exiting.")
+                        break
 
-            timestep = 1e-6
-            max_time = 1
-            num_timesteps = int(max_time / timestep)
-            times = np.linspace(0, max_time, num_timesteps+1)
+                    if any(np.isnan(sol[-1])):
+                        print("NaN values in solution. Exiting.")
+                        break
 
-            init = [phi_m_0, Na_i_0, Na_e_0, K_i_0, K_e_0, Cl_i_0, Cl_e_0, n_0, m_0, h_0]
-            sol_ = init
+                sol = sol[-1]
+                for i in range(len(sol)):
+                    print(f"{sol[i]:.15f}")
 
-            # Prepare plotting
-            var_names = ['phi_m', 'Na_i', 'Na_e', 'K_i', 'K_e', 'Cl_i', 'Cl_e', 'n', 'm', 'h']
+                phi_m_init_val = sol[0]
+                Na_i_init_val = sol[1]
+                Na_e_init_val = sol[2]
+                K_i_init_val = sol[3]
+                K_e_init_val = sol[4]
+                Cl_i_init_val = sol[5]
+                Cl_e_init_val = sol[6]
+                n_init_val = sol[7]
+                m_init_val = sol[8]
+                h_init_val = sol[9]
+            else:
+                # Placeholders on non-root processes
+                phi_m_init_val = None
+                Na_i_init_val = None
+                Na_e_init_val = None
+                K_i_init_val = None
+                K_e_init_val = None
+                Cl_i_init_val = None
+                Cl_e_init_val = None
+                n_init_val = None
+                m_init_val = None
+                h_init_val = None
 
-            for t, dt in zip(times, np.diff(times)):
-            
-                if t > 0:
-                    init = sol_[-1]
+            # Communicate initial values from root process
+            self.phi_m_init = self.comm.bcast(phi_m_init_val, root=0)
+            self.Na_i_init = self.comm.bcast(Na_i_init_val, root=0)
+            self.Na_e_init = self.comm.bcast(Na_e_init_val, root=0)
+            self.K_i_init = self.comm.bcast(K_i_init_val, root=0)
+            self.K_e_init = self.comm.bcast(K_e_init_val, root=0)
+            self.Cl_i_init = self.comm.bcast(Cl_i_init_val, root=0)
+            self.Cl_e_init = self.comm.bcast(Cl_e_init_val, root=0)
+            self.n_init_val = self.comm.bcast(n_init_val, root=0)
+            self.m_init_val = self.comm.bcast(m_init_val, root=0)
+            self.h_init_val = self.comm.bcast(h_init_val, root=0)
 
-                sol = odeint(lambda x, t: rhs(x, t, args=init[:-3]), init, [t, t+dt])
+            # Update ion dictionaries
+            self.ion_list[0]['ki_init'] = self.Na_i_init
+            self.ion_list[0]['ke_init'] = self.Na_e_init
+            self.ion_list[1]['ki_init'] = self.K_i_init
+            self.ion_list[1]['ke_init'] = self.K_e_init
+            self.ion_list[2]['ki_init'] = self.Cl_i_init
+            self.ion_list[2]['ke_init'] = self.Cl_e_init
 
-                if np.allclose(sol[0], sol[-1], rtol=1e-12):
-                    # Current solution equals previous solution
-                    print("Steady state reached.")
-                    break
-
-                sol_ = sol # Update initial condition
-
-                # Checks
-                if np.isclose(t, max_time):
-                    print("Max time reached without finding steady state. Exiting.")
-                    break
-
-                if any(np.isnan(sol[-1])):
-                    print("NaN values in solution. Exiting.")
-                    break
-
-            sol = sol[-1]
-            for i in range(len(sol)):
-                print(f"{sol[i]:.15f}")
-
-            phi_M_init_val = sol[0]
-            Na_i_init_val = sol[1]
-            Na_e_init_val = sol[2]
-            K_i_init_val = sol[3]
-            K_e_init_val = sol[4]
-            Cl_i_init_val = sol[5]
-            Cl_e_init_val = sol[6]
-            n_init_val = sol[7]
-            m_init_val = sol[8]
-            h_init_val = sol[9]
         else:
-            # Placeholders on non-root processes
-            phi_M_init_val = None
-            Na_i_init_val = None
-            Na_e_init_val = None
-            K_i_init_val = None
-            K_e_init_val = None
-            Cl_i_init_val = None
-            Cl_e_init_val = None
-            n_init_val = None
-            m_init_val = None
-            h_init_val = None
+            # Both neuronal and glial intracellular space
+            vol_i_n = self.comm.allreduce(
+                                    dfx.fem.assemble_scalar(
+                                        dfx.fem.form(1*self.dx(self.neuron_tags))
+                                        ),
+                                        op=MPI.SUM
+                                        ) # [m^3]
+            vol_i_g = self.comm.allreduce(
+                                    dfx.fem.assemble_scalar(
+                                        dfx.fem.form(1*self.dx(self.glia_tags))
+                                        ),
+                                        op=MPI.SUM
+                                        ) # [m^3]
+            area_g_n = self.comm.allreduce(
+                                    dfx.fem.assemble_scalar(
+                                        dfx.fem.form(1*self.dS(self.neuron_tags))
+                                        ),
+                                        op=MPI.SUM
+                                        ) # [m^2]
+            area_g_g = self.comm.allreduce(
+                                    dfx.fem.assemble_scalar(
+                                        dfx.fem.form(1*self.dS(self.glia_tags))
+                                        ),
+                                        op=MPI.SUM
+                                        ) # [m^2]
+            vol_e = self.comm.allreduce(
+                                    dfx.fem.assemble_scalar(
+                                        dfx.fem.form(1*self.dx(self.extra_tag))
+                                        ),
+                                        op=MPI.SUM
+                                        ) # [m^3]
 
-        # Communicate initial values from root process
-        self.phi_M_init = self.comm.bcast(phi_M_init_val, root=0)
-        self.Na_i_init = self.comm.bcast(Na_i_init_val, root=0)
-        self.Na_e_init = self.comm.bcast(Na_e_init_val, root=0)
-        self.K_i_init = self.comm.bcast(K_i_init_val, root=0)
-        self.K_e_init = self.comm.bcast(K_e_init_val, root=0)
-        self.Cl_i_init = self.comm.bcast(Cl_i_init_val, root=0)
-        self.Cl_e_init = self.comm.bcast(Cl_e_init_val, root=0)
-        self.n_init_val = self.comm.bcast(n_init_val, root=0)
-        self.m_init_val = self.comm.bcast(m_init_val, root=0)
-        self.h_init_val = self.comm.bcast(h_init_val, root=0)            
+            print(f"{vol_i_n=}")
+            print(f"{vol_i_g=}")
+            print(f"{vol_e=}")
+            print(f"{area_g_n=}")
+            print(f"{area_g_g=}")
+
+            # Membrane potential initial conditions
+            phi_m_0_n = phi_m_0
+            phi_m_0_g = -0.085 # [V]
+
+            # Glial mechanisms
+            # Kir-Na and Na/K pump mechanisms
+            E_K_0 = E(z_K, K_i_0, K_e_0)
+            A = 1 + np.exp(0.433)
+            B = 1 + np.exp(-(0.1186 + E_K_0))
+            C = lambda delta_phi_K: 1 + np.exp((delta_phi_K + 0.0185)/0.0425)
+            D = lambda phi_m: 1 + np.exp(-(0.1186 + phi_m)/0.0441)
+
+            rho_pump = self.rho_pump	 # Maximum pump rate (mol/m**2 s)
+            P_Na_i = self.P_Nai          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
+            P_K_e  = self.P_Ke         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
+
+            # Pump expression
+            I_glia_pump = lambda Na_i, K_e: rho_pump*F * (1 / (1 + (P_Na_i/Na_i)**(3/2))) * (1 / (1 + P_K_e/K_e))
+
+            # Inward-rectifying K channel function
+            f_Kir = lambda K_e, K_e_0, delta_phi_K, phi_m: A*B/(C(delta_phi_K)*D(phi_m))*np.sqrt(K_e/K_e_0)
+
+            # Cotransporter strength and current
+            g_KCC1 = 7e-1 # [S / m^2]
+            S_KCC1 = g_KCC1 * R*T / F
+            I_KCC1 = lambda K_i, K_e, Cl_i, Cl_e: S_KCC1 * np.log((K_i * Cl_i) / (K_e * Cl_e))
+
+            g_NKCC1_g = 2e-2 # [S / m^2]
+            S_NKCC1_g = g_NKCC1_g * R*T / F
+            I_NKCC1_g = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: S_NKCC1_g * np.log((Na_i * K_i * Cl_i**2)/(Na_e * K_e * Cl_e**2))
+
+            if self.comm.rank==0:
+                def three_compartment_rhs(x, t, args):
+                    """ Right-hand side of ODE system for three-compartment system (neuron + glia + ECS). """
+                    # Extract gating variables at current timestep
+                    n = x[11]; m = x[12]; h = x[13]
+
+                    # Extract membrane potential and concentrations at previous timestep
+                    phi_m_n_ = args[0]; Na_i_n_ = args[1]; Na_e_ = args[2]; K_i_n_ = args[3]; K_e_ = args[4]; Cl_i_n_ = args[5]; Cl_e_ = args[6]
+                    phi_m_g_ = args[7]; Na_i_g_ = args[8]; K_i_g_ = args[9]; Cl_i_g_ = args[10]
+                    
+                    # Neuronal mechanisms
+                    # Define potential used in gating variable expressions
+                    phi_m_gating = (phi_m_n_ - phi_rest)*1e3 # Relative potential with unit correction
+
+                    # Calculate Nernst potentials
+                    E_Na_n = E(z_Na, Na_i_n_, Na_e_)
+                    E_K_n  = E(z_K, K_i_n_, K_e_)
+                    E_Cl_n = E(z_Cl, Cl_i_n_, Cl_e_)
+
+                    # Calculate neuronal ionic currents
+                    I_Na_n = (g_Na_leak + g_Na_bar * m**3 * h) * (phi_m_n_ - E_Na_n) + 3*I_ATP(Na_i_n_, K_e_) + I_NKCC1_n(Na_i_n_, Na_e_, K_i_n_, K_e_, Cl_i_n_, Cl_e_)
+                    I_K_n = (g_K_leak + g_K_bar * n**4)* (phi_m_n_ - E_K_n) - 2*I_ATP(Na_i_n_, K_e_) + I_NKCC1_n(Na_i_n_, Na_e_, K_i_n_, K_e_, Cl_i_n_, Cl_e_) + I_KCC2(K_i_n_, K_e_, Cl_i_n_, Cl_e_)
+                    I_Cl_n = g_Cl_leak * (phi_m_n_ - E_Cl_n) - 2*I_NKCC1_n(Na_i_n_, Na_e_, K_i_n_, K_e_, Cl_i_n_, Cl_e_) - I_KCC2(K_i_n_, K_e_, Cl_i_n_, Cl_e_)
+                    I_ion_n = I_Na_n + I_K_n + I_Cl_n # Total neuronal ionic current
+
+                    # Glial mechanisms
+                    # Calculate Nernst potentials
+                    E_Na_g = E(z_Na, Na_i_g_, Na_e_)
+                    E_K_g  = E(z_K, K_i_g_, K_e_)
+                    E_Cl_g = E(z_Cl, Cl_i_g_, Cl_e_)
+                    
+                    # Calculate glial ionic currents
+                    delta_phi_K = phi_m_g_ - E_K_g
+                    I_Na_g = g_Na_leak_g * (phi_m_g_ - E_Na_g) + 3*I_glia_pump(Na_i_g_, K_e_) + I_NKCC1_g(Na_i_g_, Na_e_, K_i_g_, K_e_, Cl_i_g_, Cl_e_)
+                    I_K_g = g_K_leak_g * f_Kir(x[4], K_e_, delta_phi_K, phi_m_g_) * (phi_m_g_ - E_K_g) - 2*I_glia_pump(Na_i_g_, K_e_) + I_NKCC1_g(Na_i_g_, Na_e_, K_i_g_, K_e_, Cl_i_g_, Cl_e_) + I_KCC1(K_i_g_, K_e_, Cl_i_g_, Cl_e_)
+                    I_Cl_g = g_Cl_leak_g * (phi_m_g_ - E_Cl_g) - 2*I_NKCC1_g(Na_i_g_, Na_e_, K_i_g_, K_e_, Cl_i_g_, Cl_e_) - I_KCC1(K_i_g_, K_e_, Cl_i_g_, Cl_e_)
+                    I_ion_g = I_Na_g + I_K_g + I_Cl_g
+
+                    # Define right-hand expressions
+                    rhs_phi_n = -1/C_m * I_ion_n
+                    rhs_Na_i_n = -I_Na_n * area_g_n / vol_i_n
+                    rhs_Na_e_n =  I_Na_n * area_g_n / vol_e
+                    rhs_K_i_n = -I_K_n * area_g_n / vol_i_n
+                    rhs_K_e_n =  I_K_n * area_g_n / vol_e
+                    rhs_Cl_i_n = -I_Cl_n * area_g_n / vol_i_n
+                    rhs_Cl_e_n =  I_Cl_n * area_g_n / vol_e
+                    rhs_phi_g = -1/C_m * I_ion_g
+                    rhs_Na_i_g = -I_Na_g * area_g_g / vol_i_g
+                    rhs_Na_e_g =  I_Na_g * area_g_g / vol_e
+                    rhs_K_i_g = -I_K_g * area_g_g / vol_i_g
+                    rhs_K_e_g =  I_K_g * area_g_g / vol_e
+                    rhs_Cl_i_g = -I_Cl_g * area_g_g / vol_i_g
+                    rhs_Cl_e_g =  I_Cl_g * area_g_g / vol_e
+                    rhs_Na_e = rhs_Na_e_n + rhs_Na_e_g
+                    rhs_K_e = rhs_K_e_n + rhs_K_e_g
+                    rhs_Cl_e = rhs_Cl_e_n + rhs_Cl_e_g
+                    rhs_n = alpha_n(phi_m_gating) * (1 - n) - beta_n(phi_m_gating) * n
+                    rhs_m = alpha_m(phi_m_gating) * (1 - m) - beta_m(phi_m_gating) * m
+                    rhs_h = alpha_h(phi_m_gating) * (1 - h) - beta_h(phi_m_gating) * h
+
+                    return [
+                        rhs_phi_n, rhs_Na_i_n, rhs_Na_e, rhs_K_i_n, rhs_K_e, -rhs_Cl_i_n, -rhs_Cl_e, # Neuronal variables
+                        rhs_phi_g, rhs_Na_i_g, rhs_K_i_g, -rhs_Cl_i_g, # Glial variables
+                        rhs_n, rhs_m, rhs_h # Gating variables
+                            ]
+
+                init = [
+                    phi_m_0_n, Na_i_0, Na_e_0, K_i_0, K_e_0, Cl_i_0, Cl_e_0,
+                    phi_m_0_g, Na_i_0, K_i_0, Cl_i_0, n_0, m_0, h_0,
+                        ]
+                sol_ = init
+
+                for t, dt in zip(times, np.diff(times)):
+                
+                    if t > 0:
+                        init = sol_[-1]
+
+                    sol = odeint(lambda x, t: three_compartment_rhs(x, t, args=init[:-3]), init, [t, t+dt])
+
+                    if np.allclose(sol[0], sol[-1], rtol=1e-12):
+                        # Current solution equals previous solution
+                        print("Steady state reached.")
+                        break
+
+                    sol_ = sol # Update initial condition
+
+                    # Checks
+                    if np.isclose(t, max_time):
+                        print("Max time reached without finding steady state. Exiting.")
+                        break
+
+                    if any(np.isnan(sol[-1])):
+                        print("NaN values in solution. Exiting.")
+                        break
+
+                sol = sol[-1]
+                for i in range(len(sol)):
+                    print(f"{sol[i]:.15f}")
+
+                phi_m_n_init_val = sol[0]
+                Na_i_n_init_val = sol[1]
+                Na_e_init_val = sol[2]
+                K_i_n_init_val = sol[3]
+                K_e_init_val = sol[4]
+                Cl_i_n_init_val = sol[5]
+                Cl_e_init_val = sol[6]
+                phi_m_g_init_val = sol[7]
+                Na_i_g_init_val = sol[8]
+                K_i_g_init_val = sol[9]
+                Cl_i_g_init_val = sol[10]
+                n_init_val = sol[11]
+                m_init_val = sol[12]
+                h_init_val = sol[13]
+
+            else:
+                # Placeholders on non-root processes
+                phi_m_n_init_val = None
+                Na_i_n_init_val = None
+                Na_e_init_val = None
+                K_i_n_init_val = None
+                K_e_init_val = None
+                Cl_i_n_init_val = None
+                Cl_e_init_val = None
+                phi_m_g_init_val = None
+                Na_i_g_init_val = None
+                K_i_g_init_val = None
+                Cl_i_g_init_val = None
+                n_init_val = None
+                m_init_val = None
+                h_init_val = None
+
+            # Communicate initial values from root process
+            self.phi_m_n_init = self.comm.bcast(phi_m_n_init_val, root=0)
+            self.Na_i_n_init = self.comm.bcast(Na_i_n_init_val, root=0)
+            self.Na_e_init = self.comm.bcast(Na_e_init_val, root=0)
+            self.K_i_n_init = self.comm.bcast(K_i_n_init_val, root=0)
+            self.K_e_init = self.comm.bcast(K_e_init_val, root=0)
+            self.Cl_i_n_init = self.comm.bcast(Cl_i_n_init_val, root=0)
+            self.Cl_e_init = self.comm.bcast(Cl_e_init_val, root=0)
+            self.phi_m_g_init = self.comm.bcast(phi_m_g_init_val, root=0)
+            self.Na_i_g_init = self.comm.bcast(Na_i_g_init_val, root=0)
+            self.K_i_g_init = self.comm.bcast(K_i_g_init_val, root=0)
+            self.Cl_i_g_init = self.comm.bcast(Cl_i_g_init_val, root=0)
+            self.n_init_val = self.comm.bcast(n_init_val, root=0)
+            self.m_init_val = self.comm.bcast(m_init_val, root=0)
+            self.h_init_val = self.comm.bcast(h_init_val, root=0) 
+
+            # Update ion dictionaries
+            self.ion_list[0]['ki_init_n'] = self.Na_i_n_init
+            self.ion_list[0]['ki_init_g'] = self.Na_i_g_init
+            self.ion_list[0]['ke_init'] = self.Na_e_init
+            self.ion_list[1]['ki_init_n'] = self.K_i_n_init
+            self.ion_list[1]['ki_init_g'] = self.K_i_g_init
+            self.ion_list[1]['ke_init'] = self.K_e_init
+            self.ion_list[2]['ki_init_n'] = self.Cl_i_n_init
+            self.ion_list[2]['ki_init_g'] = self.Cl_i_g_init
+            self.ion_list[2]['ke_init'] = self.Cl_e_init
 
         print("Initial conditions set.")
     

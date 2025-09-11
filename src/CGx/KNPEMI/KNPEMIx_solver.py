@@ -249,16 +249,12 @@ class SolverKNPEMI(object):
         wh     = p.wh
         V, _   = p.V.sub(p.N_ions).collapse()
 
-        # Previous membrane potentials
-        phi_i_p = dfx.fem.Function(V)
-        phi_e_p = dfx.fem.Function(V)
-
         # Assemble preconditioner if enabled
         if not self.direct_solver and self.use_P_mat:
             p.setup_preconditioner(self.use_block_Jacobi)
             self.assemble_preconditioner()
         
-        setup_timer = 0
+        setup_timer = 0.0
 
         # Time-stepping
         for i in range(self.time_steps):
@@ -336,10 +332,7 @@ class SolverKNPEMI(object):
             # Update previous timestep values
             p.u_p[0].x.array[:] = wh[0].x.array.copy() # Intracellular ions and potential
             p.u_p[1].x.array[:] = wh[1].x.array.copy() # Extracellular ions and potential
-            # phi_i_p.x.array[:]  = wh[0].sub(p.N_ions).collapse().x.array.copy() # Intracellular potential
-            # phi_e_p.x.array[:]  = wh[1].sub(p.N_ions).collapse().x.array.copy() # Extracellular potential
-            p.phi_M_prev.x.array[:] = wh[0].sub(p.N_ions).collapse().x.array.copy() - wh[1].sub(p.N_ions).collapse().x.array.copy() # Membrane potential      
-            # p.phi_M_prev.x.array[:] = phi_i_p.x.array.copy() - phi_e_p.x.array.copy() # Membrane potential      
+            p.phi_m_prev.x.array[:] = wh[0].sub(p.N_ions).collapse().x.array.copy() - wh[1].sub(p.N_ions).collapse().x.array.copy() # Membrane potential      
 
             # Write output to file and save png
             if self.save_xdmfs and (i % self.save_interval == 0) : self.save_xdmf()
@@ -439,7 +432,7 @@ class SolverKNPEMI(object):
             self.out_gate_string = self.out_file_prefix + 'gating.png'
 
         if self.comm.rank==p.owner_rank_membrane_vertex:
-            self.v_t.append(1000 * p.phi_M_prev.eval(x=p.min_point, cells=p.membrane_cell)) # Converted to mV
+            self.v_t.append(1000 * p.phi_m_prev.eval(x=p.min_point, cells=p.membrane_cell)) # Converted to mV
 
             if hasattr(p, 'n'):
                 self.n_t.append(p.n.eval(x=p.min_point, cells=p.membrane_cell))
@@ -454,7 +447,7 @@ class SolverKNPEMI(object):
         p = self.problem
 
         if self.comm.rank==p.owner_rank_membrane_vertex:
-            self.v_t.append(1000 * p.phi_M_prev.eval(x=p.min_point, cells=p.membrane_cell)) # Converted to mV
+            self.v_t.append(1000 * p.phi_m_prev.eval(x=p.min_point, cells=p.membrane_cell)) # Converted to mV
             
             if hasattr(p, 'n'):
                 self.n_t.append(p.n.eval(x=p.min_point, cells=p.membrane_cell))
@@ -641,7 +634,7 @@ class SolverKNPEMI(object):
         return
 
     # Default iterative solver parameters
-    ksp_rtol           = 1e-7
+    ksp_rtol           = 1e-6
     ksp_max_it         = 1000	
     ksp_type           = 'gmres' # cg
     pc_type            = 'hypre' # lu, fieldsplit, hypre

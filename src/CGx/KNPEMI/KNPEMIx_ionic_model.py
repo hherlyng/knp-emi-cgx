@@ -17,7 +17,7 @@ def g_syn(g_syn_bar, a_syn, t: float) -> float:
     
     return g
 
-# Kir-function used in ionic pump
+# Kir-function used in ionic pump (Halnes et al. 2013(?))
 def f_Kir(K_e_init, K_e, EK_init, Dphi, phi_m):
 
     A = 1 + ufl.exp(18.4/42.4)
@@ -59,7 +59,7 @@ class IonicModel(ABC):
 		pass
 
 
-# I_ch = phi_M
+# I_ch = phi_m
 class Null_model(IonicModel):
 
 	def _init(self):		
@@ -71,61 +71,25 @@ class Null_model(IonicModel):
 	def _eval(self, ion_idx):			
 		return 0
 
+# Passive membrane
+class PassiveModel(IonicModel):
+    """ Ionic current is the membrane potential."""
+    
+    def _init(self):		
+        pass
 
-# I_ch = phi_M
-class Passive_model(IonicModel):
+    def __str__(self):
+        return f'Passive'
 
-	def _init(self):		
-		pass
-
-	def __str__(self):
-		return f'Passive'
-		
-	def _eval(self, ion_idx):	
-		I_ch = self.problem.phi_M_prev	
-		return I_ch
-
-
-# I_ch = g*(phi_M - E) + stimulus
-class Passive_Nernst_model(IonicModel):
-
-	def __init__(self, KNPEMIx_problem, tags=None, stimulus=True):
-
-		super().__init__(KNPEMIx_problem, tags)
-
-		self.stimulus = stimulus
-
-	def __str__(self):
-		return f'Passive'
-	
-	def _init(self):			
-		pass
-
-	def _eval(self, ion_idx):	
-		
-		# aliases	
-		p     = self.problem			
-		ion   = p.ion_list[ion_idx]
-		phi_M = p.phi_M_prev
-
-		# leak currents
-		ion['g_k'] = ion['g_leak']
-
-		# stimulus
-		if ion['name'] == 'Na' and self.stimulus:
-			ion['g_k'] += g_syn(p.g_syn_bar, p.a_syn, float(p.t)) 
-
-		I_ch = ion['g_k']*(phi_M - ion['E'])
-		
-		return I_ch
-
+    def _eval(self, ion_idx):	
+        I_ch = self.problem.phi_m_prev	
+        return I_ch
 
 # Ionic K pump
-class Passive_K_pump_model(IonicModel):
-    """ Written by Pietro Benedusi. """
+class KirNaKPumpModel(IonicModel):
 
-    # potassium buffering parameters
-    rho_pump = 1.115e-6	# Maximum pump rate (mol/m**2 s)
+    # Potassium buffering parameters
+    rho_pump = 1.12e-6	# Maximum pump rate (mol/m**2 s)
     P_Nai = 10          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
     P_Ke  = 1.5         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
     k_dec = 2.9e-8		# Decay factor for [K+]e (m/s)
@@ -137,7 +101,7 @@ class Passive_K_pump_model(IonicModel):
 
         super().__init__(KNPEMIx_problem, tags)
 
-        # init pump constants
+        # Initialize pump constants
         for ion in self.problem.ion_list:
             if ion['name'] == 'Na':
                 ion['rho_p'] =  3 * self.rho_pump
@@ -152,43 +116,51 @@ class Passive_K_pump_model(IonicModel):
         else:
             return f'Passive with K pump'
 
-
     def _init(self):
 
-        # aliases		
         p = self.problem
 
-        ui_p  = p.u_p[0]
-        ue_p  = p.u_p[1]
+        ui_p = p.u_p[0]
+        ue_p = p.u_p[1]
 
-        self.pump_coeff = ui_p.sub(0)**1.5/(ui_p.sub(0)**1.5 + self.P_Nai**1.5) * (ue_p.sub(1)/(ue_p.sub(1) + self.P_Ke))			
+        self.pump_coeff = (ui_p.sub(0)**1.5/(ui_p.sub(0)**1.5 + self.P_Nai**1.5)
+                        * (ue_p.sub(1)/(ue_p.sub(1) + self.P_Ke)))
         
-
     def _eval(self, ion_idx):
 
-        # aliases		
+        # Aliases		
         p = self.problem
-        
-        phi_M = p.phi_M_prev		
+        phi_m = p.phi_m_prev		
         ue_p  = p.u_p[1]
         F     = p.F
         ion   = p.ion_list[ion_idx]
         z     = ion['z']
 
-        # leak currents
-        ion['g_k'] = ion['g_leak']
+        # Leak currents
+        ion['g_k'] = ion['g_leak_g']
             
-        # f kir coeff	
+        # f_kir function	
         if ion['name'] == 'K':
-
+            
+            # Kir-Na variable
             EK_init = (p.psi/z)*ufl.ln(p.K_e_init/p.K_i_init)			
-            Dphi  = phi_M - ion['E']
-            f_kir = f_Kir(p.K_e_init, ue_p.sub(ion_idx), EK_init, Dphi, phi_M)
+            Dphi  = phi_m - ion['E']
+            f_kir = f_Kir(p.K_e_init, ue_p.sub(ion_idx), EK_init, Dphi, phi_m)
+            
+            # ATP pump current
+            I_ATP = -2*F*z*self.pump_coeff
 
         else:
+            # Kir-Na variable
             f_kir = 1
 
-        I_ch = f_kir*ion['g_k']*(phi_M - ion['E']) + F*z*ion['rho_p']*self.pump_coeff
+            # ATP pump current
+            if ion['name'] == 'Na':
+                I_ATP = 3*F*z*self.pump_coeff
+            else:
+                I_ATP = 0.0
+
+        I_ch = f_kir*ion['g_k']*(phi_m - ion['E']) + I_ATP
 
         if self.use_decay_currents:
             if ion['name'] == 'K' or ion['name'] == 'Na':
@@ -197,7 +169,51 @@ class Passive_K_pump_model(IonicModel):
         return I_ch
 
 
-class Cotransporters(IonicModel):
+class GlialCotransporters(IonicModel):
+
+    def __init__(self, KNPEMIx_problem, tags=None):
+         
+         super().__init__(KNPEMIx_problem, tags)
+
+    def __str__(self):
+         return "KCC1/NKCC1 Cotransporters"
+
+    def _init(self):	
+        
+        if np.isclose(self.problem.t.value, 0): 
+            p = self.problem
+            # Maximum cotransporter strengths [A/m^2]
+            g_KCC1 = 7e-1 # [S / m^2]
+            self.S_KCC1 = g_KCC1 * p.R*p.T / p.F
+            
+            g_NKCC1 = 2e-2 # [S / m^2]
+            self.S_NKCC1 = g_NKCC1 * p.R*p.T / p.F
+
+        else:
+            pass
+
+    def _eval(self, ion_idx: int):
+
+        p = self.problem
+        ion   = p.ion_list[ion_idx]
+        c_Na_i = p.u_p[0].sub(0)
+        c_Na_e = p.u_p[1].sub(0)
+        c_K_i = p.u_p[0].sub(1)
+        c_K_e = p.u_p[1].sub(1)
+        c_Cl_i = p.u_p[0].sub(2)
+        c_Cl_e = p.u_p[1].sub(2)
+
+        I_KCC1 = self.S_KCC1 * ufl.ln((c_K_i * c_Cl_i) / (c_K_e * c_Cl_e))
+        I_NKCC1 = self.S_NKCC1 * ufl.ln((c_Na_i * c_K_i * c_Cl_i**2)/(c_Na_e * c_K_e * c_Cl_e**2))
+
+        if ion["name"]=="Na":
+            return I_NKCC1
+        elif ion["name"]=="K":
+            return I_NKCC1 + I_KCC1
+        else:
+            return -(2*I_NKCC1 + I_KCC1)
+
+class NeuronalCotransporters(IonicModel):
 
     def __init__(self, KNPEMIx_problem, tags=None):
          
@@ -275,10 +291,12 @@ class ATPPump(IonicModel):
         else:
             return 0.0
 
-# Hodgkin–Huxley + stimulus
-class HH_model(IonicModel):
+# Hodgkin–Huxley 
+class HodgkinHuxley(IonicModel):
 
-    def __init__(self, KNPEMIx_problem, tags=None, stimulus: bool=False, use_Rush_Lar: bool=True, time_steps_ODE: int=25):
+    def __init__(self, KNPEMIx_problem, tags=None,
+                stimulus: bool=False, use_Rush_Lar: bool=True,
+                time_steps_ODE: int=25):
 
         super().__init__(KNPEMIx_problem, tags)
 
@@ -326,7 +344,7 @@ class HH_model(IonicModel):
         # aliases		
         p     = self.problem		
         ion   = p.ion_list[ion_idx]
-        phi_M = p.phi_M_prev
+        phi_m = p.phi_m_prev
 
         # leak currents
         ion['g_k'] = ion['g_leak']
@@ -338,7 +356,7 @@ class HH_model(IonicModel):
         elif ion['name'] == 'K':
             ion['g_k'] += p.g_K_bar*p.n**4				
 
-        I_ch = ion['g_k']*(phi_M - ion['E'])
+        I_ch = ion['g_k']*(phi_m - ion['E'])
 
         return I_ch
 
@@ -359,11 +377,11 @@ class HH_model(IonicModel):
         # aliases		
         p     = self.problem		
         ion   = p.ion_list[ion_idx]
-        phi_M = p.phi_M_prev
+        phi_m = p.phi_m_prev
 
         assert ion['name'] == 'Na', print("Only Na can have a stimulus current in the Hodgkin-Huxley model.")
     
-        return g_syn(p.g_syn_bar, p.a_syn, float(p.t.value))*(phi_M - ion['E'])
+        return g_syn(p.g_syn_bar, p.a_syn, float(p.t.value))*(phi_m - ion['E'])
 
 
     def update_gating_variables(self):		
@@ -374,12 +392,12 @@ class HH_model(IonicModel):
         n = self.problem.n
         m = self.problem.m
         h = self.problem.h
-        phi_M_prev = self.problem.phi_M_prev
+        phi_m_prev = self.problem.phi_m_prev
         dt_ode     = float(self.problem.dt.value) / self.time_steps_ODE
         
         # Set membrane potential
-        with phi_M_prev.x.petsc_vec.localForm() as loc_phi_M_prev:
-            V_M = 1000*(loc_phi_M_prev[:] - self.problem.V_rest) # convert phi_M to mV	
+        with phi_m_prev.x.petsc_vec.localForm() as loc_phi_m_prev:
+            V_M = 1000*(loc_phi_m_prev[:] - self.problem.phi_rest) # convert phi_m to mV	
         
         alpha_n = 0.01e3 * (10.-V_M) / (np.exp((10. - V_M)/10.) - 1.)
         beta_n  = 0.125e3 * np.exp(-V_M/80.)

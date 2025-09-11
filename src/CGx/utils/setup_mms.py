@@ -148,7 +148,7 @@ class SetupMMS:
         J_Cl_e = - grad_Cle + Cl_e_e*grad_phie
 
         # membrane potential
-        phi_M_e = phi_i_e - phi_e_e
+        phi_m_e = phi_i_e - phi_e_e
 
         # total membrane flux defined intracellularly (F sum_k z^k J^k_i)
         total_flux_i = J_Na_i + J_K_i - J_Cl_i
@@ -163,9 +163,9 @@ class SetupMMS:
         JMe_e = [total_flux_e[0], - total_flux_e[0], total_flux_e[1], - total_flux_e[1]]
         
         # ion channel currents
-        I_ch_Na = phi_M_e                 # Na
-        I_ch_K  = phi_M_e                 # K
-        I_ch_Cl = phi_M_e                 # Cl
+        I_ch_Na = phi_m_e                 # Na
+        I_ch_K  = phi_m_e                 # K
+        I_ch_Cl = phi_m_e                 # Cl
         I_ch = I_ch_Na + I_ch_K + I_ch_Cl # total 
 
         # Calculate source terms
@@ -185,9 +185,9 @@ class SetupMMS:
                   + ( sp.diff(J_K_e[0],  x) + sp.diff(J_K_e[1],  y))
                   - ( sp.diff(J_Cl_e[0], x) + sp.diff(J_Cl_e[1], y)))
 
-        # equation for phi_M: f = C_M*d(phi_M)/dt - (I_M - I_ch) where we have
+        # equation for phi_m: f = C_M*d(phi_m)/dt - (I_M - I_ch) where we have
         # chosen I_M = F sum_k z^k J_i^k n_i = total_flux_i
-        fJM = [sp.diff(phi_M_e, t) + I_ch - foo for foo in JMe_i]
+        fJM = [sp.diff(phi_m_e, t) + I_ch - foo for foo in JMe_i]
         # coupling condition for I_M: (total_flux_i*n_i) = (- total_flux_e*n_e) + f
         # giving f = total_flux_i*n_i + total_flux_e*n_e
         fgM = [i - e for i, e in zip(JMe_i, JMe_e)]
@@ -197,7 +197,7 @@ class SetupMMS:
         V = dfx.fem.functionspace(self.mesh, ("Lagrange", 1))
 
         # Ion concentrations and electric potentials
-        var_sym_funcs = [Na_i_e, Na_e_e, K_i_e, K_e_e, Cl_i_e, Cl_e_e, phi_i_e, phi_e_e, phi_M_e]
+        var_sym_funcs = [Na_i_e, Na_e_e, K_i_e, K_e_e, Cl_i_e, Cl_e_e, phi_i_e, phi_e_e, phi_m_e]
         var_exprs = [SymPyToDOLFINxExpr([x, y], time, var_func, self.dim) for var_func in var_sym_funcs]
         var_dfx_funcs = [dfx.fem.Function(V) for _ in var_sym_funcs]
         [func.interpolate(expr) for func, expr in zip(var_dfx_funcs, var_exprs)]
@@ -226,7 +226,7 @@ class SetupMMS:
         [f_gM[i].interpolate(f_gM_exprs[i]) for i in range(len(f_gM_exprs))]
 
         # initial conditions concentrations
-        init_sym_funcs = [Na_i_e, Na_e_e, K_i_e, K_e_e, Cl_i_e, Cl_e_e, phi_M_e]
+        init_sym_funcs = [Na_i_e, Na_e_e, K_i_e, K_e_e, Cl_i_e, Cl_e_e, phi_m_e]
         init_exprs = [SymPyToDOLFINxExpr([x, y], time, init_func, self.dim) for init_func in init_sym_funcs]
         init_dfx_funcs = [dfx.fem.Function(V) for _ in init_sym_funcs]
         [func.interpolate(expr) for func, expr in zip(init_dfx_funcs, init_exprs)]
@@ -252,7 +252,7 @@ class SetupMMS:
         # exact solutions
         exact_sols = {'Na_i_e':Nai_e, 'K_i_e':Ki_e, 'Cl_i_e':Cli_e,
                       'Na_e_e':Nae_e, 'K_e_e':Ke_e, 'Cl_e_e':Cle_e,
-                      'phi_i_e':phii_e, 'phi_e_e':phie_e, 'phi_M_e':phiM_e,
+                      'phi_i_e':phii_e, 'phi_e_e':phie_e, 'phi_m_e':phiM_e,
                       'I_M_e':JM_e, 'I_ch_Na':I_ch_Na, 'I_ch_K':I_ch_K,
                       'I_ch_Cl':I_ch_Cl}
         # source terms
@@ -263,7 +263,7 @@ class SetupMMS:
         # initial conditions
         init_conds = {'Na_i':init_Nai, 'K_i':init_Ki, 'Cl_i':init_Cli,
                       'Na_e':init_Nae, 'K_e':init_Ke, 'Cl_e':init_Cle,
-                      'phi_M':init_phiM}
+                      'phi_m':init_phiM}
         # boundary terms
         bndry_terms = {'J_Na_e':J_Nae, 'J_K_e':J_Ke, 'J_Cl_e':J_Cle}
 
@@ -298,7 +298,7 @@ class SetupMMS:
         J_Cl_e = - grad_Cle + Cl_e_e*grad_phie
 
         # membrane potential
-        phi_M_e = phi_i_e - phi_e_e
+        phi_m_e = phi_i_e - phi_e_e
 
         # total membrane flux defined intracellularly (F sum_k z^k J^k_i)
         total_flux_i = J_Na_i + J_K_i - J_Cl_i
@@ -317,9 +317,9 @@ class SetupMMS:
                  total_flux_e[2], - total_flux_e[2]]
         
         # ion channel currents
-        I_ch_Na = phi_M_e                 # Na
-        I_ch_K  = phi_M_e                 # K
-        I_ch_Cl = phi_M_e                 # Cl
+        I_ch_Na = phi_m_e                 # Na
+        I_ch_K  = phi_m_e                 # K
+        I_ch_Cl = phi_m_e                 # Cl
         I_ch = I_ch_Na + I_ch_K + I_ch_Cl # total 
 
         # Calculate source terms
@@ -339,9 +339,9 @@ class SetupMMS:
                   + ( sp.diff(J_K_e[0],  x) + sp.diff(J_K_e[1],  y) + sp.diff(J_K_e[2],  z))
                   - ( sp.diff(J_Cl_e[0], x) + sp.diff(J_Cl_e[1], y) + sp.diff(J_Cl_e[2], z)))
 
-        # equation for phi_M: f = C_M*d(phi_M)/dt - (I_M - I_ch) where we have
+        # equation for phi_m: f = C_M*d(phi_m)/dt - (I_M - I_ch) where we have
         # chosen I_M = F sum_k z^k J_i^k n_i = total_flux_i
-        fJM = [sp.diff(phi_M_e, t) + I_ch - foo for foo in JMe_i]
+        fJM = [sp.diff(phi_m_e, t) + I_ch - foo for foo in JMe_i]
         # coupling condition for I_M: (total_flux_i*n_i) = (- total_flux_e*n_e) + f
         # giving f = total_flux_i*n_i + total_flux_e*n_e
         fgM = [i - e for i, e in zip(JMe_i, JMe_e)]
@@ -351,7 +351,7 @@ class SetupMMS:
         V = dfx.fem.functionspace(self.mesh, ("Lagrange", 1))
 
         # Ion concentrations and electric potentials
-        var_sym_funcs = [Na_i_e, Na_e_e, K_i_e, K_e_e, Cl_i_e, Cl_e_e, phi_i_e, phi_e_e, phi_M_e]
+        var_sym_funcs = [Na_i_e, Na_e_e, K_i_e, K_e_e, Cl_i_e, Cl_e_e, phi_i_e, phi_e_e, phi_m_e]
         var_exprs = [SymPyToDOLFINxExpr([x, y], time, var_func, self.dim) for var_func in var_sym_funcs]
         var_dfx_funcs = [dfx.fem.Function(V) for _ in var_sym_funcs]
         [func.interpolate(expr) for func, expr in zip(var_dfx_funcs, var_exprs)]
@@ -380,7 +380,7 @@ class SetupMMS:
         [f_gM[i].interpolate(f_gM_exprs[i]) for i in range(len(f_gM_exprs))]
 
         # initial conditions concentrations
-        init_sym_funcs = [Na_i_e, Na_e_e, K_i_e, K_e_e, Cl_i_e, Cl_e_e, phi_M_e]
+        init_sym_funcs = [Na_i_e, Na_e_e, K_i_e, K_e_e, Cl_i_e, Cl_e_e, phi_m_e]
         init_exprs = [SymPyToDOLFINxExpr([x, y], time, init_func, self.dim) for init_func in init_sym_funcs]
         init_dfx_funcs = [dfx.fem.Function(V) for _ in init_sym_funcs]
         [func.interpolate(expr) for func, expr in zip(init_dfx_funcs, init_exprs)]
@@ -407,7 +407,7 @@ class SetupMMS:
         # exact solutions
         exact_sols = {'Na_i_e':Nai_e, 'K_i_e':Ki_e, 'Cl_i_e':Cli_e,
                       'Na_e_e':Nae_e, 'K_e_e':Ke_e, 'Cl_e_e':Cle_e,
-                      'phi_i_e':phii_e, 'phi_e_e':phie_e, 'phi_M_e':phiM_e,
+                      'phi_i_e':phii_e, 'phi_e_e':phie_e, 'phi_m_e':phiM_e,
                       'I_M_e':JM_e, 'I_ch_Na':I_ch_Na, 'I_ch_K':I_ch_K,
                       'I_ch_Cl':I_ch_Cl}
         # source terms
@@ -418,7 +418,7 @@ class SetupMMS:
         # initial conditions
         init_conds = {'Na_i':init_Nai, 'K_i':init_Ki, 'Cl_i':init_Cli,
                       'Na_e':init_Nae, 'K_e':init_Ke, 'Cl_e':init_Cle,
-                      'phi_M':init_phiM}
+                      'phi_m':init_phiM}
         # boundary terms
         bndry_terms = {'J_Na_e':J_Nae, 'J_K_e':J_Ke, 'J_Cl_e':J_Cle}
 
