@@ -15,7 +15,7 @@ def main_yaml(yaml_file="config.yaml", view_input=None):
 	problem = ProblemKNPEMI(yaml_file)
 
 	# Set ionic models
-	HH = HodgkinHuxley(problem, tags=problem.neuron_tags, stimulus=False)
+	HH = HodgkinHuxley(problem, tags=problem.neuron_tags)
 	ATP = ATPPump(problem, tags=problem.neuron_tags)
 	NeuronalCT = NeuronalCotransporters(problem, tags=problem.neuron_tags)
 	KirNa = KirNaKPumpModel(problem, tags=problem.glia_tags)
@@ -24,6 +24,7 @@ def main_yaml(yaml_file="config.yaml", view_input=None):
 	ionic_models = [HH, ATP, NeuronalCT, GlialCT, KirNa]
 
 	problem.init_ionic_model(ionic_models)
+	problem.initial_variable_setup()
 
 	# Create solver and solve
 	solver = SolverKNPEMI(problem,

@@ -14,7 +14,7 @@ from CGx.utils.misc  import flatten_list, mark_boundaries_cube_MMS, mark_boundar
 from scipy.integrate import odeint
 
 pprint = print
-print = PETSc.Sys.Print
+print = PETSc.Sys.Print # Automatically flushes output to stream in parallel
 
 class MixedDimensionalProblem(ABC):
 
@@ -92,7 +92,7 @@ class MixedDimensionalProblem(ABC):
             if not os.path.exists(mesh_file):
                 print(f'The mesh and cell tag file {mesh_file} does not exist. Provide a valid mesh file.')
             if not os.path.exists(facet_file):
-                 print(f'The mesh and cell tag file {mesh_file} does not exist. Provide a valid facet tag file.')
+                print(f'The mesh and cell tag file {mesh_file} does not exist. Provide a valid facet tag file.')
 
             # Initialize input files dictionary and set mesh and facet files
             self.input_files = dict()
@@ -364,6 +364,7 @@ class MixedDimensionalProblem(ABC):
         mesh_center = np.array([x_c, y_c, z_c])
 
         # Find all membrane vertices of the cell
+        # gamma_facets = self.boundaries.find(89) # Always take the tag of the largest cell
         gamma_facets = self.boundaries.find(self.gamma_tags[-1]) # Always take the tag of the largest cell
         gamma_vertices = dfx.mesh.compute_incident_entities(
                                                         self.mesh.topology,
@@ -557,11 +558,12 @@ class MixedDimensionalProblem(ABC):
                                         ),
                                         op=MPI.SUM
                                         ) # [m^2]
-            print(f"{vol_i=}")
-            print(f"{vol_e=}")
-            print(f"{area_g=}")
 
             if self.comm.rank==0:
+
+                print(f"{vol_i=}")
+                print(f"{vol_e=}")
+                print(f"{area_g=}")
 
                 def two_compartment_rhs(x, t, args):
                     """ Right-hand side of ODE system for two-compartment system (neuron + ECS). """
@@ -705,11 +707,6 @@ class MixedDimensionalProblem(ABC):
                                         op=MPI.SUM
                                         ) # [m^3]
 
-            print(f"{vol_i_n=}")
-            print(f"{vol_i_g=}")
-            print(f"{vol_e=}")
-            print(f"{area_g_n=}")
-            print(f"{area_g_g=}")
 
             # Membrane potential initial conditions
             phi_m_0_n = phi_m_0
@@ -743,6 +740,13 @@ class MixedDimensionalProblem(ABC):
             I_NKCC1_g = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: S_NKCC1_g * np.log((Na_i * K_i * Cl_i**2)/(Na_e * K_e * Cl_e**2))
 
             if self.comm.rank==0:
+
+                print(f"{vol_i_n=}")
+                print(f"{vol_i_g=}")
+                print(f"{vol_e=}")
+                print(f"{area_g_n=}")
+                print(f"{area_g_g=}")
+
                 def three_compartment_rhs(x, t, args):
                     """ Right-hand side of ODE system for three-compartment system (neuron + glia + ECS). """
                     # Extract gating variables at current timestep

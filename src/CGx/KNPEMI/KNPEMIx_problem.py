@@ -1,3 +1,4 @@
+import gc
 import ufl
 import multiphenicsx.fem
 import multiphenicsx.fem.petsc
@@ -8,12 +9,13 @@ import dolfinx as dfx
 from ufl      import grad, inner, dot
 from mpi4py   import MPI
 from petsc4py import PETSc
+from memory_profiler import profile
 from CGx.utils.setup_mms         import SetupMMS, mark_MMS_boundaries
 from CGx.utils.mixed_dim_problem import MixedDimensionalProblem
 
 import basix.ufl
 
-print = PETSc.Sys.Print
+print = PETSc.Sys.Print # Automatically flushes output to stream in parallel
 
 class ProblemKNPEMI(MixedDimensionalProblem):
 
@@ -175,7 +177,70 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             ion['z']  = dfx.fem.Constant(self.mesh, PETSc.ScalarType(ion['z']))
             ion['Di'] = dfx.fem.Constant(self.mesh, PETSc.ScalarType(ion['Di']))
             ion['De'] = dfx.fem.Constant(self.mesh, PETSc.ScalarType(ion['De']))
-            
+
+    def initial_variable_setup(self):
+
+        # Set initial membrane potential
+        phi_space, _ = self.V.sub(self.N_ions).collapse()
+        self.phi_m_prev = dfx.fem.Function(phi_space)
+        if self.MMS_test:
+            self.phi_m_prev.interpolate(self.phi_m_init)
+        else:
+            if self.glia_tags is None:
+                # Only neuronal cells
+                self.phi_m_prev.x.array[:] = self.phi_m_init
+            else:
+                # Both neuronal and glial cells
+                self.neuron_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.neuron_tags]))
+                self.glia_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.glia_tags]))
+                neuron_dofs = dfx.fem.locate_dofs_topological(phi_space, self.subdomains.dim, self.neuron_cells)
+                glia_dofs = dfx.fem.locate_dofs_topological(phi_space, self.subdomains.dim, self.glia_cells)
+
+                self.phi_m_prev.x.array[neuron_dofs] = self.phi_m_n_init
+                self.phi_m_prev.x.array[glia_dofs] = self.phi_m_g_init
+
+        # Initialize ionic models
+        for model in self.ionic_models:
+            model._init()
+
+        # Solutions at previous timestep
+        ui_p = self.u_p[0]
+        ue_p = self.u_p[1]
+
+        # Initialize parts of variational formulation
+        for idx, ion in enumerate(self.ion_list):
+            # Set initial value of intra- and extracellular ion concentrations
+            if self.MMS_test:
+                ui_p.sub(idx).interpolate(ion['ki_init'])
+                ue_p.sub(idx).interpolate(ion['ke_init'])
+            else:
+                if self.glia_tags is None:
+                    # Get dof mapping between subspace and parent space
+                    _, sub_to_parent_i = ui_p.sub(idx).function_space.collapse()
+                    _, sub_to_parent_e = ue_p.sub(idx).function_space.collapse()
+
+                    # Set the array values at the subspace dofs 
+                    ui_p.sub(idx).x.array[sub_to_parent_i] = ion['ki_init']
+                    ue_p.sub(idx).x.array[sub_to_parent_e] = ion['ke_init']
+                else:
+                    # Get dof mapping between subspace and parent space
+                    W_ion_i, sub_to_parent_i = ui_p.sub(idx).function_space.collapse()
+                    neuron_dofs = dfx.fem.locate_dofs_topological((self.W[0].sub(idx), W_ion_i), self.subdomains.dim, self.neuron_cells)
+                    glia_dofs   = dfx.fem.locate_dofs_topological((self.W[0].sub(idx), W_ion_i), self.subdomains.dim, self.glia_cells)
+                    _, sub_to_parent_e = ue_p.sub(idx).function_space.collapse()
+
+                    # Set the array values at the subspace dofs 
+                    ui_p.sub(idx).x.array[np.intersect1d(sub_to_parent_i, neuron_dofs[0])] = ion['ki_init_n']
+                    ui_p.sub(idx).x.array[np.intersect1d(sub_to_parent_i, glia_dofs[0])]   = ion['ki_init_g']
+                    ue_p.sub(idx).x.array[sub_to_parent_e] = ion['ke_init']
+
+              
+        if self.MMS_test: # First timestep
+            # Set phi_e and phi_i just for visualization
+            ui_p.sub(self.N_ions).interpolate(self.phi_i_init)
+            ue_p.sub(self.N_ions).interpolate(self.phi_e_init)
+
+    @profile
     def setup_variational_form(self):
 
         # sanity check
@@ -188,27 +253,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         psi = self.psi
         C_M = self.C_M
         t   = self.t
-        phi_space, _ = self.V.sub(self.N_ions).collapse()
 
-        # Set initial membrane potential
-        if np.isclose(t.value, 0.0):
-            self.phi_m_prev = dfx.fem.Function(phi_space)
-            if self.MMS_test:
-                self.phi_m_prev.interpolate(self.phi_m_init)
-            else:
-                if self.glia_tags is None:
-                    # Only neuronal cells
-                    self.phi_m_prev.x.array[:] = self.phi_m_init
-                else:
-                    # Both neuronal and glial cells
-                    self.neuron_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.neuron_tags]))
-                    self.glia_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.glia_tags]))
-                    neuron_dofs = dfx.fem.locate_dofs_topological(phi_space, self.subdomains.dim, self.neuron_cells)
-                    glia_dofs = dfx.fem.locate_dofs_topological(phi_space, self.subdomains.dim, self.glia_cells)
-
-                    self.phi_m_prev.x.array[neuron_dofs] = self.phi_m_n_init
-                    self.phi_m_prev.x.array[glia_dofs] = self.phi_m_g_init
-        
         print("Setting up variational form ...")
 
         # Define integral measures
@@ -282,10 +327,10 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                     'f_I_M':src_terms['f_I_M'],
                     'name':'Cl'}
 
-            # create ion list
+            # Create ion list
             self.ion_list = [self.Na, self.K, self.Cl]
 
-        # init ionic models
+        # Initialize ionic models
         for model in self.ionic_models:
             model._init()
             
@@ -322,32 +367,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             Di = ion['Di']
             De = ion['De']
 
-            # Set initial value of intra- and extracellular ion concentrations
-            if np.isclose(t.value, 0.0):
-                if self.MMS_test:
-                    ui_p.sub(idx).interpolate(ion['ki_init'])
-                    ue_p.sub(idx).interpolate(ion['ke_init'])
-                else:
-                    if self.glia_tags is None:
-                        # Get dof mapping between subspace and parent space
-                        _, sub_to_parent_i = ui_p.sub(idx).function_space.collapse()
-                        _, sub_to_parent_e = ue_p.sub(idx).function_space.collapse()
-
-                        # Set the array values at the subspace dofs 
-                        ui_p.sub(idx).x.array[sub_to_parent_i] = ion['ki_init']
-                        ue_p.sub(idx).x.array[sub_to_parent_e] = ion['ke_init']
-                    else:
-                        # Get dof mapping between subspace and parent space
-                        W_ion_i, sub_to_parent_i = ui_p.sub(idx).function_space.collapse()
-                        neuron_dofs = dfx.fem.locate_dofs_topological((self.W[0].sub(idx), W_ion_i), self.subdomains.dim, self.neuron_cells)
-                        glia_dofs   = dfx.fem.locate_dofs_topological((self.W[0].sub(idx), W_ion_i), self.subdomains.dim, self.glia_cells)
-                        _, sub_to_parent_e = ue_p.sub(idx).function_space.collapse()
-
-                        # Set the array values at the subspace dofs 
-                        ui_p.sub(idx).x.array[np.intersect1d(sub_to_parent_i, neuron_dofs[0])] = ion['ki_init_n']
-                        ui_p.sub(idx).x.array[np.intersect1d(sub_to_parent_i, glia_dofs[0])]   = ion['ki_init_g']
-                        ue_p.sub(idx).x.array[sub_to_parent_e] = ion['ke_init']
-
             # Add ion specific contribution to fraction alpha
             alpha_i_sum += Di * z**2 * ui_p.sub(idx)
             alpha_e_sum += De * z**2 * ue_p.sub(idx)
@@ -374,11 +393,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
                     # Add contribution to total channel current
                     I_ch[gamma_tag] += ion['I_ch'][gamma_tag]
-            
-        if np.isclose(t.value, 0.0) and self.MMS_test: # First timestep
-            # Set phi_e and phi_i just for visualization
-            ui_p.sub(self.N_ions).interpolate(self.phi_i_init)
-            ue_p.sub(self.N_ions).interpolate(self.phi_e_init)
         
         # Initialize variational form block entries
         a00 = 0; a01 = 0; L0 = 0
@@ -494,7 +508,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         # Convert to C++ forms
         self.a = dfx.fem.form(a, jit_options=self.jit_parameters)
         self.L = dfx.fem.form(L, jit_options=self.jit_parameters)
-        
 
     def setup_preconditioner(self, use_block_jacobi: bool):
 
@@ -675,7 +688,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         K_tot  = dfx.fem.assemble_scalar(dfx.fem.form(K_i *dxi + K_e *dxe, jit_options=self.jit_parameters))
         Cl_tot = dfx.fem.assemble_scalar(dfx.fem.form(Cl_i*dxi + Cl_e*dxe, jit_options=self.jit_parameters))
 
-        
         print("Total Na+ concentration: ", self.comm.allreduce(Na_tot, op=MPI.SUM))
         print("Total K+  concentration: ", self.comm.allreduce(K_tot,  op=MPI.SUM))
         print("Total Cl- concentration: ", self.comm.allreduce(Cl_tot, op=MPI.SUM))

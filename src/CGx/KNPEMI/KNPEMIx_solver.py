@@ -11,10 +11,11 @@ from mpi4py         import MPI
 from petsc4py       import PETSc
 from CGx.utils      import restructure_xdmf
 from CGx.utils.misc import dump
+from memory_profiler import profile
 from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
 
-pprint = print
-print = PETSc.Sys.Print # Enables printing only on rank 0 when running in parallel
+pprint = print # Allows flushing from arbitrary rank
+print = PETSc.Sys.Print # Automatically flushes output to stream in parallel
 
 class SolverKNPEMI(object):
 
@@ -34,8 +35,8 @@ class SolverKNPEMI(object):
         self.out_file_prefix = problem.output_dir # The output file directory
         self.view_input = view_input
 
-        # Initialize varational form
-        self.problem.setup_variational_form()
+        # # Initialize varational form
+        # self.problem.setup_variational_form()
 
         # Initialize output files
         if save_xdmfs : self.init_xdmf_savefile()
@@ -245,23 +246,14 @@ class SolverKNPEMI(object):
             self.A.setNearNullSpace(nullspace)
             nullspace.remove(self.b)
 
+    @profile
     def solve(self):
-
-        # perform setup
-        self.setup_solver()
         
         # Aliases
         p      = self.problem
-        x      = self.x
         t      = p.t
         dt     = p.dt
         wh     = p.wh
-        V, _   = p.V.sub(p.N_ions).collapse()
-
-        # Assemble preconditioner if enabled
-        if not self.direct_solver and self.use_P_mat:
-            p.setup_preconditioner(self.use_block_Jacobi)
-            self.assemble_preconditioner()
         
         setup_timer = 0.0
 
@@ -279,6 +271,15 @@ class SolverKNPEMI(object):
             tic = time.perf_counter()   
             p.setup_variational_form()
             setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
+
+            if i==0:
+                # Perform solver setup
+                self.setup_solver()
+
+                # Assemble preconditioner if enabled
+                if not self.direct_solver and self.use_P_mat:
+                    p.setup_preconditioner(self.use_block_Jacobi)
+                    self.assemble_preconditioner()
 
             # Assemble system matrix and RHS vector
             tic = time.perf_counter()
@@ -316,11 +317,11 @@ class SolverKNPEMI(object):
 
             # Solve
             tic = time.perf_counter()
-            self.ksp.solve(self.b, x)
+            self.ksp.solve(self.b, self.x)
             self.tot_its += self.ksp.its
 
             # Update ghost values
-            x.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
+            self.x.ghostUpdate(addv=PETSc.InsertMode.INSERT, mode=PETSc.ScatterMode.FORWARD)
 
             # Time the linear solve
             solver_time     = time.perf_counter() - tic
@@ -333,7 +334,7 @@ class SolverKNPEMI(object):
             if not self.direct_solver: self.iterations.append(self.ksp.getIterationNumber())
             
             # Extract sub-components of solution and store them in the solution functions wh
-            with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(x, [p.W[0].dofmap, p.W[1].dofmap], p.restriction) as ui_ue_wrapper:
+            with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(self.x, [p.W[0].dofmap, p.W[1].dofmap], p.restriction) as ui_ue_wrapper:
                 for ui_ue_wrapper_local, component in zip(ui_ue_wrapper, (wh[0], wh[1])):
                     with component.x.petsc_vec.localForm() as component_local:
                         component_local[:] = ui_ue_wrapper_local
@@ -363,7 +364,7 @@ class SolverKNPEMI(object):
                     print("\nCheckpoints saved in ", self.out_file_prefix)
                 
                 self.save_data()
-
+                
                 print("\nTotal setup time:", setup_timer)
                 print("Total assembly time:", sum(self.assembly_time))
                 print("Total solve time:",    sum(self.solve_time))
