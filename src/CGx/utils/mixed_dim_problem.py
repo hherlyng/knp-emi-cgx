@@ -364,8 +364,9 @@ class MixedDimensionalProblem(ABC):
         mesh_center = np.array([x_c, y_c, z_c])
 
         # Find all membrane vertices of the cell
-        # gamma_facets = self.boundaries.find(89) # Always take the tag of the largest cell
-        gamma_facets = self.boundaries.find(self.gamma_tags[-1]) # Always take the tag of the largest cell
+        gamma_facets = self.boundaries.find(68) # Always take the tag of the largest cell #10m, 100c stimulated in 66
+        # gamma_facets = self.boundaries.find(89) # Always take the tag of the largest cell #20m, 100c stimulated in 88
+        # gamma_facets = self.boundaries.find(self.gamma_tags[-1]) # Always take the tag of the largest cell
         gamma_vertices = dfx.mesh.compute_incident_entities(
                                                         self.mesh.topology,
                                                         gamma_facets,

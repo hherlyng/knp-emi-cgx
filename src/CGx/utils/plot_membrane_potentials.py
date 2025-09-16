@@ -1,39 +1,122 @@
+import sys
 import mpi4py
 import pyvista
 import dolfinx
 import basix.ufl
-import colormaps
 import adios4dolfinx
 import numpy as np
-from matplotlib import colormaps as cm
 import matplotlib.pyplot as plt
+from matplotlib import colormaps as cm
 
-dim = 5
-N_cells = [5, 10, 25, 50, 100]
-output_dir = f"/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/{dim}m/"
+dim = int(sys.argv[1])
+N_cells = int(sys.argv[2])
+mesh_version = f"{dim}m/{N_cells}c"
+output_dir = f"/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/{mesh_version}/"
+filename = output_dir+"checkpoints" 
 
-# Colors
-viridis = cm.get_cmap("inferno").resampled(len(N_cells)+1)
+k = 1 # Finite element degree
 
-dt = 0.00005 # Timestep size in seconds
-time_steps = 500 # Number of timesteps
-times = np.linspace(0, dt*time_steps, time_steps+1)*1e3 # Times in milliseconds
+timestep = 5e-5
+num_timesteps = int(sys.argv[3])
+T = (num_timesteps)*timestep
+times_int = np.arange(num_timesteps+1)
 
-fig, ax = plt.subplots(figsize=[16, 9])
-lw = 2
+# Prepare finite elements and pyvista grid used to plot
+mesh = adios4dolfinx.read_mesh(filename, comm=mpi4py.MPI.COMM_WORLD)
+ct   = adios4dolfinx.read_meshtags(filename, mesh, meshtag_name="ct")
+ft   = adios4dolfinx.read_meshtags(filename, mesh, meshtag_name="ft")
+CG = dolfinx.fem.functionspace(mesh,
+        basix.ufl.element("CG", mesh.basix_cell(), k)
+        )
+u_cg = dolfinx.fem.Function(CG)
 
-for i, N in enumerate(N_cells):
-    print("N = ", N)
-    mesh_version = f"{N}c"
-    filename = output_dir+f"{mesh_version}/phi_m.npy"
+cells, types, x = dolfinx.plot.vtk_mesh(CG)
+grid = pyvista.UnstructuredGrid(cells, types, x)
 
-    phi_m = np.load(filename)
-    ax.plot(times, phi_m, label=f"N={N} cells", color=viridis.colors[i], linewidth=lw)
+xx, yy, zz = [mesh.geometry.x[:, i] for i in range(mesh.geometry.dim)]
+x_min = xx.min()
+x_max = xx.max()
+y_min = yy.min()
+y_max = yy.max()
+z_min = zz.min()
+z_max = zz.max()
+x_c = (x_max + x_min) / 2
+y_c = (y_max + y_min) / 2
+z_c = (z_max + z_min) / 2
+mesh_center = np.array([x_c, y_c, z_c])
 
-ax.set_ylabel('mV', fontsize=40)
-ax.tick_params(axis='both', labelsize=30)
-ax.set_xlabel('Time [ms]', fontsize=40) 
-ax.legend(fontsize=16, loc='best', frameon=True, fancybox=False, edgecolor='k')
-fig.suptitle(f"Membrane potentials cube dimensions = {dim} microns")
+cell_ids = [3, 2]#[66, 68] # 1st stimulated, 2nd neighbor
+
+gamma_facets = ft.find(cell_ids[0])
+gamma_vertices = dolfinx.mesh.compute_incident_entities(
+                                                mesh.topology,
+                                                gamma_facets,
+                                                mesh.topology.dim-1,
+                                                0
+)
+gamma_vertices = np.unique(gamma_vertices)
+gamma_coords = mesh.geometry.x[gamma_vertices]
+
+# Find the vertex that lies closest to the cell's centroid
+distances = np.sum((gamma_coords - mesh_center)**2, axis=1)
+argmin_local = np.argmin(distances)
+min_dist_local = distances[argmin_local]
+min_vertex = gamma_vertices[argmin_local]
+
+min_point1 = mesh.geometry.x[min_vertex]
+
+# Find the cell that contains the vertex
+bb_tree = dolfinx.geometry.bb_tree(mesh, mesh.topology.dim)
+cell_candidates = dolfinx.geometry.compute_collisions_points(bb_tree, min_point1)
+colliding_cells = dolfinx.geometry.compute_colliding_cells(mesh, cell_candidates, min_point1)
+cc = colliding_cells.links(0)[0]
+membrane_cell1 = np.array(cc)
+
+gamma_facets = ft.find(cell_ids[1]) 
+gamma_vertices = dolfinx.mesh.compute_incident_entities(
+                                                mesh.topology,
+                                                gamma_facets,
+                                                mesh.topology.dim-1,
+                                                0
+)
+gamma_vertices = np.unique(gamma_vertices)
+gamma_coords = mesh.geometry.x[gamma_vertices]
+
+# Find the vertex that lies closest to the cell's centroid
+distances = np.sum((gamma_coords - mesh_center)**2, axis=1)
+argmin_local = np.argmin(distances)
+min_dist_local = distances[argmin_local]
+min_vertex = gamma_vertices[argmin_local]
+
+min_point2 = mesh.geometry.x[min_vertex]
+
+# Find the cell that contains the vertex
+bb_tree = dolfinx.geometry.bb_tree(mesh, mesh.topology.dim)
+cell_candidates = dolfinx.geometry.compute_collisions_points(bb_tree, min_point2)
+colliding_cells = dolfinx.geometry.compute_colliding_cells(mesh, cell_candidates, min_point2)
+cc = colliding_cells.links(0)[0]
+membrane_cell2 = np.array(cc)
+
+phi_m_1 = []
+phi_m_2 = []
+
+# Plot configuration
+figsize = [12, 8]
+fig, ax = plt.subplots(figsize=figsize, ncols=2)
+
+for t in times_int:
+    # Read potentials
+    adios4dolfinx.read_function(filename, u_cg, time=t, name=f"phi_m")
+    phi_m_val1 = u_cg.eval(min_point1, membrane_cell1)
+    phi_m_val2 = u_cg.eval(min_point2, membrane_cell2)
+
+    phi_m_1.append(phi_m_val1)
+    phi_m_2.append(phi_m_val2)
+
+# Plot in milliseconds and millivolts
+ax[0].plot(times_int*timestep*1e3, phi_m_1*1e3, label=f"stimulated")
+ax[1].plot(times_int*timestep*1e3, phi_m_2*1e3, label=f"neighbor")
+
+plt.legend()
 fig.tight_layout()
-fig.savefig(output_dir+"membrane_potentials")
+fig.savefig(output_dir+f"membrane_potentials_stim_and_neighbor.png")

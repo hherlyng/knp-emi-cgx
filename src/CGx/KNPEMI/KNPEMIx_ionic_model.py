@@ -10,12 +10,9 @@ from petsc4py import PETSc
 
 # Stimulus
 def g_syn(g_syn_bar, a_syn, t: float) -> float:
-    g = g_syn_bar * np.exp(-np.mod(t, 0.01)/a_syn)
-    # g = g_syn_bar			
-    # g = lambda x: g_syn_bar*np.exp(-np.mod(t,0.01)/a_syn)*(x[2] < 5e-4)
-    # g = lambda x: g_syn_bar*(x[0] < 0.3) * (x[1] < 0.3)
-    
-    return g
+
+    # return g_syn_bar * np.exp(-np.mod(t, 0.01)/a_syn)
+    return g_syn_bar * np.exp(-np.mod(t, 0.001)/a_syn)
 
 # Kir-function used in ionic pump (Halnes et al. 2013(?))
 def f_Kir(K_e_init, K_e, E_K_init, delta_phi, phi_m):
@@ -286,12 +283,10 @@ class ATPPump(IonicModel):
 class HodgkinHuxley(IonicModel):
 
     def __init__(self, KNPEMIx_problem, tags=None,
-                stimulus: bool=False, use_Rush_Lar: bool=True,
-                time_steps_ODE: int=25):
+                 use_Rush_Lar: bool=True, time_steps_ODE: int=25):
 
         super().__init__(KNPEMIx_problem, tags)
 
-        self.stimulus = stimulus
         self.use_Rush_Lar = use_Rush_Lar
         self.time_steps_ODE = time_steps_ODE
 
@@ -332,15 +327,15 @@ class HodgkinHuxley(IonicModel):
         I_ch : float
             The value of the passive channel current.
         """
-        # aliases		
+        # Aliases		
         p     = self.problem		
         ion   = p.ion_list[ion_idx]
         phi_m = p.phi_m_prev
 
-        # leak currents
+        # Leak currents
         ion['g_k'] = ion['g_leak']
 
-        # stimulus and gating
+        # Voltage-gated currents
         if ion['name'] == 'Na': 
             ion['g_k'] += p.g_Na_bar*p.m**3*p.h
 

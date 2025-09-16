@@ -11,7 +11,6 @@ from mpi4py         import MPI
 from petsc4py       import PETSc
 from CGx.utils      import restructure_xdmf
 from CGx.utils.misc import dump
-from memory_profiler import profile
 from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
 
 pprint = print # Allows flushing from arbitrary rank
@@ -246,7 +245,6 @@ class SolverKNPEMI(object):
             self.A.setNearNullSpace(nullspace)
             nullspace.remove(self.b)
 
-    @profile
     def solve(self):
         
         # Aliases
@@ -599,22 +597,32 @@ class SolverKNPEMI(object):
         a4d.write_mesh(filename, p.mesh)
         a4d.write_meshtags(filename, p.mesh, meshtags=p.subdomains)
         a4d.write_meshtags(filename, p.mesh, meshtags=p.boundaries)
-        for idx in range(p.N_ions+1):
+
+        # Write concentrations to file
+        for idx in range(p.N_ions):
             p.u_out_i[idx].interpolate(p.u_p[0].sub(idx))
             p.u_out_e[idx].interpolate(p.u_p[1].sub(idx))
             a4d.write_function(filename=filename, u=p.u_out_i[idx], time=0)
             a4d.write_function(filename=filename, u=p.u_out_e[idx], time=0)
+        
+        # Write membrane potential to file
+        a4d.write_function(filename=filename, u=p.phi_m_prev, time=0)
 
         return
     
     def save_checkpoint(self, i: int):
         """ Write solution to checkpoint file. """
         p = self.problem
-        for idx in range(p.N_ions+1):
+
+        # Write concentrations to file
+        for idx in range(p.N_ions):
             p.u_out_i[idx].interpolate(p.u_p[0].sub(idx))
             p.u_out_e[idx].interpolate(p.u_p[1].sub(idx))
             a4d.write_function(filename=self.cpoint_filename, u=p.u_out_i[idx], time=i)
             a4d.write_function(filename=self.cpoint_filename, u=p.u_out_e[idx], time=i)
+        
+        # Write membrane potential to file
+        a4d.write_function(filename=self.cpoint_filename, u=p.phi_m_prev, time=i)
 
         return
 

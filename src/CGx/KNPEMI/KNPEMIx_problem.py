@@ -9,7 +9,6 @@ import dolfinx as dfx
 from ufl      import grad, inner, dot
 from mpi4py   import MPI
 from petsc4py import PETSc
-from memory_profiler import profile
 from CGx.utils.setup_mms         import SetupMMS, mark_MMS_boundaries
 from CGx.utils.mixed_dim_problem import MixedDimensionalProblem
 
@@ -51,7 +50,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         self.u_p[0].name = "intra"
         self.u_p[1].name = "extra"
 
-        # Setup checkpoint output files
+        # Setup checkpoint output files for concentrations
         self.u_out_i = []
         self.u_out_e = []
         for idx, ion in enumerate(self.ion_list):
@@ -61,12 +60,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             extra_func = self.u_p[1].sub(idx).collapse()
             extra_func.name = f"{ion["name"]}_e"
             self.u_out_e.append(extra_func)
-        phi_i = self.u_p[0].sub(self.N_ions).collapse()
-        phi_i.name = "phi_i"
-        self.u_out_i.append(phi_i)
-        phi_e = self.u_p[1].sub(self.N_ions).collapse()
-        phi_e.name = "phi_e"
-        self.u_out_e.append(phi_e)
 
         print("Creating mesh restrictions ...")
 
@@ -183,6 +176,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         # Set initial membrane potential
         phi_space, _ = self.V.sub(self.N_ions).collapse()
         self.phi_m_prev = dfx.fem.Function(phi_space)
+        self.phi_m_prev.name = "phi_m"
         if self.MMS_test:
             self.phi_m_prev.interpolate(self.phi_m_init)
         else:
@@ -240,7 +234,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             ui_p.sub(self.N_ions).interpolate(self.phi_i_init)
             ue_p.sub(self.N_ions).interpolate(self.phi_e_init)
 
-    @profile
     def setup_variational_form(self):
 
         # sanity check

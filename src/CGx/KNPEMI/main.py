@@ -15,13 +15,14 @@ def main_yaml(yaml_file="config.yaml", view_input=None):
 	problem = ProblemKNPEMI(yaml_file)
 
 	# Set ionic models
-	HH = HodgkinHuxley(problem, tags=problem.neuron_tags)
-	ATP = ATPPump(problem, tags=problem.neuron_tags)
-	NeuronalCT = NeuronalCotransporters(problem, tags=problem.neuron_tags)
-	KirNa = KirNaKPumpModel(problem, tags=problem.glia_tags)
-	GlialCT = GlialCotransporters(problem, tags=problem.glia_tags)
+	HH = HodgkinHuxley(problem, tags=problem.gamma_tags)
+	# HH = HodgkinHuxley(problem, tags=problem.neuron_tags)
+	# ATP = ATPPump(problem, tags=problem.neuron_tags)
+	# NeuronalCT = NeuronalCotransporters(problem, tags=problem.neuron_tags)
+	# KirNa = KirNaKPumpModel(problem, tags=problem.glia_tags)
+	# GlialCT = GlialCotransporters(problem, tags=problem.glia_tags)
 
-	ionic_models = [HH, ATP, NeuronalCT, GlialCT, KirNa]
+	ionic_models = [HH]#, ATP, NeuronalCT, GlialCT, KirNa]
 
 	problem.init_ionic_model(ionic_models)
 	problem.initial_variable_setup()
