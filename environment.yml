@@ -20,6 +20,3 @@ dependencies:
   - cmake
   - ninja
   - cxx-compiler
-  - pyvista
-  - adios4dolfinx
-  - colormaps

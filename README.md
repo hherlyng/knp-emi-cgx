@@ -13,7 +13,7 @@ conda activate CGx
 Whilst still in the root directory, install the `CGx` Python module by running
 
 ```
-pip install -e .
+pip install -e . --no-build-isolation
 ```
 
 # Testing the setup on a unit square mesh
@@ -29,4 +29,19 @@ to generate a 32x32 unit square mesh. The script `generate_square_mesh.py` has a
 To run a simulation with a test setup config, run
 ```
 python main.py --config test_setup_config.yaml
+```
+
+# Citation
+If you use this code, please cite the following paper
+```
+@article{benedusi2024scalable,
+  author = {Benedusi, Pietro and Ellingsrud, Ada Johanne and Herlyng, Halvor and Rognes, Marie E.},
+  title = {Scalable Approximation and Solvers for Ionic Electrodiffusion in Cellular Geometries},
+  journal = {SIAM Journal on Scientific Computing},
+  volume = {46},
+  number = {5},
+  pages = {B725-B751},
+  year = {2024},
+  doi = {10.1137/24M1644717}
+}
 ```
