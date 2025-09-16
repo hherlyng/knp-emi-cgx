@@ -782,46 +782,44 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     ### Default class variables ###
     
     # Physical parameters
-    C_M = 0.02                       # capacitance (F)
-    T   = 300                        # temperature (K)
-    F   = 96485                      # Faraday's constant (C/mol)
-    R   = 8.314                      # Gas constant (J/(K*mol))
-    psi = R*T/F                      # recurring variable
+    C_M = 0.02                     # Capacitance (F)
+    T   = 300                      # Temperature (K)
+    F   = 96485                    # Faraday's constant (C/mol)
+    R   = 8.314                    # Gas constant (J/(K*mol))
+    psi = R*T/F                    # Recurring variable
     
-    g_Na_bar    = 1200                 # Na max conductivity (S/m**2)
-    g_K_bar     = 360                  # K max conductivity (S/m**2)    
+    g_Na_bar    = 1200             # Na max conductivity (S/m**2)
+    g_K_bar     = 360              # K max conductivity (S/m**2)    
     g_Na_leak   = 1.0              # Na leak conductivity (S/m**2) (Constant)
     g_Na_leak_g = 1.0              # Na leak conductivity (S/m**2) (Constant)
     g_K_leak    = 4.0              # K leak conductivity (S/m**2)
     g_K_leak_g  = 16.96
-    g_Cl_leak   = 0.25                  # Cl leak conductivity (S/m**2) (Constant)
+    g_Cl_leak   = 0.25             # Cl leak conductivity (S/m**2) (Constant)
     g_Cl_leak_g = 0.5
-    a_syn       = 0.002                 # synaptic time constant (s)
-    g_syn_bar   = 40                    # synaptic conductivity (S/m**2)
-    D_Na        = 1.33e-9               # diffusion coefficients Na (m/s^2) (Constant)
-    D_K         = 1.96e-9               # diffusion coefficients K (m/s^2) (Constant)
-    D_Cl        = 2.03e-9               # diffusion coefficients Cl (m/s^2) (Constant)
-    phi_rest    = -0.065                # resting membrane potential (V)
+    a_syn       = 0.001              # Synaptic time constant (s)
+    g_syn_bar   = 40               # Synaptic conductivity (S/m**2)
+    D_Na        = 1.33e-9          # Diffusion coefficients Na (m/s^2) (Constant)
+    D_K         = 1.96e-9          # Diffusion coefficients K (m/s^2) (Constant)
+    D_Cl        = 2.03e-9          # Diffusion coefficients Cl (m/s^2) (Constant)
+    phi_rest    = -0.065           # Resting membrane potential (V)
 
     # Potassium buffering params [Halnes et al. 2013]
-    rho_pump = 1.12e-6			     # maximum pump rate (mol/m**2 s)
-    P_Na_i = 10                       # [Na+]i threshold for Na+/K+ pump (mol/m^3)
-    P_K_e  = 1.5                      # [K+]e  threshold for Na+/K+ pump (mol/m^3)
-    k_dec = 2.9e-8				     # Decay factor for [K+]e (m/s)
+    rho_pump = 1.12e-6	# Maximum pump rate (mol/m**2 s)
+    P_Na_i = 10         # [Na+]i threshold for Na+/K+ pump (mol/m^3)
+    P_K_e  = 1.5        # [K+]e  threshold for Na+/K+ pump (mol/m^3)
+    k_dec = 2.9e-8		# Decay factor for [K+]e (m/s)
 
     # Initial conditions
-    phi_m_init = -0.067 # Membrane potential (V)	 (Constant)
-    phi_i_init = phi_m_init # Intracellular potential (V)	 (Constant)
-    phi_e_init = 0.0     # Extracellular potential (V)	 (Constant)
-    Na_i_init  = 40        # intracellular Na concentration (mol/m^3) (Constant)
-    Na_e_init  = 90       # extracellular Na concentration (mol/m^3) (Constant)
-    K_i_init   = 80        # intracellular K  concentration (mol/m^3) (Constant)
-    K_e_init   = 4         # extracellular K  concentration (mol/m^3) (Constant)
-    Cl_i_init  = 7        # intracellular Cl concentration (mol/m^3) (Constant)
-    Cl_e_init  = 112   # extracellular Cl concentration (mol/m^3) (Constant)
-    n_init_val = 0.3 # Gating variable
-    m_init_val = 0.05 # Gating variable
-    h_init_val = 0.65 # Gating variable
+    phi_m_init = -0.067 # Membrane potential (V)
+    Na_i_init  = 40     # Intracellular Na concentration (mol/m^3) (Constant)
+    Na_e_init  = 90     # Extracellular Na concentration (mol/m^3) (Constant)
+    K_i_init   = 80     # Intracellular K  concentration (mol/m^3) (Constant)
+    K_e_init   = 4      # Extracellular K  concentration (mol/m^3) (Constant)
+    Cl_i_init  = 7      # Intracellular Cl concentration (mol/m^3) (Constant)
+    Cl_e_init  = 112    # Eextracellular Cl concentration (mol/m^3) (Constant)
+    n_init_val = 0.3    # Gating variable
+    m_init_val = 0.05   # Gating variable
+    h_init_val = 0.65   # Gating variable
 
     # Source terms
     Na_e_f = 0.0

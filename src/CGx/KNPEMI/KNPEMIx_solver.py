@@ -605,8 +605,11 @@ class SolverKNPEMI(object):
             a4d.write_function(filename=filename, u=p.u_out_i[idx], time=0)
             a4d.write_function(filename=filename, u=p.u_out_e[idx], time=0)
         
-        # Write membrane potential to file
+        # Write membrane potential and gating variables to file
         a4d.write_function(filename=filename, u=p.phi_m_prev, time=0)
+        a4d.write_function(filename=filename, u=p.n, time=0)
+        a4d.write_function(filename=filename, u=p.m, time=0)
+        a4d.write_function(filename=filename, u=p.h, time=0)
 
         return
     
@@ -623,6 +626,9 @@ class SolverKNPEMI(object):
         
         # Write membrane potential to file
         a4d.write_function(filename=self.cpoint_filename, u=p.phi_m_prev, time=i)
+        a4d.write_function(filename=self.cpoint_filename, u=p.n, time=i)
+        a4d.write_function(filename=self.cpoint_filename, u=p.m, time=i)
+        a4d.write_function(filename=self.cpoint_filename, u=p.h, time=i)
 
         return
 

@@ -10,9 +10,8 @@ from petsc4py import PETSc
 
 # Stimulus
 def g_syn(g_syn_bar, a_syn, t: float) -> float:
-
-    # return g_syn_bar * np.exp(-np.mod(t, 0.01)/a_syn)
-    return g_syn_bar * np.exp(-np.mod(t, 0.001)/a_syn)
+    T = 5e-3
+    return g_syn_bar * np.exp(-np.mod(t, T)/a_syn)
 
 # Kir-function used in ionic pump (Halnes et al. 2013(?))
 def f_Kir(K_e_init, K_e, E_K_init, delta_phi, phi_m):
@@ -302,9 +301,9 @@ class HodgkinHuxley(IonicModel):
         # update gating variables
         if np.isclose(float(p.t), 0): 
             G, _ = p.V.sub(p.N_ions).collapse() # Gating function finite element space
-            p.n = dfx.fem.Function(G)
-            p.m = dfx.fem.Function(G)
-            p.h = dfx.fem.Function(G)
+            p.n = dfx.fem.Function(G); p.n.name = "n"
+            p.m = dfx.fem.Function(G); p.m.name = "m"
+            p.h = dfx.fem.Function(G); p.h.name = "h"
 
             p.n.x.array[:] = p.n_init_val
             p.m.x.array[:] = p.m_init_val

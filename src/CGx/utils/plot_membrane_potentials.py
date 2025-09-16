@@ -100,23 +100,56 @@ membrane_cell2 = np.array(cc)
 phi_m_1 = []
 phi_m_2 = []
 
-# Plot configuration
-figsize = [12, 8]
-fig, ax = plt.subplots(figsize=figsize, ncols=2)
+n_1 = []
+m_1 = []
+h_1 = []
+
+n_2 = []
+m_2 = []
+h_2 = []
 
 for t in times_int:
     # Read potentials
     adios4dolfinx.read_function(filename, u_cg, time=t, name=f"phi_m")
-    phi_m_val1 = u_cg.eval(min_point1, membrane_cell1)
-    phi_m_val2 = u_cg.eval(min_point2, membrane_cell2)
+    phi_m_1.append(u_cg.eval(min_point1, membrane_cell1))
+    phi_m_2.append(u_cg.eval(min_point2, membrane_cell2))
 
-    phi_m_1.append(phi_m_val1)
-    phi_m_2.append(phi_m_val2)
+    # Read gating variables
+    adios4dolfinx.read_function(filename, u_cg, time=t, name=f"n")
+    n_1.append(u_cg.eval(min_point1, membrane_cell1))
+    n_2.append(u_cg.eval(min_point2, membrane_cell2))
+
+    adios4dolfinx.read_function(filename, u_cg, time=t, name=f"m")
+    m_1.append(u_cg.eval(min_point1, membrane_cell1))
+    m_2.append(u_cg.eval(min_point2, membrane_cell2))
+    
+    adios4dolfinx.read_function(filename, u_cg, time=t, name=f"h")
+    h_1.append(u_cg.eval(min_point1, membrane_cell1))
+    h_2.append(u_cg.eval(min_point2, membrane_cell2))
+
+# Plot membrane potentials
+figsize = [12, 8]
+fig, ax = plt.subplots(figsize=figsize, ncols=2)
 
 # Plot in milliseconds and millivolts
-ax[0].plot(times_int*timestep*1e3, phi_m_1*1e3, label=f"stimulated")
-ax[1].plot(times_int*timestep*1e3, phi_m_2*1e3, label=f"neighbor")
+ax[0].plot(times_int*timestep*1e3, np.array(phi_m_1)*1e3)
+ax[1].plot(times_int*timestep*1e3, np.array(phi_m_2)*1e3)
 
-plt.legend()
 fig.tight_layout()
 fig.savefig(output_dir+f"membrane_potentials_stim_and_neighbor.png")
+
+# Plot gating variables
+fig, ax = plt.subplots(figsize=figsize, ncols=2)
+
+# Plot in milliseconds
+ax[0].plot(times_int*timestep*1e3, n_1, label=f"n")
+ax[0].plot(times_int*timestep*1e3, m_1, label=f"m")
+ax[0].plot(times_int*timestep*1e3, h_1, label=f"h")
+ax[0].legend()
+ax[1].plot(times_int*timestep*1e3, n_2, label=f"n")
+ax[1].plot(times_int*timestep*1e3, m_2, label=f"m")
+ax[1].plot(times_int*timestep*1e3, h_2, label=f"h")
+ax[1].legend()
+
+fig.tight_layout()
+fig.savefig(output_dir+f"gating_variables_stim_and_neighbor.png")
