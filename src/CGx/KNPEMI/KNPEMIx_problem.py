@@ -196,10 +196,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                 self.phi_m_prev.x.array[neuron_dofs] = self.phi_m_n_init
                 self.phi_m_prev.x.array[glia_dofs] = self.phi_m_g_init
 
-        # Initialize ionic models
-        for model in self.ionic_models:
-            model._init()
-
         # Solutions at previous timestep
         ui_p = self.u_p[0]
         ue_p = self.u_p[1]
@@ -268,9 +264,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         if self.MMS_test:
             # Create boundary integral measure
             ds = ufl.Measure("ds", domain=self.mesh, subdomain_data=self.boundaries)
-
-        for model in self.ionic_models:
-            model._init()
             
         # Trial and test functions
         (ui, vi) = ufl.TrialFunctions(self.W[0]), ufl.TestFunctions(self.W[0])

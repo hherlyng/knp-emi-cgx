@@ -281,6 +281,7 @@ class MixedDimensionalProblem(ABC):
     
         # Check that all intracellular space tags are present in some ionic model
         for model in self.ionic_models:
+            model._init()
             for tag in model.tags:
                 if tag not in ionic_tags:
                     ionic_tags.append(tag)
