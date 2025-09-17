@@ -23,24 +23,30 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 	
 	problem = ProblemKNPEMI(yaml_file)
 
+	# Set ionic models
 	if problem.MMS_test:
 		ionic_models = [PassiveModel(problem, tags=(1, 2, 3, 4))]
-	else:
-		# Set ionic models
+	elif yaml_file=="square_config.yaml":
 		HH = HodgkinHuxley(problem)
 		ATP = ATPPump(problem)
 		NeuronalCT = NeuronalCotransporters(problem)
-		# HH = HodgkinHuxley(problem, tags=problem.neuron_tags)
-		# ATP = ATPPump(problem, tags=problem.neuron_tags)
-		# NeuronalCT = NeuronalCotransporters(problem, tags=problem.neuron_tags)
-		# KirNa = KirNaKPumpModel(problem, tags=problem.glia_tags)
-		# GlialCT = GlialCotransporters(problem, tags=problem.glia_tags)
+		ionic_models = [HH, ATP, NeuronalCT]
+	else:
+		HH = HodgkinHuxley(problem, tags=problem.neuron_tags)
+		ATP = ATPPump(problem, tags=problem.neuron_tags)
+		NeuronalCT = NeuronalCotransporters(problem, tags=problem.neuron_tags)
+		KirNa = KirNaKPumpModel(problem, tags=problem.glia_tags)
+		GlialCT = GlialCotransporters(problem, tags=problem.glia_tags)
 
-		ionic_models = [HH, ATP, NeuronalCT]#, GlialCT, KirNa]
+		ionic_models = [HH, ATP, NeuronalCT, GlialCT, KirNa]
 
 	problem.init_ionic_model(ionic_models)
 	problem.set_initial_conditions()
+	tic = time.perf_counter()
 	problem.setup_variational_form()
+	var_form_setup_time = time.perf_counter()-tic
+	var_form_setup_time_max = problem.comm.allreduce(var_form_setup_time, op=MPI.MAX)
+	print(f"Variational form setup in {var_form_setup_time_max:0.4f} seconds")
 
 	# Create solver and solve
 	solver = SolverKNPEMI(problem,

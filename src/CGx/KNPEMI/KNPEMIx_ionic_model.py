@@ -70,7 +70,7 @@ class KirNaKPumpModel(IonicModel):
 
     # Potassium buffering parameters
     rho_pump_val = 1.12e-6	# Maximum pump rate (mol/m**2 s)
-    P_Na_i_val = 10          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
+    P_Na_i_val = 10.0          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
     P_K_e_val  = 1.5         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
     k_dec_val = 2.9e-8		# Decay factor for [K+]e (m/s)
 
@@ -83,7 +83,7 @@ class KirNaKPumpModel(IonicModel):
 
         # Initial potassium Nernst potential
         p = KNPEMIx_problem
-        self.E_K_init = p.psi.value*np.log(p.K_e_init.value/p.K_i_g_init.value)
+        self.E_K_init = dfx.fem.Constant(p.mesh, p.psi.value*np.log(p.K_e_init.value/p.K_i_g_init.value))
         self.rho_pump = dfx.fem.Constant(p.mesh, self.rho_pump_val)
         self.P_Na_i = dfx.fem.Constant(p.mesh, self.P_Na_i_val)
         self.P_K_e = dfx.fem.Constant(p.mesh, self.P_K_e_val)
@@ -158,12 +158,13 @@ class GlialCotransporters(IonicModel):
     def _init(self):	
         
         p = self.problem
+
         # Maximum cotransporter strengths [A/m^2]
         g_KCC1 = 7e-1 # [S / m^2]
-        self.S_KCC1 = g_KCC1 * p.R*p.T / p.F
+        self.S_KCC1 = dfx.fem.Constant(p.mesh, g_KCC1 * p.psi.value)
         
         g_NKCC1 = 2e-2 # [S / m^2]
-        self.S_NKCC1 = g_NKCC1 * p.R*p.T / p.F
+        self.S_NKCC1 = dfx.fem.Constant(p.mesh, g_NKCC1 * p.psi.value)
 
     def _eval(self, ion_idx: int):
 
@@ -215,7 +216,7 @@ class NeuronalCotransporters(IonicModel):
         c_Cl_e = p.u_p[1].sub(2)
 
         I_KCC2 = self.S_KCC2 * ufl.ln((c_K_i * c_Cl_i)/(c_K_e*c_Cl_e))
-        I_NKCC1 = (self.S_NKCC1 * 1 / (1 + ufl.exp(16 - c_K_e))
+        I_NKCC1 = (self.S_NKCC1 * 1 / (1 + ufl.exp(16. - c_K_e))
                 * ufl.ln((c_Na_i * c_K_i * c_Cl_i**2)/(c_Na_e * c_K_e * c_Cl_e**2)))
 
         if ion["name"]=="Na":

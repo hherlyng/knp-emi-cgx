@@ -318,7 +318,7 @@ class MixedDimensionalProblem(ABC):
             with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
                 # Read mesh and cell tags
                 self.mesh = xdmf.read_mesh(ghost_mode=self.ghost_mode)
-                self.subdomains = xdmf.read_meshtags(self.mesh, name="ct")
+                self.subdomains = xdmf.read_meshtags(self.mesh, name="mesh")
                 self.subdomains.name = "ct"
 
             # Create facet entities, facet-to-cell connectivity and cell-to-cell connectivity
@@ -328,7 +328,7 @@ class MixedDimensionalProblem(ABC):
 
             with dfx.io.XDMFFile(MPI.COMM_WORLD, ft_file, 'r') as xdmf:
                 # Read facet tags
-                self.boundaries = xdmf.read_meshtags(self.mesh, name="ft")
+                self.boundaries = xdmf.read_meshtags(self.mesh, name="mesh")
                 self.boundaries.name = "ft"      
             
             # Scale mesh
@@ -382,8 +382,8 @@ class MixedDimensionalProblem(ABC):
         mesh_center = np.array([x_c, y_c, z_c])
 
         # Find all membrane vertices of the cell
-        gamma_facets = self.boundaries.find(4)
-        # gamma_facets = self.boundaries.find(68) # Always take the tag of the largest cell #10m, 100c stimulated in 66
+        gamma_facets = self.boundaries.find(66) # Always take the tag of the largest cell #10m, 100c stimulated in 66
+        # gamma_facets = self.boundaries.find(3)
         # gamma_facets = self.boundaries.find(89) # Always take the tag of the largest cell #20m, 100c stimulated in 88
         # gamma_facets = self.boundaries.find(self.gamma_tags[-1]) # Always take the tag of the largest cell
         gamma_vertices = dfx.mesh.compute_incident_entities(
@@ -750,9 +750,9 @@ class MixedDimensionalProblem(ABC):
             C = lambda delta_phi_K: 1 + np.exp((delta_phi_K + 0.0185)/0.0425)
             D = lambda phi_m: 1 + np.exp(-(0.1186 + phi_m)/0.0441)
 
-            rho_pump = self.rho_pump.value	 # Maximum pump rate (mol/m**2 s)
-            P_Na_i = self.P_Na_i.value          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
-            P_K_e  = self.P_K_e.value         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
+            rho_pump = 1.12e-6	 # Maximum pump rate (mol/m**2 s)
+            P_Na_i = 10          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
+            P_K_e  = 1.5         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
 
             # Pump expression
             I_glia_pump = lambda Na_i, K_e: rho_pump*F * (1 / (1 + (P_Na_i/Na_i)**(3/2))) * (1 / (1 + P_K_e/K_e))
@@ -906,22 +906,6 @@ class MixedDimensionalProblem(ABC):
                 n_init_val = None
                 m_init_val = None
                 h_init_val = None
-
-            # Communicate initial values from root process
-            self.phi_m_n_init = self.comm.bcast(Constant(self.mesh, phi_m_n_init_val), root=0)
-            self.Na_i_n_init = self.comm.bcast(Constant(self.mesh, Na_i_n_init_val), root=0)
-            self.Na_e_init = self.comm.bcast(Constant(self.mesh, Na_e_init_val), root=0)
-            self.K_i_n_init = self.comm.bcast(Constant(self.mesh, K_i_n_init_val), root=0)
-            self.K_e_init = self.comm.bcast(Constant(self.mesh, K_e_init_val), root=0)
-            self.Cl_i_n_init = self.comm.bcast(Constant(self.mesh, Cl_i_n_init_val), root=0)
-            self.Cl_e_init = self.comm.bcast(Constant(self.mesh, Cl_e_init_val), root=0)
-            self.phi_m_g_init = self.comm.bcast(Constant(self.mesh, phi_m_g_init_val), root=0)
-            self.Na_i_g_init = self.comm.bcast(Constant(self.mesh, Na_i_g_init_val), root=0)
-            self.K_i_g_init = self.comm.bcast(Constant(self.mesh, K_i_g_init_val), root=0)
-            self.Cl_i_g_init = self.comm.bcast(Constant(self.mesh, Cl_i_g_init_val), root=0)
-            self.n_init = self.comm.bcast(Constant(self.mesh, n_init_val), root=0)
-            self.m_init = self.comm.bcast(Constant(self.mesh, m_init_val), root=0)
-            self.h_init = self.comm.bcast(Constant(self.mesh, h_init_val), root=0) 
 
             # Communicate initial values from root process
             phi_m_n_init_val = self.comm.bcast(phi_m_n_init_val, root=0)
