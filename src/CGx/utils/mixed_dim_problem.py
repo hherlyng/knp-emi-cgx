@@ -9,6 +9,7 @@ import dolfinx as dfx
 
 from abc             import ABC, abstractmethod
 from mpi4py          import MPI
+from dolfinx         import Constant
 from petsc4py        import PETSc
 from CGx.utils.misc  import flatten_list, mark_boundaries_cube_MMS, mark_boundaries_square_MMS, mark_subdomains_cube, mark_subdomains_square, range_constructor
 from scipy.integrate import odeint
@@ -275,6 +276,7 @@ class MixedDimensionalProblem(ABC):
     def init_ionic_model(self, ionic_models):
 
         self.ionic_models = ionic_models
+        self.gating_variables = False # Initialize with no gating variables in the models
 
         # Initialize list
         ionic_tags = []
@@ -286,6 +288,10 @@ class MixedDimensionalProblem(ABC):
                 if tag not in ionic_tags:
                     ionic_tags.append(tag)
             print("Added tags for ionic model: ", model.__str__())
+
+            if model.__str__()=="Hodgkin-Huxley":
+                self.gating_variables = True
+                print("Gating variables flag set to True.")
         
         ionic_tags = sorted(flatten_list(ionic_tags))
         gamma_tags = sorted(flatten_list([self.gamma_tags]))
@@ -348,6 +354,11 @@ class MixedDimensionalProblem(ABC):
         # Integral measures for the domain
         self.dx = ufl.Measure("dx", domain=self.mesh, subdomain_data=self.subdomains) # Volume integral measure
         self.dS = ufl.Measure("dS", domain=self.mesh, subdomain_data=self.boundaries) # Facet integral measure
+
+        if self.glia_tags is not None:
+            # Store the neuron and glia computational cells
+            self.neuron_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.neuron_tags]))
+            self.glia_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.glia_tags]))
 
         # Find the point on the largest cell's membrane
         # that lies closest to the center point of the mesh.
@@ -663,16 +674,16 @@ class MixedDimensionalProblem(ABC):
                 h_init_val = None
 
             # Communicate initial values from root process
-            self.phi_m_init = self.comm.bcast(phi_m_init_val, root=0)
-            self.Na_i_init = self.comm.bcast(Na_i_init_val, root=0)
-            self.Na_e_init = self.comm.bcast(Na_e_init_val, root=0)
-            self.K_i_init = self.comm.bcast(K_i_init_val, root=0)
-            self.K_e_init = self.comm.bcast(K_e_init_val, root=0)
-            self.Cl_i_init = self.comm.bcast(Cl_i_init_val, root=0)
-            self.Cl_e_init = self.comm.bcast(Cl_e_init_val, root=0)
-            self.n_init_val = self.comm.bcast(n_init_val, root=0)
-            self.m_init_val = self.comm.bcast(m_init_val, root=0)
-            self.h_init_val = self.comm.bcast(h_init_val, root=0)
+            self.phi_m_init = self.comm.bcast(Constant(self.mesh, phi_m_init_val), root=0)
+            self.Na_i_init = self.comm.bcast(Constant(self.mesh, Na_i_init_val), root=0)
+            self.Na_e_init = self.comm.bcast(Constant(self.mesh, Na_e_init_val), root=0)
+            self.K_i_init = self.comm.bcast(Constant(self.mesh, K_i_init_val), root=0)
+            self.K_e_init = self.comm.bcast(Constant(self.mesh, K_e_init_val), root=0)
+            self.Cl_i_init = self.comm.bcast(Constant(self.mesh, Cl_i_init_val), root=0)
+            self.Cl_e_init = self.comm.bcast(Constant(self.mesh, Cl_e_init_val), root=0)
+            self.n_init = self.comm.bcast(Constant(self.mesh, n_init_val), root=0)
+            self.m_init = self.comm.bcast(Constant(self.mesh, m_init_val), root=0)
+            self.h_init = self.comm.bcast(Constant(self.mesh, h_init_val), root=0)
 
             # Update ion dictionaries
             self.ion_list[0]['ki_init'] = self.Na_i_init
@@ -886,20 +897,20 @@ class MixedDimensionalProblem(ABC):
                 h_init_val = None
 
             # Communicate initial values from root process
-            self.phi_m_n_init = self.comm.bcast(phi_m_n_init_val, root=0)
-            self.Na_i_n_init = self.comm.bcast(Na_i_n_init_val, root=0)
-            self.Na_e_init = self.comm.bcast(Na_e_init_val, root=0)
-            self.K_i_n_init = self.comm.bcast(K_i_n_init_val, root=0)
-            self.K_e_init = self.comm.bcast(K_e_init_val, root=0)
-            self.Cl_i_n_init = self.comm.bcast(Cl_i_n_init_val, root=0)
-            self.Cl_e_init = self.comm.bcast(Cl_e_init_val, root=0)
-            self.phi_m_g_init = self.comm.bcast(phi_m_g_init_val, root=0)
-            self.Na_i_g_init = self.comm.bcast(Na_i_g_init_val, root=0)
-            self.K_i_g_init = self.comm.bcast(K_i_g_init_val, root=0)
-            self.Cl_i_g_init = self.comm.bcast(Cl_i_g_init_val, root=0)
-            self.n_init_val = self.comm.bcast(n_init_val, root=0)
-            self.m_init_val = self.comm.bcast(m_init_val, root=0)
-            self.h_init_val = self.comm.bcast(h_init_val, root=0) 
+            self.phi_m_n_init = self.comm.bcast(Constant(self.mesh, phi_m_n_init_val), root=0)
+            self.Na_i_n_init = self.comm.bcast(Constant(self.mesh, Na_i_n_init_val), root=0)
+            self.Na_e_init = self.comm.bcast(Constant(self.mesh, Na_e_init_val), root=0)
+            self.K_i_n_init = self.comm.bcast(Constant(self.mesh, K_i_n_init_val), root=0)
+            self.K_e_init = self.comm.bcast(Constant(self.mesh, K_e_init_val), root=0)
+            self.Cl_i_n_init = self.comm.bcast(Constant(self.mesh, Cl_i_n_init_val), root=0)
+            self.Cl_e_init = self.comm.bcast(Constant(self.mesh, Cl_e_init_val), root=0)
+            self.phi_m_g_init = self.comm.bcast(Constant(self.mesh, phi_m_g_init_val), root=0)
+            self.Na_i_g_init = self.comm.bcast(Constant(self.mesh, Na_i_g_init_val), root=0)
+            self.K_i_g_init = self.comm.bcast(Constant(self.mesh, K_i_g_init_val), root=0)
+            self.Cl_i_g_init = self.comm.bcast(Constant(self.mesh, Cl_i_g_init_val), root=0)
+            self.n_init = self.comm.bcast(Constant(self.mesh, n_init_val), root=0)
+            self.m_init = self.comm.bcast(Constant(self.mesh, m_init_val), root=0)
+            self.h_init = self.comm.bcast(Constant(self.mesh, h_init_val), root=0) 
 
             # Update ion dictionaries
             self.ion_list[0]['ki_init_n'] = self.Na_i_n_init
@@ -912,7 +923,7 @@ class MixedDimensionalProblem(ABC):
             self.ion_list[2]['ki_init_g'] = self.Cl_i_g_init
             self.ion_list[2]['ke_init'] = self.Cl_e_init
 
-        print("Initial conditions set.")
+        print("Steady-state initial conditions found.")
     
     @abstractmethod
     def init(self):

@@ -124,7 +124,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                 if self.MMS_test:
                     func.interpolate(dfx.fem.Expression(
                                         ion['ke_init'],
-                                        We_ion.element.interpolation_points()
+                                        W_ion.element.interpolation_points()
                                         )
                                     )
                 else:
@@ -174,28 +174,48 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             ion['Di'] = dfx.fem.Constant(self.mesh, PETSc.ScalarType(ion['Di']))
             ion['De'] = dfx.fem.Constant(self.mesh, PETSc.ScalarType(ion['De']))
 
-    def initial_variable_setup(self):
+    def set_initial_conditions(self):
 
-        # Set initial membrane potential
+        # Set initial electric potentials
         phi_space, _ = self.V.sub(self.N_ions).collapse()
         self.phi_m_prev = dfx.fem.Function(phi_space)
         self.phi_m_prev.name = "phi_m"
         if self.MMS_test:
-            self.phi_m_prev.interpolate(self.phi_m_init)
+           self.phi_m_prev.interpolate(
+                                    dfx.fem.Expression(
+                                        self.phi_m_init,
+                                        phi_space.element.interpolation_points()
+                                        )
+                                    )
+
+            # Set intra- and extracellular potentials just for visualization   
+            ui_space, _ = ui_p.sub(self.N_ions).function_space.collapse()
+            ue_space, _ = ue_p.sub(self.N_ions).function_space.collapse()
+            ui_p.sub(self.N_ions).interpolate(
+                                    dfx.fem.Expression(
+                                        self.phi_i_init,
+                                        ui_space.element.interpolation_points()
+                                        )
+                                    )
+            ue_p.sub(self.N_ions).interpolate(
+                                    dfx.fem.Expression(
+                                        self.phi_e_init,
+                                        ue_space.element.interpolation_points()
+                                        )
+                                    )
         else:
             if self.glia_tags is None:
                 # Only neuronal cells
-                self.phi_m_prev.x.array[:] = self.phi_m_init
+                self.phi_m_prev.x.array[:] = self.phi_m_init.value
             else:
                 # Both neuronal and glial cells
-                self.neuron_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.neuron_tags]))
-                self.glia_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.glia_tags]))
                 neuron_dofs = dfx.fem.locate_dofs_topological(phi_space, self.subdomains.dim, self.neuron_cells)
                 glia_dofs = dfx.fem.locate_dofs_topological(phi_space, self.subdomains.dim, self.glia_cells)
 
-                self.phi_m_prev.x.array[neuron_dofs] = self.phi_m_n_init
-                self.phi_m_prev.x.array[glia_dofs] = self.phi_m_g_init
+                self.phi_m_prev.x.array[neuron_dofs] = self.phi_m_n_init.value
+                self.phi_m_prev.x.array[glia_dofs] = self.phi_m_g_init.value
 
+        # Set initial concentrations
         # Solutions at previous timestep
         ui_p = self.u_p[0]
         ue_p = self.u_p[1]
@@ -204,8 +224,20 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         for idx, ion in enumerate(self.ion_list):
             # Set initial value of intra- and extracellular ion concentrations
             if self.MMS_test:
-                ui_p.sub(idx).interpolate(ion['ki_init'])
-                ue_p.sub(idx).interpolate(ion['ke_init'])
+                ui_space, _ = ui_p.sub(idx).function_space.collapse()
+                ue_space, _ = ue_p.sub(idx).function_space.collapse()
+                ui_p.sub(idx).interpolate(
+                                    dfx.fem.Expression(
+                                        ion['ki_init'],
+                                        ui_space.element.interpolation_points()
+                                        )
+                                    )
+                ue_p.sub(idx).interpolate(
+                                    dfx.fem.Expression(
+                                        ion['ke_init'],
+                                        ue_space.element.interpolation_points()
+                                        )
+                                    )
             else:
                 if self.glia_tags is None:
                     # Get dof mapping between subspace and parent space
@@ -213,8 +245,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                     _, sub_to_parent_e = ue_p.sub(idx).function_space.collapse()
 
                     # Set the array values at the subspace dofs 
-                    ui_p.sub(idx).x.array[sub_to_parent_i] = ion['ki_init']
-                    ue_p.sub(idx).x.array[sub_to_parent_e] = ion['ke_init']
+                    ui_p.sub(idx).x.array[sub_to_parent_i] = ion['ki_init'].value
+                    ue_p.sub(idx).x.array[sub_to_parent_e] = ion['ke_init'].value
                 else:
                     # Get dof mapping between subspace and parent space
                     W_ion_i, sub_to_parent_i = ui_p.sub(idx).function_space.collapse()
@@ -223,13 +255,17 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                     _, sub_to_parent_e = ue_p.sub(idx).function_space.collapse()
 
                     # Set the array values at the subspace dofs 
-                    ui_p.sub(idx).x.array[np.intersect1d(sub_to_parent_i, neuron_dofs[0])] = ion['ki_init_n']
-                    ui_p.sub(idx).x.array[np.intersect1d(sub_to_parent_i, glia_dofs[0])]   = ion['ki_init_g']
-                    ue_p.sub(idx).x.array[sub_to_parent_e] = ion['ke_init']
+                    ui_p.sub(idx).x.array[np.intersect1d(sub_to_parent_i, neuron_dofs[0])] = ion['ki_init_n'].value
+                    ui_p.sub(idx).x.array[np.intersect1d(sub_to_parent_i, glia_dofs[0])]   = ion['ki_init_g'].value
+                    ue_p.sub(idx).x.array[sub_to_parent_e] = ion['ke_init'].value
+        
+        print("Initial conditions set.")
             
     def setup_variational_form(self):
 
-        # sanity check
+        print("Setting up variational form ...")
+        
+        # Check that ionic models have been initialized
         if len(self.ionic_models)==0 and self.comm.rank==0:
             raise RuntimeError('\nNo ionic model(s) specified.\nCall init_ionic_model() to provide ionic models.\n')
 
@@ -238,22 +274,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         F   = self.F
         psi = self.psi
         C_M = self.C_M
-        t   = self.t
-        phi_space, _ = self.V.sub(self.N_ions).collapse()
-
-        # Set initial membrane potential
-        if np.isclose(t.value, 0.0):
-            self.phi_M_prev = dfx.fem.Function(phi_space)
-            if self.MMS_test:
-                self.phi_M_prev.interpolate(dfx.fem.Expression(
-                                                self.phi_M_init,
-                                                phi_space.element.interpolation_points()
-                                                )
-                                            )
-            else:
-                self.phi_M_prev.x.array[:] = self.phi_M_init.value
-        
-        print("Setting up variational form ...")
 
         # Define integral measures
         dxi = self.dx(self.intra_tags)
@@ -298,32 +318,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             Di = ion['Di']
             De = ion['De']
 
-            # Set initial value of intra- and extracellular ion concentrations
-            if np.isclose(t.value, 0.0):
-                if self.MMS_test:
-                    ui_space, _ = ui_p.sub(idx).function_space.collapse()
-                    ue_space, _ = ue_p.sub(idx).function_space.collapse()
-                    ui_p.sub(idx).interpolate(
-                                        dfx.fem.Expression(
-                                            ion['ki_init'],
-                                            ui_space.element.interpolation_points()
-                                            )
-                                        )
-                    ue_p.sub(idx).interpolate(
-                                        dfx.fem.Expression(
-                                            ion['ke_init'],
-                                            ue_space.element.interpolation_points()
-                                            )
-                                        )
-                else:
-                    # Get dof mapping between subspace and parent space
-                    _, sub_to_parent_i = ui_p.sub(idx).function_space.collapse()
-                    _, sub_to_parent_e = ue_p.sub(idx).function_space.collapse()
-
-                    # Set the array values at the subspace dofs 
-                    ui_p.sub(idx).x.array[sub_to_parent_i] = ion['ki_init'].value
-                    ue_p.sub(idx).x.array[sub_to_parent_e] = ion['ke_init'].value
-
             # Add ion specific contribution to fraction alpha
             alpha_i_sum += Di * z**2 * ui_p.sub(idx)
             alpha_e_sum += De * z**2 * ue_p.sub(idx)
@@ -352,33 +346,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
                     # Add contribution to total channel current
                     I_ch[gamma_tag] += ion['I_ch'][gamma_tag]
-            
-        if np.isclose(t.value, 0.0):
-            # First timestep
-            # Set phi_e and phi_i just for visualization
-            if self.MMS_test:
-                ui_space, _ = ui_p.sub(self.N_ions).function_space.collapse()
-                ue_space, _ = ue_p.sub(self.N_ions).function_space.collapse()
-                ui_p.sub(self.N_ions).interpolate(
-                                        dfx.fem.Expression(
-                                            self.phi_i_init,
-                                            ui_space.element.interpolation_points()
-                                            )
-                                        )
-                ue_p.sub(self.N_ions).interpolate(
-                                        dfx.fem.Expression(
-                                            self.phi_e_init,
-                                            ue_space.element.interpolation_points()
-                                            )
-                                        )
-            else:
-                # Get dof mapping between subspace and parent space
-                _, sub_to_parent_i = ui_p.sub(self.N_ions).function_space.collapse()
-                _, sub_to_parent_e = ue_p.sub(self.N_ions).function_space.collapse()
-                
-                # Set the array values at the subspace dofs 
-                ui_p.sub(self.N_ions).x.array[sub_to_parent_i] = self.phi_i_init.value
-                ue_p.sub(self.N_ions).x.array[sub_to_parent_e] = self.phi_e_init.value
         
         # Initialize variational form block entries
         a00 = 0; a01 = 0; L0 = 0
@@ -604,7 +571,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         # initial values
         self.phi_i_init = exact_sols["phi_i_init"] # internal potential (V) just for visualization
         self.phi_e_init = exact_sols["phi_e_init"] # external potential (V) just for visualization
-        self.phi_M_init = self.phi_i_init - self.phi_e_init # membrane potential (V)
+        self.phi_m_init = self.phi_i_init - self.phi_e_init # membrane potential (V)
 
         # create ions
         self.Na = {'Di' : dfx.fem.Constant(self.mesh, 1.0),
@@ -802,7 +769,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         self.D_Na = Constant(self.mesh, dfx.default_scalar_type(1.33e-9)) # Diffusion coefficients Na (m/s^2) (Constant)
         self.D_K  = Constant(self.mesh, dfx.default_scalar_type(1.96e-9)) # Diffusion coefficients K (m/s^2) (Constant)
         self.D_Cl = Constant(self.mesh, dfx.default_scalar_type(2.03e-9)) # diffusion coefficients Cl (m/s^2) (Constant)
-        self.V_rest  = Constant(self.mesh, dfx.default_scalar_type(-0.065)) # Resting membrane potential (V)
+        self.phi_rest  = Constant(self.mesh, dfx.default_scalar_type(-0.065)) # Resting membrane potential (V)
 
         # Potassium buffering params
         self.rho_pump = Constant(self.mesh, dfx.default_scalar_type(1.115e-6)) # maximum pump rate (mol/m**2 s)
@@ -813,7 +780,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         # Initial conditions
         self.phi_e_init = Constant(self.mesh, dfx.default_scalar_type(0))         # External potential (V) (Constant)
         self.phi_i_init = Constant(self.mesh, dfx.default_scalar_type(-0.06774))  # Internal potential (V) just for visualization (Constant)
-        self.phi_M_init = Constant(self.mesh, dfx.default_scalar_type(-0.06774))  # Membrane potential (V)	 (Constant)
+        self.phi_m_init = Constant(self.mesh, dfx.default_scalar_type(-0.06774))  # Membrane potential (V)	 (Constant)
         self.Na_i_init  = Constant(self.mesh, dfx.default_scalar_type(12))        # Intracellular Na concentration (mol/m^3) (Constant)
         self.Na_e_init  = Constant(self.mesh, dfx.default_scalar_type(100))       # Extracellular Na concentration (mol/m^3) (Constant)
         self.K_i_init   = Constant(self.mesh, dfx.default_scalar_type(125))       # Intracellular K  concentration (mol/m^3) (Constant)
@@ -822,9 +789,9 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         self.Cl_e_init  = Constant(self.mesh, dfx.default_scalar_type(104))       # Extracellular Cl concentration (mol/m^3) (Constant)
 
         # Initial values of gating variables
-        self.n_init_val = Constant(self.mesh, dfx.default_scalar_type(0.27622914792))
-        self.m_init_val = Constant(self.mesh, dfx.default_scalar_type(0.03791834627))
-        self.h_init_val = Constant(self.mesh, dfx.default_scalar_type(0.68848921811))
+        self.n_init = Constant(self.mesh, dfx.default_scalar_type(0.27622914792))
+        self.m_init = Constant(self.mesh, dfx.default_scalar_type(0.03791834627))
+        self.h_init = Constant(self.mesh, dfx.default_scalar_type(0.68848921811))
 
         # Source terms
         self.Na_e_f = Constant(self.mesh, dfx.default_scalar_type(0.0))

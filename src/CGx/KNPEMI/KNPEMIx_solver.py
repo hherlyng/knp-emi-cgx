@@ -255,6 +255,19 @@ class SolverKNPEMI(object):
         
         setup_timer = 0.0
 
+
+        tic = time.perf_counter()
+        # Perform solver setup
+        self.setup_solver()
+        setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
+
+        # Assemble preconditioner if enabled
+        if not self.direct_solver and self.use_P_mat:
+            tic = time.perf_counter()
+            p.setup_preconditioner(self.use_block_Jacobi)
+            setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
+            self.assemble_preconditioner()
+
         # Time-stepping
         for i in range(self.time_steps):
 
@@ -265,24 +278,9 @@ class SolverKNPEMI(object):
             print('\nTime step ', i + 1)
             print('t (ms) = ', 1000 * float(t.value))               
 
-            # Set up the variational form
-            tic = time.perf_counter()
-            setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
-
-            if i==0:
-                # Perform solver setup
-                self.setup_solver()
-
-                # Assemble preconditioner if enabled
-                if not self.direct_solver and self.use_P_mat:
-                    p.setup_preconditioner(self.use_block_Jacobi)
-                    self.assemble_preconditioner()
-
-            # Update ionic models
-            #############
-            # TODO IONIC MODELS
-            p.ionic_models[0].update_gating_variables()
-            ############
+            # Update ODE-based ionic models
+            if p.gating_variables:
+                p.ionic_models[0].update_gating_variables()
 
             # Assemble system matrix and RHS vector
             tic = time.perf_counter()

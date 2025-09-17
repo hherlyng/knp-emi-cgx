@@ -24,8 +24,7 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 	problem = ProblemKNPEMI(yaml_file)
 
 	if problem.MMS_test:
-		ionic_models = [Passive_model(problem, tags=(1, 2, 3, 4))]
-		problem.init_ionic_model(ionic_models)
+		ionic_models = [PassiveModel(problem, tags=(1, 2, 3, 4))]
 	else:
 		# Set ionic models
 		HH = HodgkinHuxley(problem, tags=problem.gamma_tags)
@@ -37,12 +36,13 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 
 		ionic_models = [HH]#, ATP, NeuronalCT, GlialCT, KirNa]
 
-		problem.init_ionic_model(ionic_models)
-		problem.initial_variable_setup()
+	problem.init_ionic_model(ionic_models)
+	problem.set_initial_conditions()
+	problem.setup_variational_form()
 
 	# Create solver and solve
 	solver = SolverKNPEMI(problem,
-						  view_input=view_input,
+						  view_input=view_ksp,
 						  save_xdmfs=True,
 						  use_direct_solver=False,
 						  save_pngs=True,
@@ -68,6 +68,6 @@ if __name__=='__main__':
 
 	parser = argparse.ArgumentParser(formatter_class=CustomParser)
 	parser.add_argument("--config", dest="config_file", default='./test_setup_config.yaml', type=Path, help="Configuration file")
-	parser.add_argument("--view", dest="view_input", type=bool)
+	parser.add_argument("--view", dest="view_ksp", default=False, type=bool, help="Verbose KSP object log")
 	args = parser.parse_args(None)
-	main_yaml(yaml_file=str(args.config_file), view_input=bool(args.view_input))
+	main_yaml(yaml_file=str(args.config_file), view_ksp=args.view_ksp)

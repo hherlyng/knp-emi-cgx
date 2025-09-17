@@ -11,7 +11,7 @@ from petsc4py import PETSc
 # Stimulus
 def g_syn(g_syn_bar, a_syn, t: dfx.fem.Constant) -> float:
     T = 5e-3
-    g = g_syn_bar * ufl.exp(-np.mod(float(t), T) / a_syn)
+    return g_syn_bar * ufl.exp(-np.mod(float(t), T) / a_syn)
 
 # Kir-function used in ionic pump (Halnes et al. 2013(?))
 def f_Kir(K_e_init, K_e, E_K_init, delta_phi, phi_m):
@@ -54,19 +54,6 @@ class IonicModel(ABC):
 		# Abstract method that must be implemented by concrete subclasses.
 		pass
 
-
-# I_ch = phi_m
-class Null_model(IonicModel):
-
-	def _init(self):		
-		pass
-
-	def __str__(self):
-		return f'Zero'
-		
-	def _eval(self, ion_idx):			
-		return 0
-
 # Passive membrane model: I_ch = phi_M
 class PassiveModel(IonicModel):
     """ Ionic current is the membrane potential."""
@@ -101,7 +88,7 @@ class KirNaKPumpModel(IonicModel):
 
         # Initial potassium Nernst potential
         p = KNPEMIx_problem
-        self.E_K_init = p.psi*ufl.ln(p.K_e_init/p.K_i_g_init)	
+        self.E_K_init = p.psi.value*np.log(p.K_e_init.value/p.K_i_g_init.value)	
 
     def __str__(self):
         return f'Inward-rectifying K current passive model with Na/K/ATPase pump'
@@ -169,17 +156,13 @@ class GlialCotransporters(IonicModel):
 
     def _init(self):	
         
-        if np.isclose(self.problem.t.value, 0): 
-            p = self.problem
-            # Maximum cotransporter strengths [A/m^2]
-            g_KCC1 = 7e-1 # [S / m^2]
-            self.S_KCC1 = g_KCC1 * p.R*p.T / p.F
-            
-            g_NKCC1 = 2e-2 # [S / m^2]
-            self.S_NKCC1 = g_NKCC1 * p.R*p.T / p.F
-
-        else:
-            pass
+        p = self.problem
+        # Maximum cotransporter strengths [A/m^2]
+        g_KCC1 = 7e-1 # [S / m^2]
+        self.S_KCC1 = g_KCC1 * p.R*p.T / p.F
+        
+        g_NKCC1 = 2e-2 # [S / m^2]
+        self.S_NKCC1 = g_NKCC1 * p.R*p.T / p.F
 
     def _eval(self, ion_idx: int):
 
@@ -212,14 +195,10 @@ class NeuronalCotransporters(IonicModel):
          return "KCC2/NKCC1 Cotransporters"
 
     def _init(self):	
-        
-        if np.isclose(self.problem.t.value, 0): 
-            # Maximum cotransporter strengths [A/m^2]
-            self.S_KCC2 = 0.0034
-            self.S_NKCC1 = 0.023
-
-        else:
-            pass
+    
+        # Maximum cotransporter strengths [A/m^2]
+        self.S_KCC2 = 0.0034
+        self.S_NKCC1 = 0.023
 
     def _eval(self, ion_idx: int):
 
@@ -255,12 +234,9 @@ class ATPPump(IonicModel):
     
     def _init(self):	
         
-        if np.isclose(self.problem.t.value, 0): 
-            self.I_hat = 0.18 # Maximum pump strength [A/m^2]
-            self.m_K = 3 # ECS K+ pump threshold [mM]
-            self.m_Na = 12 # ICS Na+ pump threshold [mM]
-        else:
-            pass
+        self.I_hat = 0.18 # Maximum pump strength [A/m^2]
+        self.m_K = 3 # ECS K+ pump threshold [mM]
+        self.m_Na = 12 # ICS Na+ pump threshold [mM]
 
     def _eval(self, ion_idx: int):
 
@@ -297,22 +273,18 @@ class HodgkinHuxley(IonicModel):
 
     def _init(self):	
 
-        # alias
+        # Alias
         p = self.problem		
 
-        # update gating variables
-        if np.isclose(float(p.t), 0): 
-            G, _ = p.V.sub(p.N_ions).collapse() # Gating function finite element space
-            p.n = dfx.fem.Function(G); p.n.name = "n"
-            p.m = dfx.fem.Function(G); p.m.name = "m"
-            p.h = dfx.fem.Function(G); p.h.name = "h"
+        G, _ = p.V.sub(p.N_ions).collapse() # Gating function finite element space
+        p.n = dfx.fem.Function(G); p.n.name = "n"
+        p.m = dfx.fem.Function(G); p.m.name = "m"
+        p.h = dfx.fem.Function(G); p.h.name = "h"
 
-            p.n.x.array[:] = p.n_init_val
-            p.m.x.array[:] = p.m_init_val
-            p.h.x.array[:] = p.h_init_val
-        
-        else:
-            self.update_gating_variables()			
+        p.n.x.array[:] = p.n_init.value
+        p.m.x.array[:] = p.m_init.value
+        p.h.x.array[:] = p.h_init.value
+        		
 
 
     def _eval(self, ion_idx: int):	
@@ -388,7 +360,7 @@ class HodgkinHuxley(IonicModel):
         
         # Set membrane potential
         with phi_m_prev.x.petsc_vec.localForm() as loc_phi_m_prev:
-            V_M = 1000*(loc_phi_m_prev[:] - self.problem.phi_rest) # convert phi_m to mV	
+            V_M = 1000*(loc_phi_m_prev[:] - self.problem.phi_rest.value) # convert phi_m to mV	
         
         alpha_n = 0.01e3 * (10.-V_M) / (np.exp((10. - V_M)/10.) - 1.)
         beta_n  = 0.125e3 * np.exp(-V_M/80.)
