@@ -523,12 +523,12 @@ class MixedDimensionalProblem(ABC):
         Cl_i_0 = self.Cl_i_init.value # [Mm]
         Cl_e_0 = self.Cl_e_init.value # [Mm]
         phi_m_0 = self.phi_m_init.value # [V]
-        n_0 = 0.3 
-        m_0 = 0.05
-        h_0 = 0.65
+        n_0 = self.n_init.value
+        m_0 = self.m_init.value
+        h_0 = self.h_init.value
 
         # ATP pump
-        I_hat = 0.18 # Maximum pump strength [A/m^2]
+        I_hat = 0.449 # Maximum pump strength [A/m^2]
         m_K = 3 # ECS K+ pump threshold [mM]
         m_Na = 12 # ICS Na+ pump threshold [mM]
 

@@ -782,17 +782,17 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         # Initial conditions
         self.phi_m_init = Constant(self.mesh, dfx.default_scalar_type(-0.067))  # Membrane potential, neuronal (V) 
         self.phi_m_init_g = Constant(self.mesh, dfx.default_scalar_type(-0.085))  # Membrane potential, glial (V) 
-        self.Na_i_init  = Constant(self.mesh, dfx.default_scalar_type(40))        # Intracellular Na concentration (mol/m^3) (Constant)
-        self.Na_e_init  = Constant(self.mesh, dfx.default_scalar_type(90))       # Extracellular Na concentration (mol/m^3) (Constant)
-        self.K_i_init   = Constant(self.mesh, dfx.default_scalar_type(80))       # Intracellular K  concentration (mol/m^3) (Constant)
+        self.Na_i_init  = Constant(self.mesh, dfx.default_scalar_type(12))        # Intracellular Na concentration (mol/m^3) (Constant)
+        self.Na_e_init  = Constant(self.mesh, dfx.default_scalar_type(100))       # Extracellular Na concentration (mol/m^3) (Constant)
+        self.K_i_init   = Constant(self.mesh, dfx.default_scalar_type(125))       # Intracellular K  concentration (mol/m^3) (Constant)
         self.K_e_init   = Constant(self.mesh, dfx.default_scalar_type(4))         # Extracellular K  concentration (mol/m^3) (Constant)
-        self.Cl_i_init  = Constant(self.mesh, dfx.default_scalar_type(7))       # Intracellular Cl concentration (mol/m^3) (Constant)
-        self.Cl_e_init  = Constant(self.mesh, dfx.default_scalar_type(112))       # Extracellular Cl concentration (mol/m^3) (Constant)
+        self.Cl_i_init  = Constant(self.mesh, dfx.default_scalar_type(137))       # Intracellular Cl concentration (mol/m^3) (Constant)
+        self.Cl_e_init  = Constant(self.mesh, dfx.default_scalar_type(104))       # Extracellular Cl concentration (mol/m^3) (Constant)
 
         # Initial values of gating variables
-        self.n_init = Constant(self.mesh, dfx.default_scalar_type(0.3))
-        self.m_init = Constant(self.mesh, dfx.default_scalar_type(0.05))
-        self.h_init = Constant(self.mesh, dfx.default_scalar_type(0.65))
+        self.n_init = Constant(self.mesh, dfx.default_scalar_type(0.276))
+        self.m_init = Constant(self.mesh, dfx.default_scalar_type(0.00379))
+        self.h_init = Constant(self.mesh, dfx.default_scalar_type(0.688))
 
         # Source terms
         self.Na_e_f = Constant(self.mesh, dfx.default_scalar_type(0.0))

@@ -239,7 +239,7 @@ class ATPPump(IonicModel):
         
         mesh = self.problem.mesh
 
-        self.I_hat = dfx.fem.Constant(mesh, 0.18) # Maximum pump strength [A/m^2]
+        self.I_hat = dfx.fem.Constant(mesh, 0.449) # Maximum pump strength [A/m^2]
         self.m_K = dfx.fem.Constant(mesh, dfx.default_scalar_type(3)) # ECS K+ pump threshold [mM]
         self.m_Na = dfx.fem.Constant(mesh, dfx.default_scalar_type(12)) # ICS Na+ pump threshold [mM]
 
@@ -271,8 +271,7 @@ class HodgkinHuxley(IonicModel):
 
         self.use_Rush_Lar = use_Rush_Lar
         self.time_steps_ODE = time_steps_ODE
-        self.T = 1e-2 # Stimulus period
-
+        self.T = 2e-3 # Stimulus period
 
     def __str__(self):
         return 'Hodgkin-Huxley'
