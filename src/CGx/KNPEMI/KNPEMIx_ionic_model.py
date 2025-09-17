@@ -8,11 +8,6 @@ from abc      import ABC, abstractmethod
 from mpi4py   import MPI
 from petsc4py import PETSc
 
-# Stimulus
-def g_syn(g_syn_bar, a_syn, t: dfx.fem.Constant) -> float:
-    T = 5e-3
-    return g_syn_bar * ufl.exp(-np.mod(float(t), T) / a_syn)
-
 # Kir-function used in ionic pump (Halnes et al. 2013(?))
 def f_Kir(K_e_init, K_e, E_K_init, delta_phi, phi_m):
 
@@ -74,10 +69,10 @@ class PassiveModel(IonicModel):
 class KirNaKPumpModel(IonicModel):
 
     # Potassium buffering parameters
-    rho_pump = 1.12e-6	# Maximum pump rate (mol/m**2 s)
-    P_Na_i = 10          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
-    P_K_e  = 1.5         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
-    k_dec = 2.9e-8		# Decay factor for [K+]e (m/s)
+    rho_pump_val = 1.12e-6	# Maximum pump rate (mol/m**2 s)
+    P_Na_i_val = 10          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
+    P_K_e_val  = 1.5         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
+    k_dec_val = 2.9e-8		# Decay factor for [K+]e (m/s)
 
     # -k_dec * ([K]e − [K]e_0) both for K and Na
     use_decay_currents = False
@@ -88,7 +83,13 @@ class KirNaKPumpModel(IonicModel):
 
         # Initial potassium Nernst potential
         p = KNPEMIx_problem
-        self.E_K_init = p.psi.value*np.log(p.K_e_init.value/p.K_i_g_init.value)	
+        self.E_K_init = p.psi.value*np.log(p.K_e_init.value/p.K_i_g_init.value)
+        self.rho_pump = dfx.fem.Constant(p.mesh, self.rho_pump_val)
+        self.P_Na_i = dfx.fem.Constant(p.mesh, self.P_Na_i_val)
+        self.P_K_e = dfx.fem.Constant(p.mesh, self.P_K_e_val)
+        if self.use_decay_currents:
+            self.k_dec = dfx.fem.Constant(p.mesh, self.k_dec_val)
+            
 
     def __str__(self):
         return f'Inward-rectifying K current passive model with Na/K/ATPase pump'
@@ -128,7 +129,7 @@ class KirNaKPumpModel(IonicModel):
 
         else:
             # Kir-Na variable
-            f_kir = 1.0
+            f_kir = dfx.fem.Constant(p.mesh, 1.0)
 
             # ATP pump current
             if ion['name'] == 'Na':
@@ -195,10 +196,12 @@ class NeuronalCotransporters(IonicModel):
          return "KCC2/NKCC1 Cotransporters"
 
     def _init(self):	
-    
+
+        mesh = self.problem.mesh
+
         # Maximum cotransporter strengths [A/m^2]
-        self.S_KCC2 = 0.0034
-        self.S_NKCC1 = 0.023
+        self.S_KCC2 = dfx.fem.Constant(mesh, 0.0034)
+        self.S_NKCC1 = dfx.fem.Constant(mesh, 0.023)
 
     def _eval(self, ion_idx: int):
 
@@ -234,9 +237,11 @@ class ATPPump(IonicModel):
     
     def _init(self):	
         
-        self.I_hat = 0.18 # Maximum pump strength [A/m^2]
-        self.m_K = 3 # ECS K+ pump threshold [mM]
-        self.m_Na = 12 # ICS Na+ pump threshold [mM]
+        mesh = self.problem.mesh
+
+        self.I_hat = dfx.fem.Constant(mesh, 0.18) # Maximum pump strength [A/m^2]
+        self.m_K = dfx.fem.Constant(mesh, dfx.default_scalar_type(3)) # ECS K+ pump threshold [mM]
+        self.m_Na = dfx.fem.Constant(mesh, dfx.default_scalar_type(12)) # ICS Na+ pump threshold [mM]
 
     def _eval(self, ion_idx: int):
 
@@ -266,6 +271,7 @@ class HodgkinHuxley(IonicModel):
 
         self.use_Rush_Lar = use_Rush_Lar
         self.time_steps_ODE = time_steps_ODE
+        self.T = 1e-2 # Stimulus period
 
 
     def __str__(self):
@@ -284,8 +290,9 @@ class HodgkinHuxley(IonicModel):
         p.n.x.array[:] = p.n_init.value
         p.m.x.array[:] = p.m_init.value
         p.h.x.array[:] = p.h_init.value
-        		
 
+        # Set modulo time variable
+        p.t_mod = dfx.fem.Constant(p.mesh, 0.0)
 
     def _eval(self, ion_idx: int):	
         """ Evaluate and return the passive channel current for ion number 'ion_idx'.
@@ -342,10 +349,13 @@ class HodgkinHuxley(IonicModel):
         )
 
         # Synaptic conductivity factor
-        g_syn_fac = g_syn(p.g_syn_bar, p.a_syn, p.t)
+        g_syn_fac = p.g_syn_bar * ufl.exp(-p.t_mod / p.a_syn)
 
         # Return stimulus
         return g_syn_fac * (p.phi_m_prev - ion["E"])
+
+    def update_t_mod(self):
+        self.problem.t_mod.value = np.mod(self.problem.t.value, self.T)
 
     def update_gating_variables(self):		
 

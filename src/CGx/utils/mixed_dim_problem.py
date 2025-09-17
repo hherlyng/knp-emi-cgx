@@ -9,8 +9,8 @@ import dolfinx as dfx
 
 from abc             import ABC, abstractmethod
 from mpi4py          import MPI
-from dolfinx         import Constant
 from petsc4py        import PETSc
+from dolfinx.fem     import Constant
 from CGx.utils.misc  import flatten_list, mark_boundaries_cube_MMS, mark_boundaries_square_MMS, mark_subdomains_cube, mark_subdomains_square, range_constructor
 from scipy.integrate import odeint
 
@@ -318,7 +318,7 @@ class MixedDimensionalProblem(ABC):
             with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
                 # Read mesh and cell tags
                 self.mesh = xdmf.read_mesh(ghost_mode=self.ghost_mode)
-                self.subdomains = xdmf.read_meshtags(self.mesh, name="mesh")
+                self.subdomains = xdmf.read_meshtags(self.mesh, name="ct")
                 self.subdomains.name = "ct"
 
             # Create facet entities, facet-to-cell connectivity and cell-to-cell connectivity
@@ -328,7 +328,7 @@ class MixedDimensionalProblem(ABC):
 
             with dfx.io.XDMFFile(MPI.COMM_WORLD, ft_file, 'r') as xdmf:
                 # Read facet tags
-                self.boundaries = xdmf.read_meshtags(self.mesh, name="mesh")
+                self.boundaries = xdmf.read_meshtags(self.mesh, name="ft")
                 self.boundaries.name = "ft"      
             
             # Scale mesh
@@ -382,7 +382,8 @@ class MixedDimensionalProblem(ABC):
         mesh_center = np.array([x_c, y_c, z_c])
 
         # Find all membrane vertices of the cell
-        gamma_facets = self.boundaries.find(68) # Always take the tag of the largest cell #10m, 100c stimulated in 66
+        gamma_facets = self.boundaries.find(4)
+        # gamma_facets = self.boundaries.find(68) # Always take the tag of the largest cell #10m, 100c stimulated in 66
         # gamma_facets = self.boundaries.find(89) # Always take the tag of the largest cell #20m, 100c stimulated in 88
         # gamma_facets = self.boundaries.find(self.gamma_tags[-1]) # Always take the tag of the largest cell
         gamma_vertices = dfx.mesh.compute_incident_entities(
@@ -490,23 +491,23 @@ class MixedDimensionalProblem(ABC):
         
         print("Solving ODE system to find steady-state initial conditions ...")
 
-        # Set constants
-        R = self.R # Gas constant [J/(mol*K)]
-        F = self.F # Faraday's constant [C/mol]
-        T = self.T # Temperature [K]
-        C_m = self.C_M # Membrane capacitance
+        # Get constants
+        R = self.R.value # Gas constant [J/(mol*K)]
+        F = self.F.value # Faraday's constant [C/mol]
+        T = self.T.value # Temperature [K]
+        C_m = self.C_M.value # Membrane capacitance
         z_Na =  1 # Valence sodium
         z_K  =  1 # Valence potassium
         z_Cl = -1 # Valence chloride
-        g_Na_bar  = self.g_Na_bar                 # Na max conductivity (S/m**2)
-        g_K_bar   = self.g_K_bar                  # K max conductivity (S/m**2)    
-        g_Na_leak = self.g_Na_leak              # Na leak conductivity (S/m**2) (Constant)
-        g_Na_leak_g = self.g_Na_leak_g              # Na leak conductivity (S/m**2) (Constant)
-        g_K_leak  = self.g_K_leak              # K leak conductivity (S/m**2)
-        g_K_leak_g  = self.g_K_leak_g              # K leak conductivity (S/m**2)
-        g_Cl_leak = self.g_Cl_leak                  # Cl leak conductivity (S/m**2) (Constant)
-        g_Cl_leak_g = self.g_Cl_leak_g                  # Cl leak conductivity (S/m**2) (Constant)
-        phi_rest = self.phi_rest  # Resting potential [V]
+        g_Na_bar  = self.g_Na_bar.value                 # Na max conductivity (S/m**2)
+        g_K_bar   = self.g_K_bar.value                  # K max conductivity (S/m**2)    
+        g_Na_leak = self.g_Na_leak.value              # Na leak conductivity (S/m**2) (Constant)
+        g_Na_leak_g = self.g_Na_leak_g.value              # Na leak conductivity (S/m**2) (Constant)
+        g_K_leak  = self.g_K_leak.value              # K leak conductivity (S/m**2)
+        g_K_leak_g  = self.g_K_leak_g.value              # K leak conductivity (S/m**2)
+        g_Cl_leak = self.g_Cl_leak.value                  # Cl leak conductivity (S/m**2) (Constant)
+        g_Cl_leak_g = self.g_Cl_leak_g.value                  # Cl leak conductivity (S/m**2) (Constant)
+        phi_rest = self.phi_rest.value  # Resting potential [V]
 
         # Define timespan for ODE solver
         timestep = 1e-6
@@ -515,14 +516,13 @@ class MixedDimensionalProblem(ABC):
         times = np.linspace(0, max_time, num_timesteps+1)
 
         # Define initial condition guesses
-        Na_i_0 = 40 # [Mm]
-        Na_e_0 = 90 # [Mm]
-        K_i_0 = 80 # [Mm]
-        K_e_0 = 4 # [Mm]
-        Cl_i_0 = 7 # [Mm]
-        Cl_e_0 = 112 # [Mm]
-        phi_m_0 = -0.067 # [V]
-        phi_m_0_g = -0.085 # [V]
+        Na_i_0 = self.Na_i_init.value # [Mm]
+        Na_e_0 = self.Na_e_init.value # [Mm]
+        K_i_0 = self.K_i_init.value # [Mm]
+        K_e_0 = self.K_e_init.value # [Mm]
+        Cl_i_0 = self.Cl_i_init.value # [Mm]
+        Cl_e_0 = self.Cl_e_init.value # [Mm]
+        phi_m_0 = self.phi_m_init.value # [V]
         n_0 = 0.3 
         m_0 = 0.05
         h_0 = 0.65
@@ -674,16 +674,27 @@ class MixedDimensionalProblem(ABC):
                 h_init_val = None
 
             # Communicate initial values from root process
-            self.phi_m_init = self.comm.bcast(Constant(self.mesh, phi_m_init_val), root=0)
-            self.Na_i_init = self.comm.bcast(Constant(self.mesh, Na_i_init_val), root=0)
-            self.Na_e_init = self.comm.bcast(Constant(self.mesh, Na_e_init_val), root=0)
-            self.K_i_init = self.comm.bcast(Constant(self.mesh, K_i_init_val), root=0)
-            self.K_e_init = self.comm.bcast(Constant(self.mesh, K_e_init_val), root=0)
-            self.Cl_i_init = self.comm.bcast(Constant(self.mesh, Cl_i_init_val), root=0)
-            self.Cl_e_init = self.comm.bcast(Constant(self.mesh, Cl_e_init_val), root=0)
-            self.n_init = self.comm.bcast(Constant(self.mesh, n_init_val), root=0)
-            self.m_init = self.comm.bcast(Constant(self.mesh, m_init_val), root=0)
-            self.h_init = self.comm.bcast(Constant(self.mesh, h_init_val), root=0)
+            phi_m_init_val = self.comm.bcast(phi_m_init_val, root=0)
+            Na_i_init_val = self.comm.bcast(Na_i_init_val, root=0)
+            Na_e_init_val = self.comm.bcast(Na_e_init_val, root=0)
+            K_i_init_val = self.comm.bcast(K_i_init_val, root=0)
+            K_e_init_val = self.comm.bcast(K_e_init_val, root=0)
+            Cl_i_init_val = self.comm.bcast(Cl_i_init_val, root=0)
+            Cl_e_init_val = self.comm.bcast(Cl_e_init_val, root=0)
+            n_init_val = self.comm.bcast(n_init_val, root=0)
+            m_init_val = self.comm.bcast(m_init_val, root=0)
+            h_init_val = self.comm.bcast(h_init_val, root=0)
+
+            self.phi_m_init = Constant(self.mesh, phi_m_init_val)
+            self.Na_i_init = Constant(self.mesh, Na_i_init_val)
+            self.Na_e_init = Constant(self.mesh, Na_e_init_val)
+            self.K_i_init = Constant(self.mesh, K_i_init_val)
+            self.K_e_init = Constant(self.mesh, K_e_init_val)
+            self.Cl_i_init = Constant(self.mesh, Cl_i_init_val)
+            self.Cl_e_init = Constant(self.mesh, Cl_e_init_val)
+            self.n_init = Constant(self.mesh, n_init_val)
+            self.m_init = Constant(self.mesh, m_init_val)
+            self.h_init = Constant(self.mesh, h_init_val)
 
             # Update ion dictionaries
             self.ion_list[0]['ki_init'] = self.Na_i_init
@@ -728,8 +739,8 @@ class MixedDimensionalProblem(ABC):
 
 
             # Membrane potential initial conditions
-            phi_m_0_n = phi_m_0
-            phi_m_0_g = -0.085 # [V]
+            phi_m_0_n = phi_m_0 # Neuronal
+            phi_m_0_g = self.phi_m_init_g.value # Glial [V]
 
             # Glial mechanisms
             # Kir-Na and Na/K pump mechanisms
@@ -739,9 +750,9 @@ class MixedDimensionalProblem(ABC):
             C = lambda delta_phi_K: 1 + np.exp((delta_phi_K + 0.0185)/0.0425)
             D = lambda phi_m: 1 + np.exp(-(0.1186 + phi_m)/0.0441)
 
-            rho_pump = self.rho_pump	 # Maximum pump rate (mol/m**2 s)
-            P_Na_i = self.P_Na_i          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
-            P_K_e  = self.P_K_e         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
+            rho_pump = self.rho_pump.value	 # Maximum pump rate (mol/m**2 s)
+            P_Na_i = self.P_Na_i.value          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
+            P_K_e  = self.P_K_e.value         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
 
             # Pump expression
             I_glia_pump = lambda Na_i, K_e: rho_pump*F * (1 / (1 + (P_Na_i/Na_i)**(3/2))) * (1 / (1 + P_K_e/K_e))
@@ -911,6 +922,38 @@ class MixedDimensionalProblem(ABC):
             self.n_init = self.comm.bcast(Constant(self.mesh, n_init_val), root=0)
             self.m_init = self.comm.bcast(Constant(self.mesh, m_init_val), root=0)
             self.h_init = self.comm.bcast(Constant(self.mesh, h_init_val), root=0) 
+
+            # Communicate initial values from root process
+            phi_m_n_init_val = self.comm.bcast(phi_m_n_init_val, root=0)
+            Na_i_n_init_val = self.comm.bcast(Na_i_n_init_val, root=0)
+            Na_e_init_val = self.comm.bcast(Na_e_init_val, root=0)
+            K_i_n_init_val = self.comm.bcast(K_i_n_init_val, root=0)
+            K_e_init_val = self.comm.bcast(K_e_init_val, root=0)
+            Cl_i_n_init_val = self.comm.bcast(Cl_i_n_init_val, root=0)
+            Cl_e_init_val = self.comm.bcast(Cl_e_init_val, root=0)
+            phi_m_g_init_val = self.comm.bcast(phi_m_g_init_val, root=0)
+            Na_i_g_init_val = self.comm.bcast(Na_i_g_init_val, root=0)
+            K_i_g_init_val = self.comm.bcast(K_i_g_init_val, root=0)
+            Cl_i_g_init_val = self.comm.bcast(Cl_i_g_init_val, root=0)
+            n_init_val = self.comm.bcast(n_init_val, root=0)
+            m_init_val = self.comm.bcast(m_init_val, root=0)
+            h_init_val = self.comm.bcast(h_init_val, root=0)
+
+            self.phi_m_n_init = Constant(self.mesh, phi_m_n_init_val)
+            self.Na_i_n_init = Constant(self.mesh, Na_i_n_init_val)
+            self.Na_e_init = Constant(self.mesh, Na_e_init_val)
+            self.K_i_n_init = Constant(self.mesh, K_i_n_init_val)
+            self.K_e_init = Constant(self.mesh, K_e_init_val)
+            self.Cl_i_n_init = Constant(self.mesh, Cl_i_n_init_val)
+            self.Cl_e_init = Constant(self.mesh, Cl_e_init_val)
+            self.phi_m_g_init = Constant(self.mesh, phi_m_g_init_val)
+            self.Na_i_g_init = Constant(self.mesh, Na_i_g_init_val)
+            self.K_i_g_init = Constant(self.mesh, K_i_g_init_val)
+            self.Cl_i_g_init = Constant(self.mesh, Cl_i_g_init_val)
+            self.n_init = Constant(self.mesh, n_init_val)
+            self.m_init = Constant(self.mesh, m_init_val)
+            self.h_init = Constant(self.mesh, h_init_val)
+
 
             # Update ion dictionaries
             self.ion_list[0]['ki_init_n'] = self.Na_i_n_init

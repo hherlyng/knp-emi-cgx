@@ -280,7 +280,10 @@ class SolverKNPEMI(object):
 
             # Update ODE-based ionic models
             if p.gating_variables:
-                p.ionic_models[0].update_gating_variables()
+                for model in p.ionic_models:
+                    if model.__str__() == "Hodgkin-Huxley":
+                        model.update_t_mod()
+                        model.update_gating_variables()
 
             # Assemble system matrix and RHS vector
             tic = time.perf_counter()
