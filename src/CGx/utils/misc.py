@@ -14,12 +14,12 @@ def norm_2(vec):
     return ufl.sqrt(ufl.dot(vec, vec))
 
 def dump(thing, path):
-            if isinstance(thing, PETSc.Vec):
-                assert np.all(np.isfinite(thing.array))
-                return np.save(path, thing.array)
-            m = sparse.csr_matrix(thing.getValuesCSR()[::-1]).tocoo()
-            assert np.all(np.isfinite(m.data))
-            return np.save(path, np.c_[m.row, m.col, m.data])
+    if isinstance(thing, PETSc.Vec):
+        assert np.all(np.isfinite(thing.array))
+        return np.save(path, thing.array)
+    m = sparse.csr_matrix(thing.getValuesCSR()[::-1]).tocoo()
+    assert np.all(np.isfinite(m.data))
+    return np.save(path, np.c_[m.row, m.col, m.data])
 
 def flatten_list(input_list):
     return [item for sublist in input_list for item in (sublist if isinstance(sublist, tuple) else [sublist])]

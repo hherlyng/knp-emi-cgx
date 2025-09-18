@@ -1,5 +1,6 @@
+import petsc4py
+petsc4py.init(["memory_view"])
 import argparse
-import petsc4py.PETSc
 
 from pathlib import Path
 from CGx.utils.parsers import CustomParser
@@ -32,13 +33,17 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 		NeuronalCT = NeuronalCotransporters(problem)
 		ionic_models = [HH, ATP, NeuronalCT]
 	else:
-		HH = HodgkinHuxley(problem, tags=problem.neuron_tags)
-		ATP = ATPPump(problem, tags=problem.neuron_tags)
-		NeuronalCT = NeuronalCotransporters(problem, tags=problem.neuron_tags)
-		KirNa = KirNaKPumpModel(problem, tags=problem.glia_tags)
-		GlialCT = GlialCotransporters(problem, tags=problem.glia_tags)
+		HH = HodgkinHuxley(problem)
+		ATP = ATPPump(problem)
+		NeuronalCT = NeuronalCotransporters(problem)
+		ionic_models = [HH, ATP, NeuronalCT]
+		# HH = HodgkinHuxley(problem, tags=problem.neuron_tags)
+		# ATP = ATPPump(problem, tags=problem.neuron_tags)
+		# NeuronalCT = NeuronalCotransporters(problem, tags=problem.neuron_tags)
+		# KirNa = KirNaKPumpModel(problem, tags=problem.glia_tags)
+		# GlialCT = GlialCotransporters(problem, tags=problem.glia_tags)
 
-		ionic_models = [HH, ATP, NeuronalCT, GlialCT, KirNa]
+		# ionic_models = [HH, ATP, NeuronalCT, GlialCT, KirNa]
 
 	problem.init_ionic_model(ionic_models)
 	problem.set_initial_conditions()
@@ -54,7 +59,8 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 						  save_xdmfs=True,
 						  use_direct_solver=False,
 						  save_pngs=True,
-						  save_cpoints=True)
+						  save_cpoints=True,
+						  save_mat=False)
 	solver.solve()
 
 	phi_i = solver.problem.wh[0].sub(problem.N_ions)
@@ -78,4 +84,5 @@ if __name__=='__main__':
 	parser.add_argument("--config", dest="config_file", default='./test_setup_config.yaml', type=Path, help="Configuration file")
 	parser.add_argument("--view", dest="view_ksp", default=False, type=bool, help="Verbose KSP object log")
 	args = parser.parse_args(None)
+
 	main_yaml(yaml_file=str(args.config_file), view_ksp=args.view_ksp)

@@ -47,7 +47,7 @@ class MixedDimensionalProblem(ABC):
         self.setup_constants()
         self.setup_spaces()
         self.init()
-        self.find_steady_state_initial_conditions()
+        # self.find_steady_state_initial_conditions()
         self.setup_boundary_conditions()
         if self.source_terms=="ion_injection": self.setup_source_terms()
 
@@ -318,7 +318,7 @@ class MixedDimensionalProblem(ABC):
             with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
                 # Read mesh and cell tags
                 self.mesh = xdmf.read_mesh(ghost_mode=self.ghost_mode)
-                self.subdomains = xdmf.read_meshtags(self.mesh, name="mesh")
+                self.subdomains = xdmf.read_meshtags(self.mesh, name="ct")
                 self.subdomains.name = "ct"
 
             # Create facet entities, facet-to-cell connectivity and cell-to-cell connectivity
@@ -328,7 +328,7 @@ class MixedDimensionalProblem(ABC):
 
             with dfx.io.XDMFFile(MPI.COMM_WORLD, ft_file, 'r') as xdmf:
                 # Read facet tags
-                self.boundaries = xdmf.read_meshtags(self.mesh, name="mesh")
+                self.boundaries = xdmf.read_meshtags(self.mesh, name="ft")
                 self.boundaries.name = "ft"      
             
             # Scale mesh
@@ -352,8 +352,8 @@ class MixedDimensionalProblem(ABC):
             self.boundary_tag = 8
 
         # Integral measures for the domain
-        self.dx = ufl.Measure("dx", domain=self.mesh, subdomain_data=self.subdomains) # Volume integral measure
-        self.dS = ufl.Measure("dS", domain=self.mesh, subdomain_data=self.boundaries) # Facet integral measure
+        self.dx = ufl.Measure("dx", domain=self.mesh, subdomain_data=self.subdomains, metadata={"quadrature_degree":10}) # Volume integral measure
+        self.dS = ufl.Measure("dS", domain=self.mesh, subdomain_data=self.boundaries, metadata={"quadrature_degree":10}) # Facet integral measure
 
         if self.glia_tags is not None:
             # Store the neuron and glia computational cells
@@ -382,8 +382,8 @@ class MixedDimensionalProblem(ABC):
         mesh_center = np.array([x_c, y_c, z_c])
 
         # Find all membrane vertices of the cell
-        gamma_facets = self.boundaries.find(66) # Always take the tag of the largest cell #10m, 100c stimulated in 66
-        # gamma_facets = self.boundaries.find(3)
+        # gamma_facets = self.boundaries.find(66) # Always take the tag of the largest cell #10m, 100c stimulated in 66
+        gamma_facets = self.boundaries.find(4)
         # gamma_facets = self.boundaries.find(89) # Always take the tag of the largest cell #20m, 100c stimulated in 88
         # gamma_facets = self.boundaries.find(self.gamma_tags[-1]) # Always take the tag of the largest cell
         gamma_vertices = dfx.mesh.compute_incident_entities(

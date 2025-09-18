@@ -60,6 +60,8 @@ class SolverKNPEMI(object):
         multiphenicsx.fem.petsc.assemble_vector_block(self.b, p.L, p.a, bcs=p.bcs, restriction=p.restriction) # Assemble RHS vector
         self.A.assemble() # Assemble PETSc matrix
 
+        print(self.A.getInfo())
+
 
     def assemble_preconditioner(self):
         """ Assemble the preconditioner matrix. """
@@ -255,8 +257,8 @@ class SolverKNPEMI(object):
         
         setup_timer = 0.0
 
-
         tic = time.perf_counter()
+
         # Perform solver setup
         self.setup_solver()
         setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
@@ -288,6 +290,15 @@ class SolverKNPEMI(object):
             # Assemble system matrix and RHS vector
             tic = time.perf_counter()
             self.assemble()
+
+            if self.save_mat:
+                if self.problem.MMS_test:
+                    print("Saving Amat_MMS ...")
+                    dump(self.A, 'output/Amat_MMS')
+                else:
+                    print("Saving Amat ...")
+                    dump(self.A, 'output/Amat')
+                exit()
 
             # Time the assembly
             assembly_time     = time.perf_counter() - tic
@@ -379,13 +390,6 @@ class SolverKNPEMI(object):
             if self.problem.MMS_test:
                 self.problem.print_errors()
 
-            if self.save_mat:
-                if self.problem.MMS_test:
-                    print("Saving Amat_MMS ...")
-                    dump(self.A, 'output/Amat_MMS')
-                else:
-                    print("Saving Amat ...")
-                    dump(self.A, 'output/Amat')
 
     def print_info(self):
         """ Print info about the problem and the solver. """

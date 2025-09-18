@@ -27,23 +27,32 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         print("Setting up function spaces ...")
 
         # Define elements
+        # P = basix.ufl.element("Lagrange", self.mesh.basix_cell(), self.fem_order, shape=(self.N_ions + 1,))
         P = basix.ufl.element("Lagrange", self.mesh.basix_cell(), self.fem_order)
 
-        # Ion concentrations for each ion + electric potential
-        element_list = [P] * (self.N_ions + 1)
+        # # Ion concentrations for each ion + electric potential
+        # element_list = [P] * (self.N_ions + 1)
 
-        self.V = dfx.fem.functionspace(self.mesh, basix.ufl.mixed_element(element_list))
+        # mixed_element = basix.ufl.mixed_element(element_list)
+        # V1 = dfx.fem.functionspace(self.mesh, mixed_element)
+        # V2 = dfx.fem.functionspace(self.mesh, mixed_element)
+        # self.V = dfx.fem.functionspace(self.mesh, mixed_element)
 
-        # Define block function space
-        V1 = self.V.clone()
-        V2 = self.V.clone()
-        self.W = [V1, V2]
+        self.V = V_0 = dfx.fem.functionspace(self.mesh, P)
+        # V1 = ufl.MixedFunctionSpace(*[V_0.clone() for _ in range(self.N_ions+1)])
+        # V2 = ufl.MixedFunctionSpace(*[V_0.clone() for _ in range(self.N_ions+1)])
+
+        # # Define block function space
+        # V1 = self.V.clone()
+        # V2 = self.V.clone()
+        # self.W = [V1, V2]
 
         # Create functions for storing the solutions
-        self.wh = [dfx.fem.Function(self.W[0]), dfx.fem.Function(self.W[1])]
+        self.wh = [dfx.fem.Function(V_0) for _ in range(2*(self.N_ions+1))]
 
         # Create functions for solution at previous timestep
-        self.u_p = [dfx.fem.Function(self.W[0]), dfx.fem.Function(self.W[1])]
+        self.u_p = [dfx.fem.Function(V_0) for _ in range(2*(self.N_ions+1))]
+        # self.u_p = [dfx.fem.Function(self.W[0]), dfx.fem.Function(self.W[1])]
 
         # Rename for more readable output
         self.u_p[0].name = "intra"
@@ -63,7 +72,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         print("Creating mesh restrictions ...")
 
         ### Restrictions
-        
         # Get indices of the cells of the intra- and extracellular subdomains        
         if len(self.intra_tags) > 1:
             list_of_indices = [self.subdomains.find(tag) for tag in self.intra_tags]
@@ -158,21 +166,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
         self.ion_list[1]['f_e'] = f_e_K
         self.ion_list[2]['f_e'] = f_e_Cl
-
-    def setup_constants(self, dt: float):
-        """ Initialize constants as dolfinx.fem.Constant objects to reduce total compilation time. """
-
-        # TODO
-        self.dt       = dfx.fem.Constant(self.mesh, PETSc.ScalarType(dt))
-        self.F_const  = dfx.fem.Constant(self.mesh, PETSc.ScalarType(self.F))
-        self.psi_const = dfx.fem.Constant(self.mesh, PETSc.ScalarType(self.psi))
-        self.C_M_const = dfx.fem.Constant(self.mesh, PETSc.ScalarType(self.C_M))
-        self.domain_L_const = dfx.fem.Constant(self.mesh, PETSc.ScalarType(self.domain_L))
-        for ion in self.ion_list:
-            # Get ion attributes
-            ion['z']  = dfx.fem.Constant(self.mesh, PETSc.ScalarType(ion['z']))
-            ion['Di'] = dfx.fem.Constant(self.mesh, PETSc.ScalarType(ion['Di']))
-            ion['De'] = dfx.fem.Constant(self.mesh, PETSc.ScalarType(ion['De']))
 
     def set_initial_conditions(self):
 

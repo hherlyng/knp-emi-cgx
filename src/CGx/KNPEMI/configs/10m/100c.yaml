@@ -28,7 +28,7 @@ ics_tags  : !range [2, 102] # Intracellular space cell tags
 ecs_tags  : [1] # Extracellular space cell tags
 boundary_tags : !range [1001, 1102] # Boundary facet tags
 membrane_tags : !range [2, 102] # Membrane (interface) facet tags
-glia_tags : [42, 47, 91, 94, 95, 97]
+# glia_tags : [42, 47, 91, 94, 95, 97]
 stimulus_tags : [66] # Membrane facet tags of the cells being stimulated
 
 point_evaluation :
