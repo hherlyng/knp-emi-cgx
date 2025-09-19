@@ -27,32 +27,23 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         print("Setting up function spaces ...")
 
         # Define elements
-        # P = basix.ufl.element("Lagrange", self.mesh.basix_cell(), self.fem_order, shape=(self.N_ions + 1,))
         P = basix.ufl.element("Lagrange", self.mesh.basix_cell(), self.fem_order)
 
-        # # Ion concentrations for each ion + electric potential
-        # element_list = [P] * (self.N_ions + 1)
+        # Ion concentrations for each ion + electric potential
+        element_list = [P] * (self.N_ions + 1)
 
-        # mixed_element = basix.ufl.mixed_element(element_list)
-        # V1 = dfx.fem.functionspace(self.mesh, mixed_element)
-        # V2 = dfx.fem.functionspace(self.mesh, mixed_element)
-        # self.V = dfx.fem.functionspace(self.mesh, mixed_element)
+        self.V = dfx.fem.functionspace(self.mesh, basix.ufl.mixed_element(element_list))
 
-        self.V = V_0 = dfx.fem.functionspace(self.mesh, P)
-        # V1 = ufl.MixedFunctionSpace(*[V_0.clone() for _ in range(self.N_ions+1)])
-        # V2 = ufl.MixedFunctionSpace(*[V_0.clone() for _ in range(self.N_ions+1)])
-
-        # # Define block function space
-        # V1 = self.V.clone()
-        # V2 = self.V.clone()
-        # self.W = [V1, V2]
+        # Define block function space
+        V1 = self.V.clone()
+        V2 = self.V.clone()
+        self.W = [V1, V2]
 
         # Create functions for storing the solutions
-        self.wh = [dfx.fem.Function(V_0) for _ in range(2*(self.N_ions+1))]
+        self.wh = [dfx.fem.Function(self.W[0]), dfx.fem.Function(self.W[1])]
 
         # Create functions for solution at previous timestep
-        self.u_p = [dfx.fem.Function(V_0) for _ in range(2*(self.N_ions+1))]
-        # self.u_p = [dfx.fem.Function(self.W[0]), dfx.fem.Function(self.W[1])]
+        self.u_p = [dfx.fem.Function(self.W[0]), dfx.fem.Function(self.W[1])]
 
         # Rename for more readable output
         self.u_p[0].name = "intra"
