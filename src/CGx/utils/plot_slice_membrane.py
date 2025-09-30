@@ -8,14 +8,11 @@ import numpy as np
 from matplotlib import colormaps as cm
 
 k = 1 # Finite element degree
-dt = 5e-5
-dim = 5
-N_cells = 25
+dim = 10
+N_cells = 100
 mesh_version = f"{dim}m/{N_cells}c"
 output_dir = f"/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/{mesh_version}/"
 filename = output_dir+"checkpoints" 
-intra_vars = ["Na_i", "K_i", "Cl_i", "phi_i"]
-extra_vars = ["Na_e", "K_e", "Cl_e", "phi_e"]
 
 EXTRA = 1
 
@@ -26,7 +23,7 @@ origin_yz = [approx_bounds/2, approx_bounds/2, approx_bounds/2]
 # origin_xz = [0.0, -0.0112, 0.0075]
 # origin_xy = [0.0, 0.0029, 0.0065]
 
-zoom_yz = 1.0
+zoom_yz = 1.4
 # zoom_xz = 1.0
 # zoom_xy = 1.35
 
@@ -34,7 +31,7 @@ zoom_yz = 1.0
 cmap = colormaps.curl
 n_colors = 64
 sargs = sargs = {
-    'title': 'Concentration [mM]',
+    'title': 'Membrane potential [mV]',
     'n_labels': 4, 
     'fmt': '%.2g',
     'font_family': 'arial'
@@ -44,7 +41,9 @@ pl = pyvista.Plotter(shape=(3, 1), window_size=[500, 1200], border=False)
 
 view = 'yz'
 
-times = np.arange(501)
+dt = 5e-5
+num_timesteps = 400
+times = np.arange(num_timesteps)
 timestamps = [times[5], times[50], times[100]]
 
 # Prepare finite elements and pyvista grid used to plot
@@ -53,8 +52,6 @@ ct   = adios4dolfinx.read_meshtags(filename, mesh, meshtag_name="ct")
 CG = dolfinx.fem.functionspace(mesh,
         basix.ufl.element("CG", mesh.basix_cell(), k)
         )
-phi_i = dolfinx.fem.Function(CG)
-phi_e = dolfinx.fem.Function(CG)
 phi_m = dolfinx.fem.Function(CG)
 
 # Get the intracellular tags
@@ -67,33 +64,33 @@ grid = pyvista.UnstructuredGrid(cells, types, x)
 grid.cell_data["Domain ID"] = ct.values
 
 for i, timestamp in enumerate(timestamps):
-    adios4dolfinx.read_function(filename, phi_i, time=timestamp, name=f"phi_i")
-    adios4dolfinx.read_function(filename, phi_e, time=timestamp, name=f"phi_e")
-    phi_m.x.array[:] = phi_i.x.array.copy() - phi_e.x.array.copy()
+    adios4dolfinx.read_function(filename, phi_m, time=timestamp, name=f"phi_m")
 
     # Set data
-    grid.point_data["phi_m"] = phi_m.x.array.copy()
+    grid.point_data["phi_m"] = phi_m.x.array.copy()*1e3 # Convert to mV
 
     # Use the threshold filter to select cells that are in the intracellular
     # and extracellular spaces
-    intra_grid = grid.threshold([INTRA[0], INTRA[-1]], scalars="Domain ID")
+    intra_grid = grid.threshold([55, 70], scalars="Domain ID")
     sliced_grid = intra_grid.clip(normal=[-1, 0, 0], origin=origin_yz, invert=False)
         
-    sargs['title'] = f'Time: {timestamp*dt*1e3} ms, var: phi_m' # Give each bar a unique title
+    sargs['title'] = f'Time: {timestamp*dt*1e3} ms, Membrane potential [mV]' # Give each bar a unique title
             
     if view=='yz':
         # Plot yz plane
         pl.subplot(i, 0)
-        pl.add_mesh(intra_grid,
+        pl.add_mesh(sliced_grid,
                     cmap=cmap,
                     # clim=[sliced_grid, 0.75] if location=="laterals" else [0, 1.0],
                     show_scalar_bar=True,
                     scalar_bar_args=sargs.copy(),
                     n_colors=n_colors)
         # pl.add_scalar_bar(scalar_bar_text)
-        # pl.view_yz()
+        pl.view_yz()
         pl.view_isometric()
         pl.camera.zoom(zoom_yz)
+        pl.camera.azimuth = -45
+        pl.camera.elevation = -30
 
 # pl.enable_parallel_projection()
 pl.background_color = 'white'

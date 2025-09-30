@@ -102,8 +102,8 @@ class KirNaKPumpModel(IonicModel):
         ue_p = p.u_p[1]
 
         self.pump_coeff = (
-                        1.0 / (1.0 + (self.P_Na_i/ui_p.sub(0))**(3/2))
-                    * (1.0 / (1.0 + self.P_K_e/ue_p.sub(1)))
+                        1.0 / (1.0 + (self.P_Na_i/ui_p[0])**(3/2))
+                    * (1.0 / (1.0 + self.P_K_e/ue_p[1]))
                     * self.rho_pump
                         )
         
@@ -122,7 +122,7 @@ class KirNaKPumpModel(IonicModel):
             
             # Kir-Na variable		
             delta_phi  = phi_m - ion['E']
-            f_kir = f_Kir(p.K_e_init, ue_p.sub(ion_idx), self.E_K_init, delta_phi, phi_m)
+            f_kir = f_Kir(p.K_e_init, ue_p[ion_idx], self.E_K_init, delta_phi, phi_m)
             
             # ATP pump current
             I_ATP = -2*F*z*self.pump_coeff
@@ -141,7 +141,7 @@ class KirNaKPumpModel(IonicModel):
 
         if self.use_decay_currents:
             if ion['name'] == 'K' or ion['name'] == 'Na':
-                I_ch -= F*z*self.k_dec*(ue_p.sub(1) - p.K_e_init)  
+                I_ch -= F*z*self.k_dec*(ue_p[1] - p.K_e_init)  
         
         return I_ch
 
@@ -170,12 +170,12 @@ class GlialCotransporters(IonicModel):
 
         p = self.problem
         ion   = p.ion_list[ion_idx]
-        c_Na_i = p.u_p[0].sub(0)
-        c_Na_e = p.u_p[1].sub(0)
-        c_K_i = p.u_p[0].sub(1)
-        c_K_e = p.u_p[1].sub(1)
-        c_Cl_i = p.u_p[0].sub(2)
-        c_Cl_e = p.u_p[1].sub(2)
+        c_Na_i = p.u_p[0][0]
+        c_Na_e = p.u_p[1][0]
+        c_K_i = p.u_p[0][1]
+        c_K_e = p.u_p[1][1]
+        c_Cl_i = p.u_p[0][2]
+        c_Cl_e = p.u_p[1][2]
 
         I_KCC1 = self.S_KCC1 * ufl.ln((c_K_i * c_Cl_i) / (c_K_e * c_Cl_e))
         I_NKCC1 = self.S_NKCC1 * ufl.ln((c_Na_i * c_K_i * c_Cl_i**2)/(c_Na_e * c_K_e * c_Cl_e**2))
@@ -208,12 +208,12 @@ class NeuronalCotransporters(IonicModel):
 
         p = self.problem
         ion   = p.ion_list[ion_idx]
-        c_Na_i = p.u_p[0].sub(0)
-        c_Na_e = p.u_p[1].sub(0)
-        c_K_i = p.u_p[0].sub(1)
-        c_K_e = p.u_p[1].sub(1)
-        c_Cl_i = p.u_p[0].sub(2)
-        c_Cl_e = p.u_p[1].sub(2)
+        c_Na_i = p.u_p[0][0]
+        c_Na_e = p.u_p[1][0]
+        c_K_i = p.u_p[0][1]
+        c_K_e = p.u_p[1][1]
+        c_Cl_i = p.u_p[0][2]
+        c_Cl_e = p.u_p[1][2]
 
         I_KCC2 = self.S_KCC2 * ufl.ln((c_K_i * c_Cl_i)/(c_K_e*c_Cl_e))
         I_NKCC1 = (self.S_NKCC1 * 1 / (1 + ufl.exp(16. - c_K_e))
@@ -248,8 +248,8 @@ class ATPPump(IonicModel):
 
         p = self.problem
         ion   = p.ion_list[ion_idx]
-        c_Na_i = p.u_p[0].sub(0)
-        c_K_e = p.u_p[1].sub(1)
+        c_Na_i = p.u_p[0][0]
+        c_K_e = p.u_p[1][1]
 
         par_1 = 1 + self.m_K/c_K_e
         par_2 = 1 + self.m_Na/c_Na_i
@@ -282,10 +282,9 @@ class HodgkinHuxley(IonicModel):
         # Alias
         p = self.problem		
 
-        G, _ = p.V.sub(p.N_ions).collapse() # Gating function finite element space
-        p.n = dfx.fem.Function(G); p.n.name = "n"
-        p.m = dfx.fem.Function(G); p.m.name = "m"
-        p.h = dfx.fem.Function(G); p.h.name = "h"
+        p.n = dfx.fem.Function(p.V); p.n.name = "n"
+        p.m = dfx.fem.Function(p.V); p.m.name = "m"
+        p.h = dfx.fem.Function(p.V); p.h.name = "h"
 
         p.n.x.array[:] = p.n_init.value
         p.m.x.array[:] = p.m_init.value

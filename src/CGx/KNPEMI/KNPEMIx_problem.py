@@ -1,4 +1,5 @@
 import ufl
+import multiphenicsx
 import multiphenicsx.fem
 import multiphenicsx.fem.petsc
 
@@ -26,71 +27,75 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
         print("Setting up function spaces ...")
 
+         # Define number of variables: Ion concentrations + electric potential,
+         # times two because of intra- and extracellular spaces
+        self.num_variables = (self.N_ions + 1)
+        num_variables_total = 2*self.num_variables
+
         # Define elements
-        P = basix.ufl.element("Lagrange", self.mesh.basix_cell(), self.fem_order)
+        P = basix.ufl.element("Lagrange", self.mesh.basix_cell(), self.fem_order) # Continuous Lagrange elements of order fem_order
 
-        # Ion concentrations for each ion + electric potential
-        element_list = [P] * (self.N_ions + 1)
+        # Create function spaces
+        self.V = dfx.fem.functionspace(self.mesh, P) # Continuous Lagrange space 
+        self.V_list = [self.V.clone() for _ in range(num_variables_total)] # List of each variable's function space
+        self.V_list_ie = [self.V_list[:self.num_variables], self.V_list[self.num_variables:]] # Separated list with intra- and extracellular variables split
+        self.W = ufl.MixedFunctionSpace(*self.V_list) # Mixed function space
 
-        self.V = dfx.fem.functionspace(self.mesh, basix.ufl.mixed_element(element_list))
+        # Functions for storing the solutions
+        self.wh = [[dfx.fem.Function(V) for V in self.V_list_ie[0]], [dfx.fem.Function(V) for V in self.V_list_ie[1]]]
 
-        # Define block function space
-        V1 = self.V.clone()
-        V2 = self.V.clone()
-        self.W = [V1, V2]
+        # Functions for solution at previous timestep
+        self.u_p = [[dfx.fem.Function(V) for V in self.V_list_ie[0]], [dfx.fem.Function(V) for V in self.V_list_ie[1]]]
 
-        # Create functions for storing the solutions
-        self.wh = [dfx.fem.Function(self.W[0]), dfx.fem.Function(self.W[1])]
-
-        # Create functions for solution at previous timestep
-        self.u_p = [dfx.fem.Function(self.W[0]), dfx.fem.Function(self.W[1])]
-
-        # Rename for more readable output
-        self.u_p[0].name = "intra"
-        self.u_p[1].name = "extra"
-
-        # Setup checkpoint output files for concentrations
+        # Setup checkpoint output files
         self.u_out_i = []
         self.u_out_e = []
         for idx, ion in enumerate(self.ion_list):
-            intra_func = self.u_p[0].sub(idx).collapse()
-            intra_func.name = f"{ion["name"]}_i"
+            intra_func = self.u_p[0][idx]
+            intra_func.name = f"{ion['name']}_i"
             self.u_out_i.append(intra_func)
-            extra_func = self.u_p[1].sub(idx).collapse()
-            extra_func.name = f"{ion["name"]}_e"
+            extra_func = self.u_p[1][idx]
+            extra_func.name = f"{ion['name']}_e"
             self.u_out_e.append(extra_func)
+        phi_i = self.u_p[0][self.N_ions]
+        phi_i.name = "phi_i"
+        self.u_out_i.append(phi_i)
+        phi_e = self.u_p[1][self.N_ions]
+        phi_e.name = "phi_e"
+        self.u_out_e.append(phi_e)
 
         print("Creating mesh restrictions ...")
 
         ### Restrictions
+        
         # Get indices of the cells of the intra- and extracellular subdomains        
         if len(self.intra_tags) > 1:
-            list_of_indices = [self.subdomains.find(tag) for tag in self.intra_tags]
-            intra_indices = np.array([], dtype=np.int32)
-            for l in list_of_indices:
-                intra_indices = np.concatenate((intra_indices, l))
+            intra_indices = np.concatenate(([self.subdomains.find(tag) for tag in self.intra_tags]))
         else:
             intra_indices = self.subdomains.values==self.intra_tags[0]
+        
         extra_indices = self.subdomains.values==self.extra_tag
         
         cells_intra = self.subdomains.indices[intra_indices]
         cells_extra = self.subdomains.indices[extra_indices]
+
+        dofs_intra = dfx.fem.locate_dofs_topological(self.V, self.subdomains.dim, cells_intra)
+        dofs_extra = dfx.fem.locate_dofs_topological(self.V, self.subdomains.dim, cells_extra)
+        
+        self.interior = multiphenicsx.fem.DofMapRestriction(self.V.dofmap, dofs_intra)
+        self.exterior = multiphenicsx.fem.DofMapRestriction(self.V.dofmap, dofs_extra)
         
         # Get interior and exterior dofs
-        self.dofs_intra = dfx.fem.locate_dofs_topological(self.W[0], self.subdomains.dim, cells_intra)
-        self.dofs_extra = dfx.fem.locate_dofs_topological(self.W[1], self.subdomains.dim, cells_extra)
-        
-        self.interior = multiphenicsx.fem.DofMapRestriction(self.W[0].dofmap, self.dofs_intra)
-        self.exterior = multiphenicsx.fem.DofMapRestriction(self.W[1].dofmap, self.dofs_extra)
-
-        self.restriction = [self.interior, self.exterior]
+        self.restriction = [None] * num_variables_total
+        self.restriction[:self.num_variables] = [self.interior] * self.num_variables
+        self.restriction[self.num_variables:] = [self.exterior] * self.num_variables
 
     def setup_boundary_conditions(self):
 
         print('Setting up boundary conditions ...')
         
-        Wi = self.W[0]
-        We = self.W[1]
+        Wi = self.V_list[:self.num_variables]
+        We = self.V_list[self.num_variables:]
 
         # Add Dirichlet boundary conditions on exterior boundary
         bcs = []
@@ -101,36 +106,36 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
             # First round in for-loop is for intracellular variables
             ion_suffix = 'i'
-            init_phi = self.phi_m_init
+            init_phi = self.phi_m_init.value
             for W in [Wi, We]:
                 # BCs for concentrations
                 for idx, ion in enumerate(self.ion_list):
 
-                    W_ion, _ = W.sub(idx).collapse()
+                    W_ion = W[idx]
                     func = dfx.fem.Function(W_ion)
                     if self.MMS_test:
                         func.interpolate(ion[f'k{ion_suffix}_init'])
                     else:
-                        func.x.array[:] = ion[f'k{ion_suffix}_init']
+                        func.x.array[:] = ion[f'k{ion_suffix}_init'].value
 
-                    dofs = dfx.fem.locate_dofs_topological((W.sub(idx), W_ion), self.boundaries.dim, facets_boundary)
-                    bcs.append(dfx.fem.dirichletbc(func, dofs, W.sub(idx)))
+                    dofs = dfx.fem.locate_dofs_topological(W_ion, self.boundaries.dim, facets_boundary)
+                    bcs.append(dfx.fem.dirichletbc(func, dofs))
 
                 # Electric potential in extracellular space
-                W_phi, _ = W.sub(self.N_ions).collapse()
+                W_phi = W[self.N_ions]
                 func = dfx.fem.Function(W_phi)
 
                 if self.MMS_test:
                     func.interpolate(dfx.fem.Expression(
-                                        ion['ke_init'],
-                                        W_ion.element.interpolation_points()
+                                        ion[f'phi_{ion_suffix}_e'],
+                                        W_phi.element.interpolation_points()
                                         )
                                     )
                 else:
                     func.x.array[:] = init_phi
                     
-                dofs = dfx.fem.locate_dofs_topological((W.sub(self.N_ions), W_phi), self.boundaries.dim, facets_boundary)
-                bcs.append(dfx.fem.dirichletbc(func, dofs, W.sub(self.N_ions)))
+                dofs = dfx.fem.locate_dofs_topological(W_phi, self.boundaries.dim, facets_boundary)
+                bcs.append(dfx.fem.dirichletbc(func, dofs))
 
                 # Next round in for-loop is for extracellular variables
                 ion_suffix = 'e'
@@ -141,8 +146,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     def setup_source_terms(self):
         """ Initialize source term functions. """
 
-        Ve_K,  _ = self.W[1].sub(1).collapse()
-        Ve_Cl, _ = self.W[1].sub(2).collapse()
+        Ve_K  = self.V_list_ie[1][1]
+        Ve_Cl = self.V_list_ie[1][2]
         f_e_K  = dfx.fem.Function(Ve_K)
         f_e_Cl = dfx.fem.Function(Ve_Cl)
         
@@ -161,26 +166,25 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     def set_initial_conditions(self):
 
         # Set initial electric potentials
-        phi_space, _ = self.V.sub(self.N_ions).collapse()
-        self.phi_m_prev = dfx.fem.Function(phi_space)
+        self.phi_m_prev = dfx.fem.Function(self.V)
         self.phi_m_prev.name = "phi_m"
         if self.MMS_test:
             self.phi_m_prev.interpolate(
                                     dfx.fem.Expression(
                                         self.phi_m_init,
-                                        phi_space.element.interpolation_points()
+                                        self.V.element.interpolation_points()
                                         )
                                     )
             # Set intra- and extracellular potentials just for visualization   
-            ui_space, _ = ui_p.sub(self.N_ions).function_space.collapse()
-            ue_space, _ = ue_p.sub(self.N_ions).function_space.collapse()
-            ui_p.sub(self.N_ions).interpolate(
+            ui_space = ui_p[self.N_ions]
+            ue_space = ue_p[self.N_ions]
+            ui_p[self.N_ions].interpolate(
                                     dfx.fem.Expression(
                                         self.phi_i_init,
                                         ui_space.element.interpolation_points()
                                         )
                                     )
-            ue_p.sub(self.N_ions).interpolate(
+            ue_p[self.N_ions].interpolate(
                                     dfx.fem.Expression(
                                         self.phi_e_init,
                                         ue_space.element.interpolation_points()
@@ -192,11 +196,11 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                 self.phi_m_prev.x.array[:] = self.phi_m_init.value
             else:
                 # Both neuronal and glial cells
-                neuron_dofs = dfx.fem.locate_dofs_topological(phi_space, self.subdomains.dim, self.neuron_cells)
-                glia_dofs = dfx.fem.locate_dofs_topological(phi_space, self.subdomains.dim, self.glia_cells)
+                self.neuron_dofs = dfx.fem.locate_dofs_topological(self.V, self.subdomains.dim, self.neuron_cells)
+                self.glia_dofs = dfx.fem.locate_dofs_topological(self.V, self.subdomains.dim, self.glia_cells)
 
-                self.phi_m_prev.x.array[neuron_dofs] = self.phi_m_n_init.value
-                self.phi_m_prev.x.array[glia_dofs] = self.phi_m_g_init.value
+                self.phi_m_prev.x.array[self.neuron_dofs] = self.phi_m_n_init.value
+                self.phi_m_prev.x.array[self.glia_dofs] = self.phi_m_g_init.value
 
         # Set initial concentrations
         # Solutions at previous timestep
@@ -207,15 +211,15 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         for idx, ion in enumerate(self.ion_list):
             # Set initial value of intra- and extracellular ion concentrations
             if self.MMS_test:
-                ui_space, _ = ui_p.sub(idx).function_space.collapse()
-                ue_space, _ = ue_p.sub(idx).function_space.collapse()
-                ui_p.sub(idx).interpolate(
+                ui_space = ui_p[idx].function_space
+                ue_space = ue_p[idx].function_space
+                ui_p[idx].interpolate(
                                     dfx.fem.Expression(
                                         ion['ki_init'],
                                         ui_space.element.interpolation_points()
                                         )
                                     )
-                ue_p.sub(idx).interpolate(
+                ue_p[idx].interpolate(
                                     dfx.fem.Expression(
                                         ion['ke_init'],
                                         ue_space.element.interpolation_points()
@@ -223,24 +227,14 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                                     )
             else:
                 if self.glia_tags is None:
-                    # Get dof mapping between subspace and parent space
-                    _, sub_to_parent_i = ui_p.sub(idx).function_space.collapse()
-                    _, sub_to_parent_e = ue_p.sub(idx).function_space.collapse()
-
                     # Set the array values at the subspace dofs 
-                    ui_p.sub(idx).x.array[sub_to_parent_i] = ion['ki_init'].value
-                    ue_p.sub(idx).x.array[sub_to_parent_e] = ion['ke_init'].value
+                    ui_p[idx].x.array[:] = ion['ki_init'].value
+                    ue_p[idx].x.array[:] = ion['ke_init'].value
                 else:
-                    # Get dof mapping between subspace and parent space
-                    W_ion_i, sub_to_parent_i = ui_p.sub(idx).function_space.collapse()
-                    neuron_dofs = dfx.fem.locate_dofs_topological((self.W[0].sub(idx), W_ion_i), self.subdomains.dim, self.neuron_cells)
-                    glia_dofs   = dfx.fem.locate_dofs_topological((self.W[0].sub(idx), W_ion_i), self.subdomains.dim, self.glia_cells)
-                    _, sub_to_parent_e = ue_p.sub(idx).function_space.collapse()
-
                     # Set the array values at the subspace dofs 
-                    ui_p.sub(idx).x.array[np.intersect1d(sub_to_parent_i, neuron_dofs[0])] = ion['ki_init_n'].value
-                    ui_p.sub(idx).x.array[np.intersect1d(sub_to_parent_i, glia_dofs[0])]   = ion['ki_init_g'].value
-                    ue_p.sub(idx).x.array[sub_to_parent_e] = ion['ke_init'].value
+                    ui_p[idx].x.array[self.neuron_dofs] = ion['ki_init_n'].value
+                    ui_p[idx].x.array[self.glia_dofs]   = ion['ki_init_g'].value
+                    ue_p[idx].x.array[:] = ion['ke_init'].value
         
         print("Initial conditions set.")
             
@@ -269,8 +263,9 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             ds = ufl.Measure("ds", domain=self.mesh, subdomain_data=self.boundaries)
             
         # Trial and test functions
-        (ui, vi) = ufl.TrialFunctions(self.W[0]), ufl.TestFunctions(self.W[0])
-        (ue, ve) = ufl.TrialFunctions(self.W[1]), ufl.TestFunctions(self.W[1])
+        u, v = ufl.TrialFunctions(self.W), ufl.TestFunctions(self.W) # Trial and test functions of the mixed space
+        ui, vi = u[:self.num_variables], v[:self.num_variables] # Intracellular trial and test functions
+        ue, ve = u[self.num_variables:], v[self.num_variables:] # Extracellular trial and test functions
 
         # Solutions at previous timestep
         ui_p = self.u_p[0]
@@ -302,11 +297,11 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             De = ion['De']
 
             # Add ion specific contribution to fraction alpha
-            alpha_i_sum += Di * z**2 * ui_p.sub(idx)
-            alpha_e_sum += De * z**2 * ue_p.sub(idx)
+            alpha_i_sum += Di * z**2 * ui_p[idx]
+            alpha_e_sum += De * z**2 * ue_p[idx]
             
             # Calculate and update Nernst potential for current ion
-            ion['E'] = (psi/z) * ufl.ln(ue_p.sub(idx) / ui_p.sub(idx))
+            ion['E'] = (psi/z) * ufl.ln(ue_p[idx] / ui_p[idx])
 
             # Initialize dictionary of ionic channel
             ion['I_ch'] = dict.fromkeys(self.gamma_tags)
@@ -329,11 +324,11 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
                     # Add contribution to total channel current
                     I_ch[gamma_tag] += ion['I_ch'][gamma_tag]
-        
-        # Initialize variational form block entries
-        a00 = 0; a01 = 0; L0 = 0
-        a10 = 0; a11 = 0; L1 = 0
        
+        # Initialize variational form
+        a = ufl.ZeroBaseForm(None)
+        L = ufl.ZeroBaseForm(None)
+
         # Setup ion-specific part of variational formulation
         for idx, ion in enumerate(self.ion_list):
             
@@ -346,12 +341,12 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             # Set intracellular ion attributes
             ki  = ui[idx]       # Trial function
             vki = vi[idx]       # Test function
-            ki_prev = ui_p.sub(idx) # Previous solution
+            ki_prev = ui_p[idx] # Previous solution
 
             # Set extracellular ion attributes
             ke  = ue[idx]       # Trial function
             vke = ve[idx]       # Test function
-            ke_prev = ue_p.sub(idx) # Previous solution
+            ke_prev = ue_p[idx] # Previous solution
 
             # Set fraction of ion-specific intra- and extracellular I_cap
             alpha_i = Di * z**2 * ki_prev / alpha_i_sum
@@ -366,79 +361,76 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             C_e = C_M * alpha_e('-') / (F*z)
 
             # Weak form - equation for k_i
-            a00 += ki*vki*dxi - dt * inner(Ji, grad(vki)) * dxi
-            a00 +=   C_i * inner(phi_i('-'), vki('-')) * dS
-            a01 += - C_i * inner(phi_e('-'), vki('-')) * dS
-            L0  += ki_prev*vki*dxi
+            a += ki*vki*dxi - dt * inner(Ji, grad(vki)) * dxi
+            a +=   C_i * inner(phi_i('-'), vki('-')) * dS
+            a += - C_i * inner(phi_e('-'), vki('-')) * dS
+            L += ki_prev*vki*dxi
             
             # Weak form - equation for k_e
-            a11 += ke*vke*dxe - dt * inner(Je, grad(vke)) * dxe
-            a11 +=   C_e * inner(phi_e('-'), vke('-')) * dS 
-            a10 += - C_e * inner(phi_i('-'), vke('-')) * dS 
-            L1  += ke_prev*vke*dxe
+            a += ke*vke*dxe - dt * inner(Je, grad(vke)) * dxe
+            a +=   C_e * inner(phi_e('-'), vke('-')) * dS 
+            a += - C_e * inner(phi_i('-'), vke('-')) * dS 
+            L += ke_prev*vke*dxe
 
             # Ionic channels
             for gamma_tag in self.gamma_tags:
-                L0 -= (dt*I_ch_k[gamma_tag] - alpha_i('-')*C_M*self.phi_m_prev) / (F*z) * vki('-') * dS(gamma_tag)
-                L1 += (dt*I_ch_k[gamma_tag] - alpha_e('-')*C_M*self.phi_m_prev) / (F*z) * vke('-') * dS(gamma_tag)
+                L -= (dt*I_ch_k[gamma_tag] - alpha_i('-')*C_M*self.phi_m_prev) / (F*z) * vki('-') * dS(gamma_tag)
+                L += (dt*I_ch_k[gamma_tag] - alpha_e('-')*C_M*self.phi_m_prev) / (F*z) * vke('-') * dS(gamma_tag)
 
             # Add contributions to total current flux
             J_phi_i += z*Ji
             J_phi_e += z*Je
 
             # Source terms
-            L0 += dt * inner(ion['f_i'], vki) * dxi
-            L1 += dt * inner(ion['f_e'], vke) * dxe
+            L += dt * inner(ion['f_i'], vki) * dxi
+            L += dt * inner(ion['f_e'], vke) * dxe
 
             if self.MMS_test:
                 # Define outward normal on exterior boundary (\partial\Omega)
                 n_outer = ufl.FacetNormal(self.mesh)
 
                 # Concentrations source terms
-                L0 += dt * inner(ion['f_k_i'], vki) * dxi # Equation for k_i
-                L1 += dt * inner(ion['f_k_e'], vke) * dxe # Equation for k_e
+                L += dt * inner(ion['f_k_i'], vki) * dxi # Equation for k_i
+                L += dt * inner(ion['f_k_e'], vke) * dxe # Equation for k_e
 
                 # Enforcing correction for I_m
-                L0 += dt/(F*z) * alpha_i('-') * inner(ion['f_I_M'], vki('-')) * dS(self.gamma_tags)
-                L1 -= dt/(F*z) * alpha_e('-') * inner(ion['f_I_M'], vke('-')) * dS(self.gamma_tags)
+                L += dt/(F*z) * alpha_i('-') * inner(ion['f_I_m'], vki('-')) * dS(self.gamma_tags)
+                L -= dt/(F*z) * alpha_e('-') * inner(ion['f_I_m'], vke('-')) * dS(self.gamma_tags)
             
                 # Enforcing correction for I_m, assuming gM_k = gM / N_ions
-                L1 -= dt/(F*z) * alpha_e('-')*inner(ion['f_g_M'], vke('-'))*dS(self.gamma_tags)
+                L -= dt/(F*z) * alpha_e('-')*inner(ion['f_g_m'], vke('-'))*dS(self.gamma_tags)
 
                 # Exterior boundary terms (zero in "physical problem")
-                L1 -=  dt * inner(dot(ion['J_k_e'], n_outer), vke) * ds # Equation for k_e
-                L1 += F*z * inner(dot(ion['J_k_e'], n_outer), vphi_e) * ds # Equation for phi_e
+                L -=  dt * inner(dot(ion['J_k_e'], n_outer), vke) * ds # Equation for k_e
+                L += F*z * inner(dot(ion['J_k_e'], n_outer), vphi_e) * ds # Equation for phi_e
         
         # Weak form - equation for phi_i
-        a00 -= inner(J_phi_i, grad(vphi_i)) * dxi - (C_M/(F*dt)) * inner(phi_i('-'), vphi_i('-')) * dS
-        a01 -= (C_M/(F*dt)) * inner(phi_e('-'), vphi_i('-')) * dS
+        a -= inner(J_phi_i, grad(vphi_i)) * dxi - (C_M/(F*dt)) * inner(phi_i('-'), vphi_i('-')) * dS
+        a -= (C_M/(F*dt)) * inner(phi_e('-'), vphi_i('-')) * dS
         
         # Weak form - equation for phi_e
-        a11 -= inner(J_phi_e, grad(vphi_e)) * dxe - (C_M/(F*dt)) * inner(phi_e('-'), vphi_e('-')) * dS
-        a10 -= (C_M/(F*dt)) * inner(phi_i('-'), vphi_e('-')) * dS 
+        a -= inner(J_phi_e, grad(vphi_e)) * dxe - (C_M/(F*dt)) * inner(phi_e('-'), vphi_e('-')) * dS
+        a -= (C_M/(F*dt)) * inner(phi_i('-'), vphi_e('-')) * dS 
         
         for gamma_tag in self.gamma_tags:
-            L0  -= (1/F) * (I_ch[gamma_tag] - C_M*self.phi_m_prev/dt) * vphi_i('-') * dS(gamma_tag)
-            L1  += (1/F) * (I_ch[gamma_tag] - C_M*self.phi_m_prev/dt) * vphi_e('-') * dS(gamma_tag)
+            L -= (1/F) * (I_ch[gamma_tag] - C_M*self.phi_m_prev/dt) * vphi_i('-') * dS(gamma_tag)
+            L += (1/F) * (I_ch[gamma_tag] - C_M*self.phi_m_prev/dt) * vphi_e('-') * dS(gamma_tag)
         
         if self.MMS_test:
             # Phi source terms
-            L0 -= inner(ion['f_phi_i'], vphi_i) * dxi # Equation for phi_i
-            L1 -= inner(ion['f_phi_e'], vphi_e) * dxe # Equation for phi_e
+            L -= inner(ion['f_phi_i'], vphi_i) * dxi # Equation for phi_i
+            L -= inner(ion['f_phi_e'], vphi_e) * dxe # Equation for phi_e
 
             # Enforcing correction for I_m
-            
-            L0 += inner(self.src_terms['f_phi_m'], vphi_i('-')) * dS(self.gamma_tags)
-            L1 -= inner(self.src_terms['f_phi_m'], vphi_e('-')) * dS(self.gamma_tags)
+            L += inner(self.src_terms['f_phi_m'], vphi_i('-')) * dS(self.gamma_tags)
+            L -= inner(self.src_terms['f_phi_m'], vphi_e('-')) * dS(self.gamma_tags)
 
-            L1 -= inner(self.src_terms['f_gamma'], vphi_e('-')) * dS(self.gamma_tags)
+            L -= inner(self.src_terms['f_gamma'], vphi_e('-')) * dS(self.gamma_tags)
               
 
         # Store weak form in matrix and vector
-        a = [[a00, a01],
-             [a10, a11]]
-
-        L = [L0, L1]
+        a = ufl.extract_blocks(a)
+        L = ufl.extract_blocks(L)
 
         # Convert to C++ forms
         self.a = dfx.fem.form(a, jit_options=self.jit_parameters)
@@ -463,8 +455,9 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         dS  = self.dS(self.gamma_tags)
         
         # Trial and test functions
-        (ui, vi) = ufl.TrialFunctions(self.W[0]), ufl.TestFunctions(self.W[0])
-        (ue, ve) = ufl.TrialFunctions(self.W[1]), ufl.TestFunctions(self.W[1])
+        u, v = ufl.TrialFunctions(self.W), ufl.TestFunctions(self.W) # Trial and test functions of the mixed space
+        ui, vi = u[:self.num_variables], v[:self.num_variables] # Intracellular trial and test functions
+        ue, ve = u[self.num_variables:], v[self.num_variables:] # Extracellular trial and test functions
 
         # Intracellular electric potential
         phi_i  = ui[self.N_ions]
@@ -479,8 +472,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         J_phi_e = 0
 
         # Initialize variational form
-        p00 = 0
-        p11 = 0
+        P = ufl.ZeroBaseForm(None)
 
         # Setup diagonal preconditioner
         for idx, ion in enumerate(self.ion_list):
@@ -493,12 +485,12 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             # Set intracellular ion attributes
             ki  = ui[idx]       # Trial function
             vki = vi[idx]       # Test function
-            ki_prev = ui_p.sub(idx) # Previous solution
+            ki_prev = ui_p[idx] # Previous solution
 
             # Set extracellular ion attributes
             ke  = ue[idx]       # Trial function
             vke = ve[idx]       # Test function
-            ke_prev = ue_p.sub(idx) # Previous solution
+            ke_prev = ue_p[idx] # Previous solution
 
             # Add contribution to total current flux
             if use_block_jacobi:
@@ -513,18 +505,17 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             J_phi_e += z*Je
 
             # weak form - equation for k_i
-            p00 += ki*vki*dxi + dt * inner(Di*grad(ki), grad(vki)) * dxi
+            P += ki*vki*dxi + dt * inner(Di*grad(ki), grad(vki)) * dxi
 
             # weak form - equation for k_e
-            p11 += ke*vke*dxe + dt * inner(De*grad(ke), grad(vke)) * dxe
+            P += ke*vke*dxe + dt * inner(De*grad(ke), grad(vke)) * dxe
 
         # Add flux contributions to weak form equations
-        p00 -= inner(J_phi_i, grad(vphi_i)) * dxi - (C_M/(F*dt)) * inner(phi_i('-'), vphi_i('-')) * dS
-        p11 -= inner(J_phi_e, grad(vphi_e)) * dxe - (C_M/(F*dt)) * inner(phi_e('-'), vphi_e('-')) * dS        
+        P -= inner(J_phi_i, grad(vphi_i)) * dxi - (C_M/(F*dt)) * inner(phi_i('-'), vphi_i('-')) * dS
+        P -= inner(J_phi_e, grad(vphi_e)) * dxe - (C_M/(F*dt)) * inner(phi_e('-'), vphi_e('-')) * dS        
 
         # Create block preconditioner matrix
-        P = [[p00, None],
-             [None, p11]]
+        P = ufl.extract_blocks(P)
 
         # Convert to C++ form
         self.P = dfx.fem.form(P, jit_options=self.jit_parameters)
@@ -570,8 +561,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                    'phi_e_e':exact_sols['phi_e'],
                    'f_phi_i':src_terms['f_phi_i'],
                    'f_phi_e':src_terms['f_phi_e'],
-                   'f_g_M':src_terms['f_gamma'],
-                   'f_I_M':src_terms['f_phi_Na'],
+                   'f_g_m':src_terms['f_gamma'],
+                   'f_I_m':src_terms['f_phi_Na'],
                    'name':'Na',
                    'f_i' : dfx.fem.Constant(self.mesh, 0.0),
                    'f_e' : dfx.fem.Constant(self.mesh, 0.0)}
@@ -589,8 +580,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                   'phi_e_e':exact_sols['phi_e'],
                   'f_phi_i':src_terms['f_phi_i'],
                   'f_phi_e':src_terms['f_phi_e'],
-                  'f_g_M':src_terms['f_gamma'],
-                  'f_I_M':src_terms['f_phi_K'],
+                  'f_g_m':src_terms['f_gamma'],
+                  'f_I_m':src_terms['f_phi_K'],
                   'name':'K',
                   'f_i' : dfx.fem.Constant(self.mesh, 0.0),
                   'f_e' : dfx.fem.Constant(self.mesh, 0.0)}
@@ -608,8 +599,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                    'phi_e_e':exact_sols['phi_e'],
                    'f_phi_i':src_terms['f_phi_i'],
                    'f_phi_e':src_terms['f_phi_e'],
-                   'f_g_M':src_terms['f_gamma'],
-                   'f_I_M':src_terms['f_phi_Cl'],
+                   'f_g_m':src_terms['f_gamma'],
+                   'f_I_m':src_terms['f_phi_Cl'],
                    'name':'Cl',
                    'f_i' : dfx.fem.Constant(self.mesh, 0.0),
                    'f_e' : dfx.fem.Constant(self.mesh, 0.0)}
@@ -623,13 +614,13 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         dxi = self.dx(self.intra_tags)
         dxe = self.dx(self.extra_tag)
 
-        Na_i = self.wh[0].sub(0)
-        K_i  = self.wh[0].sub(1)
-        Cl_i = self.wh[0].sub(2)
+        Na_i = self.wh[0][0]
+        K_i  = self.wh[0][1]
+        Cl_i = self.wh[0][2]
         
-        Na_e = self.wh[1].sub(0)
-        K_e  = self.wh[1].sub(1)
-        Cl_e = self.wh[1].sub(2)
+        Na_e = self.wh[1][0]
+        K_e  = self.wh[1][1]
+        Cl_e = self.wh[1][2]
 
         Na_tot = dfx.fem.assemble_scalar(dfx.fem.form(Na_i*dxi + Na_e*dxe, jit_options=self.jit_parameters))
         K_tot  = dfx.fem.assemble_scalar(dfx.fem.form(K_i *dxi + K_e *dxe, jit_options=self.jit_parameters))
@@ -645,13 +636,13 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         dxi = self.dx(self.intra_tags)
         dxe = self.dx(self.extra_tag)
 
-        Na_i  = self.wh[0].sub(0)
-        K_i   = self.wh[0].sub(1)
-        Cl_i  = self.wh[0].sub(2)		
+        Na_i  = self.wh[0][0]
+        K_i   = self.wh[0][1]
+        Cl_i  = self.wh[0][2]
 
-        Na_e  = self.wh[1].sub(0)
-        K_e   = self.wh[1].sub(1)
-        Cl_e  = self.wh[1].sub(2)		
+        Na_e  = self.wh[1][0]
+        K_e   = self.wh[1][1]
+        Cl_e  = self.wh[1][2]
 
         Na_tot = dfx.fem.assemble_scalar(dfx.fem.form(Na_i*dxi)) + dfx.fem.assemble_scalar(dfx.fem.form(Na_e*dxe)) 
         K_tot  = dfx.fem.assemble_scalar(dfx.fem.form(K_i*dxi))  + dfx.fem.assemble_scalar(dfx.fem.form(K_e*dxe)) 
@@ -673,15 +664,15 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         dxi = self.dx(self.intra_tags)
         dxe = self.dx(self.extra_tag)
 
-        Na_i  = self.wh[0].sub(0)
-        K_i   = self.wh[0].sub(1)
-        Cl_i  = self.wh[0].sub(2)
-        phi_i = self.wh[0].sub(3)
+        Na_i  = self.wh[0][0]
+        K_i   = self.wh[0][1]
+        Cl_i  = self.wh[0][2]
+        phi_i = self.wh[0][3]
 
-        Na_e  = self.wh[1].sub(0)
-        K_e   = self.wh[1].sub(1)
-        Cl_e  = self.wh[1].sub(2)
-        phi_e = self.wh[1].sub(3)
+        Na_e  = self.wh[1][0]
+        K_e   = self.wh[1][1]
+        Cl_e  = self.wh[1][2]
+        phi_e = self.wh[1][3]
         
         err_Na_i  = inner(Na_i  - exact_sols['Na_i'], Na_i   - exact_sols['Na_i'] ) * dxi
         err_K_i   = inner(K_i   - exact_sols['K_i'] , K_i    - exact_sols['K_i']  ) * dxi
@@ -773,6 +764,16 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         self.Cl_i_init  = Constant(self.mesh, dfx.default_scalar_type(137))       # Intracellular Cl concentration (mol/m^3) (Constant)
         self.Cl_e_init  = Constant(self.mesh, dfx.default_scalar_type(104))       # Extracellular Cl concentration (mol/m^3) (Constant)
 
+        # Neuro+glia
+        self.phi_m_n_init = Constant(self.mesh, self.phi_m_init.value)
+        self.phi_m_g_init = Constant(self.mesh, -0.085) # [V]
+        self.Na_i_n_init = Constant(self.mesh, self.Na_i_init.value)
+        self.K_i_n_init = Constant(self.mesh, self.K_i_init.value)
+        self.Cl_i_n_init = Constant(self.mesh, self.Cl_i_init.value)
+        self.Na_i_g_init = Constant(self.mesh, self.Na_i_init.value)
+        self.K_i_g_init = Constant(self.mesh, self.K_i_init.value)
+        self.Cl_i_g_init = Constant(self.mesh, self.Cl_i_init.value)
+
         # Initial values of gating variables
         self.n_init = Constant(self.mesh, dfx.default_scalar_type(0.276))
         self.m_init = Constant(self.mesh, dfx.default_scalar_type(0.00379))
@@ -787,9 +788,9 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         self.Cl_i_f = Constant(self.mesh, dfx.default_scalar_type(0.0))
 
         # Ion dictionaries and list
-        self.Na = {'g_leak':self.g_Na_leak, 'g_leak_g':self.g_Na_leak_g, 'Di':self.D_Na, 'De':self.D_Na, 'ki_init':self.Na_i_init, 'ke_init':self.Na_e_init, 'z':Constant(self.mesh, 1.0),  'f_e': self.Na_e_f, 'f_i':self.Na_i_f, 'name':'Na', 'rho_p': Constant(self.mesh, dfx.default_scalar_type(3*self.rho_pump.value))}
-        self.K  = {'g_leak':self.g_K_leak,  'g_leak_g':self.g_K_leak_g, 'Di':self.D_K,  'De':self.D_K,  'ki_init':self.K_i_init,  'ke_init':self.K_e_init,  'z':Constant(self.mesh, 1.0),  'f_e': self.K_e_f,  'f_i':self.K_i_f,  'name':'K' , 'rho_p': Constant(self.mesh, dfx.default_scalar_type(-2*self.rho_pump.value))}
-        self.Cl = {'g_leak':self.g_Cl_leak, 'g_leak_g':self.g_Cl_leak_g, 'Di':self.D_Cl, 'De':self.D_Cl, 'ki_init':self.Cl_i_init, 'ke_init':self.Cl_e_init, 'z':Constant(self.mesh, -1.0), 'f_e': self.Cl_e_f, 'f_i':self.Cl_i_f, 'name':'Cl', 'rho_p': Constant(self.mesh, 0.0)}
+        self.Na = {'g_leak':self.g_Na_leak, 'g_leak_g':self.g_Na_leak_g, 'Di':self.D_Na, 'De':self.D_Na, 'ki_init':self.Na_i_init, 'ke_init':self.Na_e_init, 'ki_init_n' : self.Na_i_n_init, 'ki_init_g' : self.Na_i_g_init, 'z':Constant(self.mesh, 1.0),  'f_e': self.Na_e_f, 'f_i':self.Na_i_f, 'name':'Na', 'rho_p': Constant(self.mesh, dfx.default_scalar_type(3*self.rho_pump.value))}
+        self.K  = {'g_leak':self.g_K_leak,  'g_leak_g':self.g_K_leak_g, 'Di':self.D_K,  'De':self.D_K,  'ki_init':self.K_i_init,  'ke_init':self.K_e_init,  'ki_init_n' : self.K_i_n_init, 'ki_init_g' : self.K_i_g_init,  'z':Constant(self.mesh, 1.0),  'f_e': self.K_e_f,  'f_i':self.K_i_f,  'name':'K' , 'rho_p': Constant(self.mesh, dfx.default_scalar_type(-2*self.rho_pump.value))}
+        self.Cl = {'g_leak':self.g_Cl_leak, 'g_leak_g':self.g_Cl_leak_g, 'Di':self.D_Cl, 'De':self.D_Cl, 'ki_init':self.Cl_i_init, 'ke_init':self.Cl_e_init,  'ki_init_n' : self.Cl_i_n_init, 'ki_init_g' : self.Cl_i_g_init, 'z':Constant(self.mesh, -1.0), 'f_e': self.Cl_e_f, 'f_i':self.Cl_i_f, 'name':'Cl', 'rho_p': Constant(self.mesh, 0.0)}
         self.ion_list = [self.Na, self.K, self.Cl]
         self.N_ions   = len(self.ion_list) 
 

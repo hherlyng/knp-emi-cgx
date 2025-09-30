@@ -8,13 +8,13 @@ import numpy as np
 from matplotlib import colormaps as cm
 
 k = 1 # Finite element degree
-dim = 5
-N_cells = 50
+dim = 10
+N_cells = 100
 mesh_version = f"{dim}m/{N_cells}c"
 output_dir = f"/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/{mesh_version}/"
 filename = output_dir+"checkpoints" 
-intra_vars = ["Na_i", "K_i", "Cl_i", "phi_i"]
-extra_vars = ["Na_e", "K_e", "Cl_e", "phi_e"]
+intra_vars = ["Na_i", "K_i", "Cl_i"]
+extra_vars = ["Na_e", "K_e", "Cl_e"]
 
 EXTRA = 1
 
@@ -47,8 +47,11 @@ pl = pyvista.Plotter(shape=(4, 2), window_size=[1000, 1200], border=False)
 
 view = 'yz'
 
-times = np.arange(501)*5e-5
-time = times[2]
+timestep = 5e-5
+num_timesteps = 40
+
+times = np.arange(num_timesteps)
+time = times[50]
 
 # Prepare finite elements and pyvista grid used to plot
 mesh = adios4dolfinx.read_mesh(filename, comm=mpi4py.MPI.COMM_WORLD)
@@ -71,7 +74,7 @@ for i, var_list in enumerate([intra_vars, extra_vars]):
         
     for j, var in enumerate(var_list):
         # Read concentration
-        adios4dolfinx.read_function(filename, u_cg, time=float(time), name=f"{var}")
+        adios4dolfinx.read_function(filename, u_cg, time=time, name=f"{var}")
         
         # Set data
         grid.point_data["c"] = u_cg.x.array.copy()

@@ -336,7 +336,7 @@ class MixedDimensionalProblem(ABC):
         
         else:
             self.dim=2
-            self.N_mesh = 16
+            self.N_mesh = 8
             if self.dim==2:
                 self.mesh = dfx.mesh.create_unit_square(comm=MPI.COMM_WORLD, nx=self.N_mesh, ny=self.N_mesh, ghost_mode=self.ghost_mode)
                 self.subdomains = mark_subdomains_square(self.mesh)
@@ -350,7 +350,7 @@ class MixedDimensionalProblem(ABC):
                 self.gamma_tags = (1, 2, 3, 4, 5, 6)
 
             self.boundary_tag = 8
-
+            
         # Integral measures for the domain
         self.dx = ufl.Measure("dx", domain=self.mesh, subdomain_data=self.subdomains, metadata={"quadrature_degree":10}) # Volume integral measure
         self.dS = ufl.Measure("dS", domain=self.mesh, subdomain_data=self.boundaries, metadata={"quadrature_degree":10}) # Facet integral measure
@@ -923,32 +923,20 @@ class MixedDimensionalProblem(ABC):
             m_init_val = self.comm.bcast(m_init_val, root=0)
             h_init_val = self.comm.bcast(h_init_val, root=0)
 
-            self.phi_m_n_init = Constant(self.mesh, phi_m_n_init_val)
-            self.Na_i_n_init = Constant(self.mesh, Na_i_n_init_val)
-            self.Na_e_init = Constant(self.mesh, Na_e_init_val)
-            self.K_i_n_init = Constant(self.mesh, K_i_n_init_val)
-            self.K_e_init = Constant(self.mesh, K_e_init_val)
-            self.Cl_i_n_init = Constant(self.mesh, Cl_i_n_init_val)
-            self.Cl_e_init = Constant(self.mesh, Cl_e_init_val)
-            self.phi_m_g_init = Constant(self.mesh, phi_m_g_init_val)
-            self.Na_i_g_init = Constant(self.mesh, Na_i_g_init_val)
-            self.K_i_g_init = Constant(self.mesh, K_i_g_init_val)
-            self.Cl_i_g_init = Constant(self.mesh, Cl_i_g_init_val)
-            self.n_init = Constant(self.mesh, n_init_val)
-            self.m_init = Constant(self.mesh, m_init_val)
-            self.h_init = Constant(self.mesh, h_init_val)
-
-
-            # Update ion dictionaries
-            self.ion_list[0]['ki_init_n'] = self.Na_i_n_init
-            self.ion_list[0]['ki_init_g'] = self.Na_i_g_init
-            self.ion_list[0]['ke_init'] = self.Na_e_init
-            self.ion_list[1]['ki_init_n'] = self.K_i_n_init
-            self.ion_list[1]['ki_init_g'] = self.K_i_g_init
-            self.ion_list[1]['ke_init'] = self.K_e_init
-            self.ion_list[2]['ki_init_n'] = self.Cl_i_n_init
-            self.ion_list[2]['ki_init_g'] = self.Cl_i_g_init
-            self.ion_list[2]['ke_init'] = self.Cl_e_init
+            self.phi_m_n_init.value = phi_m_n_init_val
+            self.Na_i_n_init.value = Na_i_n_init_val
+            self.Na_e_init.value = Na_e_init_val
+            self.K_i_n_init.value = K_i_n_init_val
+            self.K_e_init.value = K_e_init_val
+            self.Cl_i_n_init.value = Cl_i_n_init_val
+            self.Cl_e_init.value = Cl_e_init_val
+            self.phi_m_g_init.value = phi_m_g_init_val
+            self.Na_i_g_init.value = Na_i_g_init_val
+            self.K_i_g_init.value = K_i_g_init_val
+            self.Cl_i_g_init.value = Cl_i_g_init_val
+            self.n_init.value = n_init_val
+            self.m_init.value = m_init_val
+            self.h_init.value = h_init_val
 
         print("Steady-state initial conditions found.")
     

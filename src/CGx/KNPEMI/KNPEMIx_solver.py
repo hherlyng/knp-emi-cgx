@@ -111,34 +111,21 @@ class SolverKNPEMI(object):
             # Set initial guess
             for idx, ion in enumerate(p.ion_list):
                 if p.glia_tags is None:
-                    # Get dof mapping between subspace and parent space
-                    _, sub_to_parent_i = p.wh[0].sub(idx).function_space.collapse()
-                    _, sub_to_parent_e = p.wh[1].sub(idx).function_space.collapse()
-
                     # Set the array values at the subspace dofs 
-                    p.wh[0].sub(idx).x.array[sub_to_parent_i] = ion['ki_init'].value
-                    p.wh[1].sub(idx).x.array[sub_to_parent_e] = ion['ke_init'].value
+                    p.wh[0][idx].x.array[:] = ion['ki_init'].value
+                    p.wh[1][idx].x.array[:] = ion['ke_init'].value
                 else:
-                    # Get dof mapping between subspace and parent space
-                    W_ion_i, sub_to_parent_i = p.wh[0].sub(idx).function_space.collapse()
-                    neuron_dofs = dfx.fem.locate_dofs_topological((p.W[0].sub(idx), W_ion_i), p.subdomains.dim, p.neuron_cells)
-                    glia_dofs   = dfx.fem.locate_dofs_topological((p.W[0].sub(idx), W_ion_i), p.subdomains.dim, p.glia_cells)
-                    _, sub_to_parent_e = p.wh[1].sub(idx).function_space.collapse()
                     
                     # Set the array values at the subspace dofs 
-                    p.wh[0].sub(idx).x.array[np.intersect1d(sub_to_parent_i, neuron_dofs[0])] = ion['ki_init_n'].value
-                    p.wh[0].sub(idx).x.array[np.intersect1d(sub_to_parent_i, glia_dofs[0])]   = ion['ki_init_g'].value
-                    p.wh[1].sub(idx).x.array[sub_to_parent_e] = ion['ke_init'].value
+                    p.wh[0][idx].x.array[p.neuron_dofs] = ion['ki_init_n'].value
+                    p.wh[0][idx].x.array[p.glia_dofs]   = ion['ki_init_g'].value
+                    p.wh[1][idx].x.array[:] = ion['ke_init'].value
 
             self.ksp.setType(self.ksp_type)
             pc = self.ksp.getPC()
             pc.setType(self.pc_type)
 
             if self.pc_type=="fieldsplit":
-
-                # # aliases
-                # Wi = p.W[0]
-                # We = p.W[1]
 
                 # # Collapse subspaces to get dofmaps
                 # _, Wi0_to_Wi = Wi.sub(0).collapse()
@@ -215,23 +202,20 @@ class SolverKNPEMI(object):
 
         ns_vec = multiphenicsx.fem.petsc.create_vector_block(p.L, restriction=p.restriction)
 
-        # Get potential subspaces
-        _, Vi_dofs = p.W[0].sub(p.N_ions).collapse()
-        _, Ve_dofs = p.W[1].sub(p.N_ions).collapse()
-        ci = dfx.fem.Function(p.V)
-        ce = dfx.fem.Function(p.V)
-        ci.x.array[Vi_dofs] = 1.0
-        ce.x.array[Ve_dofs] = 1.0
+        dofmaps = [V.dofmap for V in p.V_list] # The function space dofmaps
+        functions = [dfx.fem.Function(V) for V in p.V_list] # Finite element functions in each space
+        functions[p.N_ions].x.array[:] = 1.0 # Intracellular potential
+        functions[2*p.N_ions+1].x.array[:] = 1.0 # Extracellular potential
+        Cs = [function.x.petsc_vec for function in functions] # Vector of constants
 
-        Ci = ci.x.petsc_vec
-        Ce = ce.x.petsc_vec 
-
+        idx = 0
         with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(
-            ns_vec, [p.W[0].dofmap, p.W[1].dofmap], p.restriction) as C_dd_wrapper:
-            for C_dd_component_local, data_vector in zip(C_dd_wrapper, (Ci, Ce)):
-                if data_vector is not None:  # skip third block
+            ns_vec, dofmaps, p.restriction) as C_dd_wrapper:
+            for C_dd_component_local, data_vector in zip(C_dd_wrapper, tuple(Cs)):
+                if idx==p.N_ions or idx==(2*p.N_ions+1):  # Only potentials
                     with data_vector.localForm() as data_vector_local:
                         C_dd_component_local[:] = data_vector_local
+                idx += 1
         ns_vec.normalize()
         
         # Create the PETSc nullspace vector and check that it is a valid nullspace of A
@@ -255,6 +239,9 @@ class SolverKNPEMI(object):
         dt     = p.dt
         wh     = p.wh
         
+        dofmaps = [V.dofmap for V in p.V_list] # The function space dofmaps
+        functions = [*wh[0], *wh[1]] # Finite element functions in each space
+
         setup_timer = 0.0
 
         tic = time.perf_counter()
@@ -286,6 +273,7 @@ class SolverKNPEMI(object):
                     if model.__str__() == "Hodgkin-Huxley":
                         model.update_t_mod()
                         model.update_gating_variables()
+            p.setup_variational_form()
 
             # Assemble system matrix and RHS vector
             tic = time.perf_counter()
@@ -311,10 +299,10 @@ class SolverKNPEMI(object):
             if i==0:
                 tic = time.perf_counter()
 
-                if not p.dirichlet_bcs:
-                    # Handle the nullspace of the electric potentials in the case of 
-                    # pure Neumann boundary conditions
-                    self.create_and_set_nullspace()
+                # if not p.dirichlet_bcs:
+                #     # Handle the nullspace of the electric potentials in the case of 
+                #     # pure Neumann boundary conditions
+                #     self.create_and_set_nullspace()
 
                 # Finalize configuration of PETSc structures
                 if self.direct_solver: 
@@ -349,15 +337,18 @@ class SolverKNPEMI(object):
             if not self.direct_solver: self.iterations.append(self.ksp.getIterationNumber())
             
             # Extract sub-components of solution and store them in the solution functions wh
-            with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(self.x, [p.W[0].dofmap, p.W[1].dofmap], p.restriction) as ui_ue_wrapper:
-                for ui_ue_wrapper_local, component in zip(ui_ue_wrapper, (wh[0], wh[1])):
+            with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(self.x, dofmaps, p.restriction) as ui_ue_wrapper:
+                for ui_ue_wrapper_local, component in zip(ui_ue_wrapper, (functions)):
                     with component.x.petsc_vec.localForm() as component_local:
                         component_local[:] = ui_ue_wrapper_local
 
-            # Update previous timestep values
-            p.u_p[0].x.array[:] = wh[0].x.array.copy() # Intracellular ions and potential
-            p.u_p[1].x.array[:] = wh[1].x.array.copy() # Extracellular ions and potential
-            p.phi_m_prev.x.array[:] = wh[0].sub(p.N_ions).collapse().x.array.copy() - wh[1].sub(p.N_ions).collapse().x.array.copy() # Membrane potential      
+            # Update previous timestep values of functions
+            for idx, func_list in enumerate(p.u_p):
+                for func, wh_func in zip(func_list, wh[idx]):
+                    func.x.array[:] = wh_func.x.array.copy()
+
+            # Update membrane potential  
+            p.phi_m_prev.x.array[:] = wh[0][p.N_ions].x.array.copy() - wh[1][p.N_ions].x.array.copy()     
 
             # Write output to file and save png
             if self.save_xdmfs and (i % self.save_interval == 0) : self.save_xdmf()
@@ -485,13 +476,13 @@ class SolverKNPEMI(object):
 
         if len(p.ics_cell)>0:
             # Process owns ICS cell
-            u_subs = p.u_p[0].split()
+            u_subs = p.u_p[0]
             for j in range(num_vars):
                 self.ics_point_values[0, j] = u_subs[j].eval(p.ics_point, p.ics_cell)
             
         if len(p.ecs_cell)>0:
             # Process owns ECS cell
-            u_subs = p.u_p[1].split()
+            u_subs = p.u_p[1]
             for j in range(num_vars):
                 self.ecs_point_values[0, j] = u_subs[j].eval(p.ecs_point, p.ecs_cell)
 
@@ -503,13 +494,13 @@ class SolverKNPEMI(object):
 
         if len(p.ics_cell)>0:
             # Process owns ICS cell
-            u_subs = p.u_p[0].split()
+            u_subs = p.u_p[0]
             for j in range(p.N_ions+1):
                 self.ics_point_values[i, j] = u_subs[j].eval(p.ics_point, p.ics_cell)
             
         if len(p.ecs_cell)>0:
             # Process owns ECS cell
-            u_subs = p.u_p[1].split()
+            u_subs = p.u_p[1]
             for j in range(p.N_ions+1):
                 self.ecs_point_values[i, j] = u_subs[j].eval(p.ecs_point, p.ecs_cell)
     
@@ -589,8 +580,8 @@ class SolverKNPEMI(object):
 
         # Write solution functions to file
         for idx in range(p.N_ions+1):
-            self.xdmf_file.write_function(p.u_p[0].sub(idx), float(p.t.value))
-            self.xdmf_file.write_function(p.u_p[1].sub(idx), float(p.t.value))
+            self.xdmf_file.write_function(p.u_p[0][idx], float(p.t.value))
+            self.xdmf_file.write_function(p.u_p[1][idx], float(p.t.value))
         
         return
 
@@ -598,8 +589,8 @@ class SolverKNPEMI(object):
         """ Write solution functions (ion concentrations and electric potentials) to file. """
 
         for idx in range(self.problem.N_ions+1):
-            self.xdmf_file.write_function(self.problem.u_p[0].sub(idx), float(self.problem.t.value))
-            self.xdmf_file.write_function(self.problem.u_p[1].sub(idx), float(self.problem.t.value))
+            self.xdmf_file.write_function(self.problem.u_p[0][idx], float(self.problem.t.value))
+            self.xdmf_file.write_function(self.problem.u_p[1][idx], float(self.problem.t.value))
 
         return
     
@@ -613,8 +604,6 @@ class SolverKNPEMI(object):
 
         # Write concentrations to file
         for idx in range(p.N_ions):
-            p.u_out_i[idx].interpolate(p.u_p[0].sub(idx))
-            p.u_out_e[idx].interpolate(p.u_p[1].sub(idx))
             a4d.write_function(filename=filename, u=p.u_out_i[idx], time=0)
             a4d.write_function(filename=filename, u=p.u_out_e[idx], time=0)
         
@@ -632,8 +621,6 @@ class SolverKNPEMI(object):
 
         # Write concentrations to file
         for idx in range(p.N_ions):
-            p.u_out_i[idx].interpolate(p.u_p[0].sub(idx))
-            p.u_out_e[idx].interpolate(p.u_p[1].sub(idx))
             a4d.write_function(filename=self.cpoint_filename, u=p.u_out_i[idx], time=i)
             a4d.write_function(filename=self.cpoint_filename, u=p.u_out_e[idx], time=i)
         

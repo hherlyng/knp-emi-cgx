@@ -20,6 +20,7 @@ times = None
 fig, ax = plt.subplots(figsize=figsize, nrows=len(intra_vars), ncols=2)
 
 for N in N_cells:
+    
     # Read data
     input_dir = output_dir+f"{N}c/"
     ics_point_values = np.load(input_dir+"ics_point_values.npy")

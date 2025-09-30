@@ -6,7 +6,7 @@ output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/'
 
 # Numerical parameters 
 dt : 0.00005 # Timestep size 
-time_steps : 1 # Number of timesteps
+time_steps : 10 # Number of timesteps
 T  : 50 # Simulation end time
 
 # Problem constants (in consistent units)

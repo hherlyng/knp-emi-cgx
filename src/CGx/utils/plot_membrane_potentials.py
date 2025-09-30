@@ -45,7 +45,7 @@ y_c = (y_max + y_min) / 2
 z_c = (z_max + z_min) / 2
 mesh_center = np.array([x_c, y_c, z_c])
 
-cell_ids = [3, 2]#[66, 68] # 1st stimulated, 2nd neighbor
+cell_ids = [66, 68] # 1st stimulated, 2nd neighbor
 
 gamma_facets = ft.find(cell_ids[0])
 gamma_vertices = dolfinx.mesh.compute_incident_entities(

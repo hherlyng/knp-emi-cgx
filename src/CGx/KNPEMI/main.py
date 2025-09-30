@@ -33,17 +33,17 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 		NeuronalCT = NeuronalCotransporters(problem)
 		ionic_models = [HH, ATP, NeuronalCT]
 	else:
-		HH = HodgkinHuxley(problem)
-		ATP = ATPPump(problem)
-		NeuronalCT = NeuronalCotransporters(problem)
-		ionic_models = [HH, ATP, NeuronalCT]
-		# HH = HodgkinHuxley(problem, tags=problem.neuron_tags)
-		# ATP = ATPPump(problem, tags=problem.neuron_tags)
-		# NeuronalCT = NeuronalCotransporters(problem, tags=problem.neuron_tags)
-		# KirNa = KirNaKPumpModel(problem, tags=problem.glia_tags)
-		# GlialCT = GlialCotransporters(problem, tags=problem.glia_tags)
+		# HH = HodgkinHuxley(problem)
+		# ATP = ATPPump(problem)
+		# NeuronalCT = NeuronalCotransporters(problem)
+		# ionic_models = [HH, ATP, NeuronalCT]
+		HH = HodgkinHuxley(problem, tags=problem.neuron_tags)
+		ATP = ATPPump(problem, tags=problem.neuron_tags)
+		NeuronalCT = NeuronalCotransporters(problem, tags=problem.neuron_tags)
+		KirNa = KirNaKPumpModel(problem, tags=problem.glia_tags)
+		GlialCT = GlialCotransporters(problem, tags=problem.glia_tags)
 
-		# ionic_models = [HH, ATP, NeuronalCT, GlialCT, KirNa]
+		ionic_models = [HH, ATP, NeuronalCT, GlialCT, KirNa]
 
 	problem.init_ionic_model(ionic_models)
 	problem.set_initial_conditions()
@@ -63,8 +63,8 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 						  save_mat=False)
 	solver.solve()
 
-	phi_i = solver.problem.wh[0].sub(problem.N_ions)
-	phi_e = solver.problem.wh[1].sub(problem.N_ions)
+	phi_i = solver.problem.wh[0][problem.N_ions]
+	phi_e = solver.problem.wh[1][problem.N_ions]
 	dx = solver.problem.dx
 
 	phi_i_L2_local = dfx.fem.assemble_scalar(dfx.fem.form(ufl.inner(phi_i, phi_i) * dx(problem.intra_tags)))
