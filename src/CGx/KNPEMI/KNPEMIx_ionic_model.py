@@ -240,9 +240,9 @@ class ATPPump(IonicModel):
         
         mesh = self.problem.mesh
 
-        self.I_hat = dfx.fem.Constant(mesh, 0.449) # Maximum pump strength [A/m^2]
-        self.m_K = dfx.fem.Constant(mesh, dfx.default_scalar_type(3)) # ECS K+ pump threshold [mM]
-        self.m_Na = dfx.fem.Constant(mesh, dfx.default_scalar_type(12)) # ICS Na+ pump threshold [mM]
+        self.I_hat = dfx.fem.Constant(mesh, 0.068) # Maximum pump strength [A/m^2]
+        self.m_K = dfx.fem.Constant(mesh, dfx.default_scalar_type(5.5)) # ECS K+ pump threshold [mM]
+        self.m_Na = dfx.fem.Constant(mesh, dfx.default_scalar_type(25)) # ICS Na+ pump threshold [mM]
 
     def _eval(self, ion_idx: int):
 
@@ -251,9 +251,9 @@ class ATPPump(IonicModel):
         c_Na_i = p.u_p[0][0]
         c_K_e = p.u_p[1][1]
 
-        par_1 = 1 + self.m_K/c_K_e
-        par_2 = 1 + self.m_Na/c_Na_i
-        I_ATP = self.I_hat / (par_1**2 * par_2**3)
+        par_1 = 1 + ufl.exp(self.m_K - c_K_e)
+        par_2 = 1 + ufl.exp((self.m_Na - c_Na_i)/3)
+        I_ATP = self.I_hat / (par_1 * par_2)
 
         if ion["name"]=="Na":
             return 3*I_ATP
@@ -272,7 +272,7 @@ class HodgkinHuxley(IonicModel):
 
         self.use_Rush_Lar = use_Rush_Lar
         self.time_steps_ODE = time_steps_ODE
-        self.T = 2e-3 # Stimulus period
+        self.T = 10e-3 # Stimulus period
 
     def __str__(self):
         return 'Hodgkin-Huxley'
@@ -353,9 +353,6 @@ class HodgkinHuxley(IonicModel):
         # Return stimulus
         return g_syn_fac * (p.phi_m_prev - ion["E"])
 
-    def update_t_mod(self):
-        self.problem.t_mod.value = np.mod(self.problem.t.value, self.T)
-
     def update_gating_variables(self):		
 
         tic = time.perf_counter()
@@ -422,3 +419,6 @@ class HodgkinHuxley(IonicModel):
         toc = time.perf_counter()
         ODE_step_time = self.problem.mesh.comm.allreduce(toc-tic, op=MPI.MAX)
         PETSc.Sys.Print(f"ODE step in {ODE_step_time:0.4f} seconds")   	
+    
+    def update_t_mod(self):
+        self.problem.t_mod.value = np.mod(self.problem.t.value, self.T)

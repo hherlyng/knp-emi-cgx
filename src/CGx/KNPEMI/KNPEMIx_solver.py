@@ -273,7 +273,6 @@ class SolverKNPEMI(object):
                     if model.__str__() == "Hodgkin-Huxley":
                         model.update_t_mod()
                         model.update_gating_variables()
-            p.setup_variational_form()
 
             # Assemble system matrix and RHS vector
             tic = time.perf_counter()
@@ -388,7 +387,7 @@ class SolverKNPEMI(object):
         p = self.problem # For ease of notation
 
         # Get number of dofs local to each processor and sum to rank 0
-        num_dofs = p.interior.index_map.size_local + p.exterior.index_map.size_local
+        num_dofs = p.interior.index_map.size_local*p.num_variables + p.exterior.index_map.size_local*p.num_variables
         num_dofs = self.comm.allreduce(num_dofs, op=MPI.SUM)
 
         # Get number of mesh cells local to each processor and sum to rank 0
@@ -401,10 +400,8 @@ class SolverKNPEMI(object):
         print("MPI Size = ", self.comm.size)
         print("Input mesh = ", p.input_files['mesh_file'])
         print("Global # mesh cells = ", num_cells)
-        print("Global # dofs = ", num_dofs)
+        print("System size (global # dofs) = ", self.A.size[0])
         print("FEM order = ", p.fem_order)
-
-        if not self.direct_solver: print("System size = ", self.A.size[0])
         print("# Time steps = ", self.time_steps)
         print("dt = ", float(p.dt.value))
 

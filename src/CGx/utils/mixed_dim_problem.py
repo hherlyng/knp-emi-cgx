@@ -318,7 +318,7 @@ class MixedDimensionalProblem(ABC):
             with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
                 # Read mesh and cell tags
                 self.mesh = xdmf.read_mesh(ghost_mode=self.ghost_mode)
-                self.subdomains = xdmf.read_meshtags(self.mesh, name="ct")
+                self.subdomains = xdmf.read_meshtags(self.mesh, name="mesh")
                 self.subdomains.name = "ct"
 
             # Create facet entities, facet-to-cell connectivity and cell-to-cell connectivity
@@ -328,7 +328,7 @@ class MixedDimensionalProblem(ABC):
 
             with dfx.io.XDMFFile(MPI.COMM_WORLD, ft_file, 'r') as xdmf:
                 # Read facet tags
-                self.boundaries = xdmf.read_meshtags(self.mesh, name="ft")
+                self.boundaries = xdmf.read_meshtags(self.mesh, name="mesh")
                 self.boundaries.name = "ft"      
             
             # Scale mesh
@@ -382,8 +382,10 @@ class MixedDimensionalProblem(ABC):
         mesh_center = np.array([x_c, y_c, z_c])
 
         # Find all membrane vertices of the cell
+        gamma_facets = self.boundaries.find(self.stimulus_tags[0])
         # gamma_facets = self.boundaries.find(66) # Always take the tag of the largest cell #10m, 100c stimulated in 66
-        gamma_facets = self.boundaries.find(4)
+        # gamma_facets = self.boundaries.find(3)
+        # gamma_facets = self.boundaries.find(4) # unit square
         # gamma_facets = self.boundaries.find(89) # Always take the tag of the largest cell #20m, 100c stimulated in 88
         # gamma_facets = self.boundaries.find(self.gamma_tags[-1]) # Always take the tag of the largest cell
         gamma_vertices = dfx.mesh.compute_incident_entities(
@@ -685,24 +687,17 @@ class MixedDimensionalProblem(ABC):
             m_init_val = self.comm.bcast(m_init_val, root=0)
             h_init_val = self.comm.bcast(h_init_val, root=0)
 
-            self.phi_m_init = Constant(self.mesh, phi_m_init_val)
-            self.Na_i_init = Constant(self.mesh, Na_i_init_val)
-            self.Na_e_init = Constant(self.mesh, Na_e_init_val)
-            self.K_i_init = Constant(self.mesh, K_i_init_val)
-            self.K_e_init = Constant(self.mesh, K_e_init_val)
-            self.Cl_i_init = Constant(self.mesh, Cl_i_init_val)
-            self.Cl_e_init = Constant(self.mesh, Cl_e_init_val)
-            self.n_init = Constant(self.mesh, n_init_val)
-            self.m_init = Constant(self.mesh, m_init_val)
-            self.h_init = Constant(self.mesh, h_init_val)
-
-            # Update ion dictionaries
-            self.ion_list[0]['ki_init'] = self.Na_i_init
-            self.ion_list[0]['ke_init'] = self.Na_e_init
-            self.ion_list[1]['ki_init'] = self.K_i_init
-            self.ion_list[1]['ke_init'] = self.K_e_init
-            self.ion_list[2]['ki_init'] = self.Cl_i_init
-            self.ion_list[2]['ke_init'] = self.Cl_e_init
+            # Update values of constants
+            self.phi_m_init.value = phi_m_init_val
+            self.Na_i_init.value = Na_i_init_val
+            self.Na_e_init.value = Na_e_init_val
+            self.K_i_init.value = K_i_init_val
+            self.K_e_init.value = K_e_init_val
+            self.Cl_i_init.value = Cl_i_init_val
+            self.Cl_e_init.value = Cl_e_init_val
+            self.n_init.value = n_init_val
+            self.m_init.value = m_init_val
+            self.h_init.value = h_init_val
 
         else:
             # Both neuronal and glial intracellular space
@@ -923,6 +918,7 @@ class MixedDimensionalProblem(ABC):
             m_init_val = self.comm.bcast(m_init_val, root=0)
             h_init_val = self.comm.bcast(h_init_val, root=0)
 
+            # Update values of constants
             self.phi_m_n_init.value = phi_m_n_init_val
             self.Na_i_n_init.value = Na_i_n_init_val
             self.Na_e_init.value = Na_e_init_val

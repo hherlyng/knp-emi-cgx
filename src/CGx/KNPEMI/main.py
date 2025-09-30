@@ -1,5 +1,4 @@
 import petsc4py
-petsc4py.init(["memory_view"])
 import argparse
 
 from pathlib import Path
@@ -83,6 +82,7 @@ if __name__=='__main__':
 	parser = argparse.ArgumentParser(formatter_class=CustomParser)
 	parser.add_argument("--config", dest="config_file", default='./test_setup_config.yaml', type=Path, help="Configuration file")
 	parser.add_argument("--view", dest="view_ksp", default=False, type=bool, help="Verbose KSP object log")
+	
 	args = parser.parse_args(None)
 
 	main_yaml(yaml_file=str(args.config_file), view_ksp=args.view_ksp)
