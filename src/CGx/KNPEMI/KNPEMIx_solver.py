@@ -273,7 +273,7 @@ class SolverKNPEMI(object):
                     if model.__str__() == "Hodgkin-Huxley":
                         model.update_t_mod()
                         model.update_gating_variables()
-
+            
             # Assemble system matrix and RHS vector
             tic = time.perf_counter()
             self.assemble()

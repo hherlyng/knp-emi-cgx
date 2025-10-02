@@ -325,7 +325,7 @@ class HodgkinHuxley(IonicModel):
 
         return I_ch
 
-    def _add_stimulus(self, ion_idx: int):
+    def _add_stimulus(self, ion_idx: int, subregion: list=None):
         """ Evaluate and return the stimulus part of the channel current for ion number 'ion_idx'.
 
         Parameters
@@ -350,8 +350,18 @@ class HodgkinHuxley(IonicModel):
         # Synaptic conductivity factor
         g_syn_fac = p.g_syn_bar * ufl.exp(-p.t_mod / p.a_syn)
 
+        if subregion is None:
+            mask = 1.0
+        else:
+            # Create mask so that stimulus is zero outside of 
+            # a subregion, but active within the subregion
+            x, y, z = ufl.SpatialCoordinate(p.mesh)
+            x_min = subregion[0]
+            x_max = subregion[1]
+            mask = ufl.conditional(ufl.And(ufl.gt(x, x_min), ufl.lt(x, x_max)), 1.0, 0.0)
+
         # Return stimulus
-        return g_syn_fac * (p.phi_m_prev - ion["E"])
+        return mask * g_syn_fac * (p.phi_m_prev - ion["E"])
 
     def update_gating_variables(self):		
 

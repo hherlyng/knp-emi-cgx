@@ -6,8 +6,8 @@ input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/geometries/GC/20m/200c/'
 output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/20m/200c/'
 
 # Numerical parameters 
-dt : 0.00005 # Timestep size 
-time_steps : 50 # Number of timesteps
+dt : 0.0000125 # Timestep size 
+time_steps : 200 # Number of timesteps
 #T  : 50 # Simulation end time
 
 # Problem constants (in consistent units)
@@ -34,3 +34,5 @@ stimulus_tags : [36] # Membrane facet tags of the cells being stimulated
 point_evaluation :
   ics_point : [3805, 2316, 3535]
   ecs_point : [3595, 7263, 13844]
+
+stimulus_region : [4450, 4550]

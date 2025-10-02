@@ -219,6 +219,11 @@ class MixedDimensionalProblem(ABC):
         else:
             self.point_evaluation = False
 
+        if 'stimulus_region' in config:
+            self.stimulus_region = np.array(config['stimulus_region'])*self.mesh_conversion_factor
+        else:
+            self.stimulus_region = None
+
     def parse_tags(self, tags: dict):
 
         allowed_tags = {'intra', 'extra', 'membrane', 'boundary', 'glia', 'neuron'}
@@ -376,7 +381,7 @@ class MixedDimensionalProblem(ABC):
         x_max = self.comm.allreduce(xx.max(), op=MPI.MAX)
         y_min = self.comm.allreduce(yy.min(), op=MPI.MIN)
         y_max = self.comm.allreduce(yy.max(), op=MPI.MAX)
-        
+
         x_c = (x_max + x_min) / 2
         y_c = (y_max + y_min) / 2
         mesh_center = np.array([x_c, y_c, z_c])
