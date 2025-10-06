@@ -17,12 +17,12 @@ import basix.ufl
 print = PETSc.Sys.Print # Automatically flushes output to stream in parallel
 
 class ProblemKNPEMI(MixedDimensionalProblem):
-
+    
     def init(self):
         """ Constructor. """
 
-        if self.MMS_test: self.setup_MMS_params() # Perform numerical verification
-        
+        if self.MMS_test: self.setup_MMS_params()
+
     def setup_spaces(self):
 
         print("Setting up function spaces ...")
@@ -164,6 +164,32 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         self.ion_list[2]['f_e'] = f_e_Cl
 
     def set_initial_conditions(self):
+        
+        if self.find_initial_conditions:
+            print("Solving ODE system to find steady-state initial conditions ...")
+            self.find_steady_state_initial_conditions()
+        else:
+            print("Setting initial conditions from input file ...")
+            if self.glia_tags is None:
+                self.phi_m_init.value = self.initial_conditions['phi_m'] # Membrane potential
+                self.Na_i_init.value = self.initial_conditions['Na_i'] # Intracellular Na+ concentration
+                self.Na_e_init.value = self.initial_conditions['Na_e'] # Extracellular Na+ concentration
+                self.K_i_init.value = self.initial_conditions['K_i'] # Intracellular K+ concentration
+                self.K_e_init.value = self.initial_conditions['K_e'] # Extracellular K+ concentration
+                self.Cl_i_init.value = self.initial_conditions['Cl_i'] # Intracellular Cl- concentration
+                self.Cl_e_init.value = self.initial_conditions['Cl_e'] # Extracellular Cl- concentration
+            else:
+                self.phi_m_n_init.value = self.initial_conditions['phi_m_n'] # Neuronal membrane potential
+                self.phi_m_g_init.value = self.initial_conditions['phi_m_g'] # Glial membrane potential
+                self.Na_i_n_init.value = self.initial_conditions['Na_i_n'] # Neuronal intracellular Na+ concentration
+                self.Na_i_g_init.value = self.initial_conditions['Na_i_g'] # Glial intracellular Na+ concentration
+                self.Na_e_init.value = self.initial_conditions['Na_e']   # Extracellular Na+ concentration
+                self.K_i_n_init.value = self.initial_conditions['K_i_n'] # Neuronal intracellular K+ concentration
+                self.K_i_g_init.value = self.initial_conditions['K_i_g'] # Glial intracellular K+ concentration
+                self.K_e_init.value = self.initial_conditions['K_e']  # Extracellular K+ concentration
+                self.Cl_i_n_init.value = self.initial_conditions['Cl_i_n'] # Neuronal intracellular Cl- concentration
+                self.Cl_i_g_init.value = self.initial_conditions['Cl_i_g'] # Glial intracellular Cl- concentration
+                self.Cl_e_init.value = self.initial_conditions['Cl_e'] # Extracellular Cl- concentration
 
         # Set initial electric potentials
         self.phi_m_prev = dfx.fem.Function(self.V)
@@ -194,6 +220,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             if self.glia_tags is None:
                 # Only neuronal cells
                 self.phi_m_prev.x.array[:] = self.phi_m_init.value
+                print(f"Initial membrane potential: {self.phi_m_init.value}")
             else:
                 # Both neuronal and glial cells
                 self.neuron_dofs = dfx.fem.locate_dofs_topological(self.V, self.subdomains.dim, self.neuron_cells)
@@ -201,6 +228,9 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
                 self.phi_m_prev.x.array[self.neuron_dofs] = self.phi_m_n_init.value
                 self.phi_m_prev.x.array[self.glia_dofs] = self.phi_m_g_init.value
+
+                print(f"Initial neuronal membrane potential: {self.phi_m_n_init.value}")
+                print(f"Initial glial membrane potential: {self.phi_m_g_init.value}")
 
         # Set initial concentrations
         # Solutions at previous timestep
@@ -230,11 +260,18 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                     # Set the array values at the subspace dofs 
                     ui_p[idx].x.array[:] = ion['ki_init'].value
                     ue_p[idx].x.array[:] = ion['ke_init'].value
+
+                    print(f"Initial condition for {ion['name']}_i set to {ion['ki_init'].value}")
+                    print(f"Initial condition for {ion['name']}_e set to {ion['ke_init'].value}")
                 else:
                     # Set the array values at the subspace dofs 
                     ui_p[idx].x.array[self.neuron_dofs] = ion['ki_init_n'].value
                     ui_p[idx].x.array[self.glia_dofs]   = ion['ki_init_g'].value
                     ue_p[idx].x.array[:] = ion['ke_init'].value
+
+                    print(f"Initial condition for {ion['name']}_i_n: {ion['ki_init_n'].value}")
+                    print(f"Initial condition for {ion['name']}_i_g: {ion['ki_init_g'].value}")
+                    print(f"Initial condition for {ion['name']}_e: {ion['ke_init'].value}")
         
         print("Initial conditions set.")
             
@@ -318,7 +355,10 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                     # a cell that is stimulated
                     if gamma_tag in self.stimulus_tags:
                         if ion['name']=='Na' and model.__str__()=='Hodgkin-Huxley':
-                            stim = model._add_stimulus(idx, subregion=self.stimulus_region)
+                            if self.stimulus_region:
+                                stim = model._add_stimulus(idx, range=self.stimulus_region_range, dir=self.stimulus_region_direction)
+                            else:
+                                stim = model._add_stimulus(idx)
                             # self.stim, self.stim_expr = model._add_stimulus(idx)
                             ion['I_ch'][gamma_tag] += stim
 
@@ -742,7 +782,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         self.g_Cl_leak   = Constant(self.mesh, dfx.default_scalar_type(0.25)) # Cl leak conductivity (S/m**2) (Constant)
         self.g_Cl_leak_g = Constant(self.mesh, dfx.default_scalar_type(0.50)) # Cl leak conductivity (S/m**2) (Constant)
         self.a_syn     = Constant(self.mesh, dfx.default_scalar_type(2e-3)) # Synaptic time constant (s)
-        self.g_syn_bar = Constant(self.mesh, dfx.default_scalar_type(40)) # Synaptic conductivity (S/m**2)
+        self.g_syn_bar = Constant(self.mesh, dfx.default_scalar_type(500)) # Synaptic conductivity (S/m**2)
         self.D_Na = Constant(self.mesh, dfx.default_scalar_type(1.33e-9)) # Diffusion coefficients Na (m/s^2) (Constant)
         self.D_K  = Constant(self.mesh, dfx.default_scalar_type(1.96e-9)) # Diffusion coefficients K (m/s^2) (Constant)
         self.D_Cl = Constant(self.mesh, dfx.default_scalar_type(2.03e-9)) # diffusion coefficients Cl (m/s^2) (Constant)
@@ -756,17 +796,16 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
         # Initial conditions
         self.phi_m_init = Constant(self.mesh, dfx.default_scalar_type(-0.067))  # Membrane potential, neuronal (V) 
-        self.phi_m_init_g = Constant(self.mesh, dfx.default_scalar_type(-0.085))  # Membrane potential, glial (V) 
         self.Na_i_init  = Constant(self.mesh, dfx.default_scalar_type(12))        # Intracellular Na concentration (mol/m^3) (Constant)
         self.Na_e_init  = Constant(self.mesh, dfx.default_scalar_type(100))       # Extracellular Na concentration (mol/m^3) (Constant)
-        self.K_i_init   = Constant(self.mesh, dfx.default_scalar_type(125))       # Intracellular K  concentration (mol/m^3) (Constant)
+        self.K_i_init   = Constant(self.mesh, dfx.default_scalar_type(124))       # Intracellular K  concentration (mol/m^3) (Constant)
         self.K_e_init   = Constant(self.mesh, dfx.default_scalar_type(4))         # Extracellular K  concentration (mol/m^3) (Constant)
-        self.Cl_i_init  = Constant(self.mesh, dfx.default_scalar_type(137))       # Intracellular Cl concentration (mol/m^3) (Constant)
-        self.Cl_e_init  = Constant(self.mesh, dfx.default_scalar_type(104))       # Extracellular Cl concentration (mol/m^3) (Constant)
+        self.Cl_i_init  = Constant(self.mesh, dfx.default_scalar_type(20))       # Intracellular Cl concentration (mol/m^3) (Constant)
+        self.Cl_e_init  = Constant(self.mesh, dfx.default_scalar_type(120))       # Extracellular Cl concentration (mol/m^3) (Constant)
 
         # Neuro+glia
         self.phi_m_n_init = Constant(self.mesh, self.phi_m_init.value)
-        self.phi_m_g_init = Constant(self.mesh, -0.085) # [V]
+        self.phi_m_g_init = Constant(self.mesh, -0.080) # [V]
         self.Na_i_n_init = Constant(self.mesh, self.Na_i_init.value)
         self.K_i_n_init = Constant(self.mesh, self.K_i_init.value)
         self.Cl_i_n_init = Constant(self.mesh, self.Cl_i_init.value)

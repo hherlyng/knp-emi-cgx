@@ -240,9 +240,9 @@ class ATPPump(IonicModel):
         
         mesh = self.problem.mesh
 
-        self.I_hat = dfx.fem.Constant(mesh, 0.068) # Maximum pump strength [A/m^2]
-        self.m_K = dfx.fem.Constant(mesh, dfx.default_scalar_type(5.5)) # ECS K+ pump threshold [mM]
-        self.m_Na = dfx.fem.Constant(mesh, dfx.default_scalar_type(25)) # ICS Na+ pump threshold [mM]
+        self.I_hat = dfx.fem.Constant(mesh, 0.449) # Maximum pump strength [A/m^2]
+        self.m_K = dfx.fem.Constant(mesh, dfx.default_scalar_type(2.0)) # ECS K+ pump threshold [mM]
+        self.m_Na = dfx.fem.Constant(mesh, dfx.default_scalar_type(7.7)) # ICS Na+ pump threshold [mM]
 
     def _eval(self, ion_idx: int):
 
@@ -251,9 +251,9 @@ class ATPPump(IonicModel):
         c_Na_i = p.u_p[0][0]
         c_K_e = p.u_p[1][1]
 
-        par_1 = 1 + ufl.exp(self.m_K - c_K_e)
-        par_2 = 1 + ufl.exp((self.m_Na - c_Na_i)/3)
-        I_ATP = self.I_hat / (par_1 * par_2)
+        par_1 = 1 + self.m_K / c_K_e
+        par_2 = 1 + self.m_Na / c_Na_i
+        I_ATP = self.I_hat / (par_1**2 * par_2**3)
 
         if ion["name"]=="Na":
             return 3*I_ATP
@@ -325,7 +325,7 @@ class HodgkinHuxley(IonicModel):
 
         return I_ch
 
-    def _add_stimulus(self, ion_idx: int, subregion: list=None):
+    def _add_stimulus(self, ion_idx: int, range: list | np.ndarray = None, dir: str = None):
         """ Evaluate and return the stimulus part of the channel current for ion number 'ion_idx'.
 
         Parameters
@@ -350,15 +350,16 @@ class HodgkinHuxley(IonicModel):
         # Synaptic conductivity factor
         g_syn_fac = p.g_syn_bar * ufl.exp(-p.t_mod / p.a_syn)
 
-        if subregion is None:
+        if range is None:
             mask = 1.0
         else:
             # Create mask so that stimulus is zero outside of 
             # a subregion, but active within the subregion
-            x, y, z = ufl.SpatialCoordinate(p.mesh)
-            x_min = subregion[0]
-            x_max = subregion[1]
-            mask = ufl.conditional(ufl.And(ufl.gt(x, x_min), ufl.lt(x, x_max)), 1.0, 0.0)
+            x = ufl.SpatialCoordinate(p.mesh)
+            coord = x[dir]
+            coord_min = range[0]
+            coord_max = range[1]
+            mask = ufl.conditional(ufl.And(ufl.gt(coord, coord_min), ufl.lt(coord, coord_max)), 1.0, 0.0)
 
         # Return stimulus
         return mask * g_syn_fac * (p.phi_m_prev - ion["E"])

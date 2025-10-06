@@ -47,18 +47,17 @@ class MixedDimensionalProblem(ABC):
         self.setup_constants()
         self.setup_spaces()
         self.init()
-        # self.find_steady_state_initial_conditions()
         self.setup_boundary_conditions()
         if self.source_terms=="ion_injection": self.setup_source_terms()
 
         # Initialize empty ionic models list
         self.ionic_models = []
-
+        
         print(f"Problem setup in {time.perf_counter() - tic:0.4f} seconds.\n")
 
     def read_config_file(self, config_file: yaml.__file__):
         
-        yaml.add_constructor("!range", range_constructor) # Add reading range of cell tags
+        yaml.add_constructor("!range", range_constructor) # Add reader for range of cell tags
 
         # Read input yaml file
         with open(config_file, 'r') as file:
@@ -100,6 +99,16 @@ class MixedDimensionalProblem(ABC):
             self.input_files = dict()
             self.input_files['mesh_file']  = mesh_file
             self.input_files['facet_file'] = facet_file
+
+            # Set tag names
+            if "square" in mesh_file or mesh_file==facet_file:
+                # Tags are in separate grids in the mesh files
+                self.ct_name = "ct"
+                self.ft_name = "ft"
+            else:
+                # Tags are under same hierarchy as mesh
+                self.ct_name = "mesh"
+                self.ft_name = "mesh"
         else:
             raise RuntimeError('Provide cell_tag_file and facet_tag_file fields in input file.')
 
@@ -214,15 +223,33 @@ class MixedDimensionalProblem(ABC):
 
         if 'point_evaluation' in config:
             self.point_evaluation = True
-            self.ics_point = np.array(config['point_evaluation']['ics_point'])*self.mesh_conversion_factor
-            self.ecs_point = np.array(config['point_evaluation']['ecs_point'])*self.mesh_conversion_factor
+            self.ics_points = np.array(config['point_evaluation']['ics_points'])*self.mesh_conversion_factor
+            self.ecs_points = np.array(config['point_evaluation']['ecs_points'])*self.mesh_conversion_factor
         else:
             self.point_evaluation = False
 
         if 'stimulus_region' in config:
-            self.stimulus_region = np.array(config['stimulus_region'])*self.mesh_conversion_factor
+            self.stimulus_region = True
+            self.stimulus_region_range = np.array(config['stimulus_region']['range'])*self.mesh_conversion_factor
+            axes = {
+                'x' : 0,
+                'y' : 1,
+                'z' : 2
+            }
+            self.stimulus_region_direction = axes[str(config['stimulus_region']['direction'])]
         else:
-            self.stimulus_region = None
+            self.stimulus_region = False
+
+        if 'initial_conditions' in config:
+            if 'filename' in config['initial_conditions']:
+                # Initial conditions provided in a file
+                self.initial_conditions = np.load(config['initial_conditions']['filename'])
+            else:
+                # Initial conditions provided as a dictionary in the config file
+                self.initial_conditions = config['initial_conditions']
+            self.find_initial_conditions = False # No need to find initial conditions
+        else:
+            self.find_initial_conditions = True # Need to find initial conditions
 
     def parse_tags(self, tags: dict):
 
@@ -313,35 +340,55 @@ class MixedDimensionalProblem(ABC):
 
         print("Reading mesh from XDMF file...")
 
-        # Rename file for readability
+        # Get mesh and facet file names
         mesh_file = self.input_files['mesh_file']
         ft_file = self.input_files['facet_file']
 
         if not self.MMS_test:
             # Load mesh files with meshtags
-            
-            with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
-                # Read mesh and cell tags
-                self.mesh = xdmf.read_mesh(ghost_mode=self.ghost_mode)
-                self.subdomains = xdmf.read_meshtags(self.mesh, name="mesh")
-                self.subdomains.name = "ct"
 
-            # Create facet entities, facet-to-cell connectivity and cell-to-cell connectivity
-            self.mesh.topology.create_entities(self.mesh.topology.dim-1)
-            self.mesh.topology.create_connectivity(self.mesh.topology.dim-1, self.mesh.topology.dim)
-            self.mesh.topology.create_connectivity(self.mesh.topology.dim, self.mesh.topology.dim)
+            if mesh_file==ft_file:
+                # Cell tags and facet tags in the same file
+                with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
+                    # Read mesh and cell tags
+                    self.mesh = xdmf.read_mesh(ghost_mode=self.ghost_mode)
+                    self.subdomains = xdmf.read_meshtags(self.mesh, name=self.ct_name)
+                    self.subdomains.name = "ct"    
 
-            with dfx.io.XDMFFile(MPI.COMM_WORLD, ft_file, 'r') as xdmf:
-                # Read facet tags
-                self.boundaries = xdmf.read_meshtags(self.mesh, name="mesh")
-                self.boundaries.name = "ft"      
+                    # Create facet entities, facet-to-cell connectivity and cell-to-cell connectivity
+                    self.mesh.topology.create_entities(self.mesh.topology.dim-1)
+                    self.mesh.topology.create_connectivity(self.mesh.topology.dim-1, self.mesh.topology.dim)
+                    self.mesh.topology.create_connectivity(self.mesh.topology.dim, self.mesh.topology.dim)
+
+                    # Read facet tags
+                    self.boundaries = xdmf.read_meshtags(self.mesh, name=self.ft_name)
+                    self.boundaries.name = "ft" 
             
-            # Scale mesh
+            else:
+                # Cell tags and facet tags in separate files
+                with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
+                    # Read mesh and cell tags
+                    self.mesh = xdmf.read_mesh(ghost_mode=self.ghost_mode)
+                    self.subdomains = xdmf.read_meshtags(self.mesh, name=self.ct_name)
+                    self.subdomains.name = "ct"
+
+                # Create facet entities, facet-to-cell connectivity and cell-to-cell connectivity
+                self.mesh.topology.create_entities(self.mesh.topology.dim-1)
+                self.mesh.topology.create_connectivity(self.mesh.topology.dim-1, self.mesh.topology.dim)
+                self.mesh.topology.create_connectivity(self.mesh.topology.dim, self.mesh.topology.dim)
+
+                with dfx.io.XDMFFile(MPI.COMM_WORLD, ft_file, 'r') as xdmf:
+                    # Read facet tags
+                    self.boundaries = xdmf.read_meshtags(self.mesh, name=self.ft_name)
+                    self.boundaries.name = "ft"      
+            
+            # Scale mesh coordinates
             self.mesh.geometry.x[:] *= self.mesh_conversion_factor
         
         else:
             self.dim=2
             self.N_mesh = 8
+
             if self.dim==2:
                 self.mesh = dfx.mesh.create_unit_square(comm=MPI.COMM_WORLD, nx=self.N_mesh, ny=self.N_mesh, ghost_mode=self.ghost_mode)
                 self.subdomains = mark_subdomains_square(self.mesh)
@@ -402,7 +449,14 @@ class MixedDimensionalProblem(ABC):
         num_local_gamma_vertices = self.mesh.topology.index_map(0).size_local
         gamma_vertices = np.unique(gamma_vertices)[gamma_vertices < num_local_gamma_vertices]
         gamma_coords = self.mesh.geometry.x[gamma_vertices]
-
+        if self.stimulus_region:
+            gamma_coords = gamma_coords[
+                                np.logical_and(
+                                    gamma_coords[:, self.stimulus_region_direction] > self.stimulus_region_range[0],
+                                    gamma_coords[:, self.stimulus_region_direction] < self.stimulus_region_range[1]
+                                )
+                            ]
+        
         # Find the vertex that lies closest to the cell's centroid
         distances = np.sum((gamma_coords - mesh_center)**2, axis=1)
         if len(distances)>0:
@@ -477,26 +531,8 @@ class MixedDimensionalProblem(ABC):
                                         ), 
                                         op=MPI.SUM
                                     )
-        if self.point_evaluation:
-            # Initialize cell placeholders
-            self.ics_cell = np.array([], dtype=np.int32)
-            self.ecs_cell = np.array([], dtype=np.int32)
-            # Find cells for point evaluation of function
-            bb_tree = dfx.geometry.bb_tree(self.mesh, self.mesh.topology.dim)
-            cell_candidates = dfx.geometry.compute_collisions_points(bb_tree, self.ics_point)
-            colliding_cells = dfx.geometry.compute_colliding_cells(self.mesh, cell_candidates, self.ics_point)
-            if len(colliding_cells.links(0))>0:
-                cc = colliding_cells.links(0)[0]
-                self.ics_cell = np.array([cc], dtype=np.int32)
-            cell_candidates = dfx.geometry.compute_collisions_points(bb_tree, self.ecs_point)
-            colliding_cells = dfx.geometry.compute_colliding_cells(self.mesh, cell_candidates, self.ecs_point)
-            if len(colliding_cells.links(0))>0:
-                cc = colliding_cells.links(0)[0]
-                self.ecs_cell = np.array([cc], dtype=np.int32)
 
     def find_steady_state_initial_conditions(self):
-        
-        print("Solving ODE system to find steady-state initial conditions ...")
 
         # Get constants
         R = self.R.value # Gas constant [J/(mol*K)]
@@ -517,7 +553,7 @@ class MixedDimensionalProblem(ABC):
         phi_rest = self.phi_rest.value  # Resting potential [V]
 
         # Define timespan for ODE solver
-        timestep = 1e-6
+        timestep = 1e-6 # [s]
         max_time = 1
         num_timesteps = int(max_time / timestep)
         times = np.linspace(0, max_time, num_timesteps+1)
@@ -536,8 +572,8 @@ class MixedDimensionalProblem(ABC):
 
         # ATP pump
         I_hat = 0.449 # Maximum pump strength [A/m^2]
-        m_K = 3 # ECS K+ pump threshold [mM]
-        m_Na = 12 # ICS Na+ pump threshold [mM]
+        m_K = 2.0 # ECS K+ pump threshold [mM]
+        m_Na = 7.7 # ICS Na+ pump threshold [mM]
 
         # Cotransporters
         S_KCC2 = 0.0034
@@ -555,8 +591,8 @@ class MixedDimensionalProblem(ABC):
         E = lambda z_k, c_ki, c_ke: R*T/(z_k*F) * np.log(c_ke/c_ki)
 
         # ATP current
-        par_1 = lambda K_e: 1 + m_K/K_e
-        par_2 = lambda Na_i: 1 + m_Na/Na_i
+        par_1 = lambda K_e: 1 + m_K / K_e
+        par_2 = lambda Na_i: 1 + m_Na / Na_i
         I_ATP = lambda Na_i, K_e: I_hat / (par_1(K_e)**2 * par_2(Na_i)**3)
 
         # Cotransporter currents
@@ -586,10 +622,6 @@ class MixedDimensionalProblem(ABC):
                                         ) # [m^2]
 
             if self.comm.rank==0:
-
-                print(f"{vol_i=}")
-                print(f"{vol_e=}")
-                print(f"{area_g=}")
 
                 def two_compartment_rhs(x, t, args):
                     """ Right-hand side of ODE system for two-compartment system (neuron + ECS). """
@@ -653,10 +685,7 @@ class MixedDimensionalProblem(ABC):
                         print("NaN values in solution. Exiting.")
                         break
 
-                sol = sol[-1]
-                for i in range(len(sol)):
-                    print(f"{sol[i]:.15f}")
-
+                sol = sol[-1] # Get solutions at final time
                 phi_m_init_val = sol[0]
                 Na_i_init_val = sol[1]
                 Na_e_init_val = sol[2]
@@ -737,10 +766,9 @@ class MixedDimensionalProblem(ABC):
                                         op=MPI.SUM
                                         ) # [m^3]
 
-
             # Membrane potential initial conditions
             phi_m_0_n = phi_m_0 # Neuronal
-            phi_m_0_g = self.phi_m_init_g.value # Glial [V]
+            phi_m_0_g = self.phi_m_g_init.value # Glial [V]
 
             # Glial mechanisms
             # Kir-Na and Na/K pump mechanisms
@@ -770,12 +798,6 @@ class MixedDimensionalProblem(ABC):
             I_NKCC1_g = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: S_NKCC1_g * np.log((Na_i * K_i * Cl_i**2)/(Na_e * K_e * Cl_e**2))
 
             if self.comm.rank==0:
-
-                print(f"{vol_i_n=}")
-                print(f"{vol_i_g=}")
-                print(f"{vol_e=}")
-                print(f"{area_g_n=}")
-                print(f"{area_g_g=}")
 
                 def three_compartment_rhs(x, t, args):
                     """ Right-hand side of ODE system for three-compartment system (neuron + glia + ECS). """
@@ -871,10 +893,7 @@ class MixedDimensionalProblem(ABC):
                         print("NaN values in solution. Exiting.")
                         break
 
-                sol = sol[-1]
-                for i in range(len(sol)):
-                    print(f"{sol[i]:.15f}")
-
+                sol = sol[-1] # Get solutions at final time
                 phi_m_n_init_val = sol[0]
                 Na_i_n_init_val = sol[1]
                 Na_e_init_val = sol[2]
@@ -939,7 +958,7 @@ class MixedDimensionalProblem(ABC):
             self.m_init.value = m_init_val
             self.h_init.value = h_init_val
 
-        print("Steady-state initial conditions found.")
+        print("Steady-state initial conditions determined and written to file.")
     
     @abstractmethod
     def init(self):

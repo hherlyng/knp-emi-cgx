@@ -2,7 +2,7 @@
 problem_type : "KNP-EMI"
 
 # Input and output directorie
-input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/geometries/GC/5m/10c/'
+input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/'
 output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/5m/10c/'
 
 # Numerical parameters 
@@ -19,20 +19,22 @@ physical_constants:
 C_M : 0.02 # membrane capacitance
 
 # Mesh and meshtags files 
-mesh_file      : "mesh.xdmf"
-cell_tag_file  : "mesh.xdmf"
-facet_tag_file : "facets.xdmf"
+mesh_file      : "geometries/GC/5m/10c/mesh.xdmf"
+cell_tag_file  : "geometries/GC/5m/10c/mesh.xdmf"
+facet_tag_file : "geometries/GC/5m/10c/facets.xdmf"
 mesh_conversion_factor: 1e-9
 
-ics_tags  : !range [2, 12] #[2, 3, 4, 5, 6, 7, 8, 9, 10, 11] # Intracellular space cell tags
+ics_tags  : !range [2, 12] # Intracellular space cell tags
 ecs_tags  : [1] # Extracellular space cell tags
-boundary_tags : !range [101, 112] #[101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111] # Boundary facet tags
-membrane_tags : !range [2, 12] #[2, 3, 4, 5, 6, 7, 8, 9, 10, 11] # Membrane (interface) facet tags
-glia_tags : [4, 5, 7]
-stimulus_tags : [3] # Membrane facet tags of the cells being stimulated
+boundary_tags : !range [101, 112]  # Boundary facet tags
+membrane_tags : !range [2, 12] # Membrane (interface) facet tags
+glia_tags : [4, 10]
+stimulus_tags : [5] # Membrane facet tags of the cells being stimulated
 
-# source_terms : "ion_injection"
+stimulus_region : 
+  range : [1150, 1250]
+  direction : "x"
 
 point_evaluation :
-  ics_point : [3805, 2316, 3535]
-  ecs_point : [1725, 3760, 3142]
+  ics_points : [[3805, 2316, 3535]]
+  ecs_points : [[1725, 3760, 3142]]

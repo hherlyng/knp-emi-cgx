@@ -2,11 +2,12 @@
 problem_type : "KNP-EMI"
 
 # Input and output directories
+input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/'
 output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/'
 
 # Numerical parameters 
 dt : 0.00005 # Timestep size 
-time_steps : 100 # Number of timesteps
+time_steps : 50 # Number of timesteps
 T  : 50 # Simulation end time
 
 # Problem constants (in consistent units)
@@ -31,5 +32,14 @@ membrane_tags : [4] # Membrane (interface) facet tags
 stimulus_tags : [4]
 
 point_evaluation :
-  ics_point : [0.5, 0.5, 0.0]
-  ecs_point : [0.1, 0.1, 0.0]
+  ics_points : [[0.3, 0.5], [0.7, 0.5]]
+  ecs_points : [[0.2, 0.2]]
+
+initial_conditions :
+  Na_i  :  10.286863641011553
+  Na_e  :  100.57104545299532
+  K_i   :  120.00096534296559
+  K_e   :  5.333011552344899
+  Cl_i  :  7.773722211611967
+  Cl_e  :  124.07542592946437
+  phi_m : -0.06695928683267384

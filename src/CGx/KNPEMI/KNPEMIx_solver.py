@@ -1,4 +1,5 @@
 import time
+import scifem
 import multiphenicsx.fem
 import multiphenicsx.fem.petsc
 
@@ -34,9 +35,6 @@ class SolverKNPEMI(object):
         self.out_file_prefix = problem.output_dir # The output file directory
         self.view_input = view_input
 
-        # # Initialize varational form
-        # self.problem.setup_variational_form()
-
         # Initialize output files
         if save_xdmfs : self.init_xdmf_savefile()
         if save_pngs  : self.init_png_savefile()
@@ -59,9 +57,6 @@ class SolverKNPEMI(object):
         multiphenicsx.fem.petsc.assemble_matrix_block(self.A, p.a, bcs=p.bcs, restriction=(p.restriction, p.restriction)) # Assemble DOLFINx matrix
         multiphenicsx.fem.petsc.assemble_vector_block(self.b, p.L, p.a, bcs=p.bcs, restriction=p.restriction) # Assemble RHS vector
         self.A.assemble() # Assemble PETSc matrix
-
-        print(self.A.getInfo())
-
 
     def assemble_preconditioner(self):
         """ Assemble the preconditioner matrix. """
@@ -426,7 +421,7 @@ class SolverKNPEMI(object):
         """ Initialize output .png file. Find a unique dof that lies on a cellular membrane (gamma) at the interface
         between an intracellular and extracellular space, and use this dof as a point for plotting the membrane potential.
         
-        If gating variables are a part of the problem, the gating variables are also plotted.
+        If gating variables are part of the problem, the gating variables are also plotted.
         """
 
         p = self.problem # For ease of notation
@@ -466,22 +461,14 @@ class SolverKNPEMI(object):
     def init_point_data(self):
         
         p = self.problem
+        
+        self.ics_point_values = np.zeros((self.time_steps+1, p.num_variables, len(p.ics_points)))
+        self.ecs_point_values = np.zeros((self.time_steps+1, p.num_variables, len(p.ecs_points)))
 
-        num_vars = p.N_ions+1
-        self.ics_point_values = np.zeros((self.time_steps+1, num_vars))
-        self.ecs_point_values = np.zeros((self.time_steps+1, num_vars))
-
-        if len(p.ics_cell)>0:
-            # Process owns ICS cell
-            u_subs = p.u_p[0]
-            for j in range(num_vars):
-                self.ics_point_values[0, j] = u_subs[j].eval(p.ics_point, p.ics_cell)
-            
-        if len(p.ecs_cell)>0:
-            # Process owns ECS cell
-            u_subs = p.u_p[1]
-            for j in range(num_vars):
-                self.ecs_point_values[0, j] = u_subs[j].eval(p.ecs_point, p.ecs_cell)
+        for j in range(p.num_variables):
+            self.ics_point_values[0, j] = scifem.evaluate_function(p.u_p[0][j], p.ics_points).T
+            self.ecs_point_values[0, j] = scifem.evaluate_function(p.u_p[1][j], p.ecs_points).T
+                
 
     def save_point_data(self, i: int):
         """ Save function values evaluated in two points (one in ICS and one in the ECS)
@@ -489,17 +476,9 @@ class SolverKNPEMI(object):
 
         p = self.problem
 
-        if len(p.ics_cell)>0:
-            # Process owns ICS cell
-            u_subs = p.u_p[0]
-            for j in range(p.N_ions+1):
-                self.ics_point_values[i, j] = u_subs[j].eval(p.ics_point, p.ics_cell)
-            
-        if len(p.ecs_cell)>0:
-            # Process owns ECS cell
-            u_subs = p.u_p[1]
-            for j in range(p.N_ions+1):
-                self.ecs_point_values[i, j] = u_subs[j].eval(p.ecs_point, p.ecs_cell)
+        for j in range(p.num_variables):
+            self.ics_point_values[i, j] = scifem.evaluate_function(p.u_p[0][j], p.ics_points).T
+            self.ecs_point_values[i, j] = scifem.evaluate_function(p.u_p[1][j], p.ecs_points).T
     
     def print_figures(self):
         """ Output .png plot of:
@@ -512,10 +491,11 @@ class SolverKNPEMI(object):
 
         """
 
+        # Aliases
+        dt = float(self.problem.dt.value)
+        time_steps = self.time_steps
+
         if self.comm.rank==self.problem.owner_rank_membrane_vertex:
-            # Aliases
-            dt = float(self.problem.dt.value)
-            time_steps = self.time_steps
 
             # Save plot of membrane potential
             plt.figure(0)        
@@ -530,12 +510,37 @@ class SolverKNPEMI(object):
                 plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.n_t, label='n')
                 plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.m_t, label='m')
                 plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.h_t, label='h')
-                pprint("Final n: ", self.n_t[-1], flush=True)
-                pprint("Final m: ", self.m_t[-1], flush=True)
-                pprint("Final h: ", self.h_t[-1], flush=True)
                 plt.legend()
                 plt.xlabel('Time (ms)')
                 plt.savefig(self.out_gate_string)
+        
+        if self.problem.point_evaluation:
+            plt.figure(4)
+            plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.ics_point_values[:, 0, :], label='ICS Na+')
+            ax = plt.twinx()
+            ax.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.ecs_point_values[:, 0, :], '--', label='ECS Na+')
+            plt.xlabel('Time (ms)')
+            plt.ylabel('Concentration (mM)')
+            plt.legend()
+            plt.savefig(self.out_file_prefix + 'point_evaluation_Na.png')
+
+            plt.figure(5)
+            plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.ics_point_values[:, 1, :], label='ICS K+')
+            plt.xlabel('Time (ms)')
+            plt.ylabel('Concentration (mM)')
+            ax = plt.twinx()
+            ax.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.ecs_point_values[:, 1, :], '--', label='ECS K+')
+            plt.legend()
+            plt.savefig(self.out_file_prefix + 'point_evaluation_K.png')
+            
+            plt.figure(6)
+            plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.ics_point_values[:, 2, :], label='ICS Cl-')
+            plt.xlabel('Time (ms)')
+            plt.ylabel('Concentration (mM)')
+            ax = plt.twinx()
+            ax.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.ecs_point_values[:, 2, :], '--', label='ECS Cl-')
+            plt.legend()
+            plt.savefig(self.out_file_prefix + 'point_evaluation_Cl.png')
 
         # Save iteration history
         if not self.direct_solver:
@@ -576,7 +581,7 @@ class SolverKNPEMI(object):
         self.output_filename = filename # Store the output filename for post-processing
 
         # Write solution functions to file
-        for idx in range(p.N_ions+1):
+        for idx in range(p.num_variables):
             self.xdmf_file.write_function(p.u_p[0][idx], float(p.t.value))
             self.xdmf_file.write_function(p.u_p[1][idx], float(p.t.value))
         
@@ -585,7 +590,7 @@ class SolverKNPEMI(object):
     def save_xdmf(self):
         """ Write solution functions (ion concentrations and electric potentials) to file. """
 
-        for idx in range(self.problem.N_ions+1):
+        for idx in range(self.problem.num_variables):
             self.xdmf_file.write_function(self.problem.u_p[0][idx], float(self.problem.t.value))
             self.xdmf_file.write_function(self.problem.u_p[1][idx], float(self.problem.t.value))
 
@@ -646,10 +651,8 @@ class SolverKNPEMI(object):
             np.save(self.problem.output_dir+"phi_m.npy", np.array(self.v_t))
 
         if self.problem.point_evaluation:
-            if len(self.problem.ics_cell)>0:
-                np.save(self.problem.output_dir+"ics_point_values.npy", self.ics_point_values)
-            if len(self.problem.ecs_cell)>0:
-                np.save(self.problem.output_dir+"ecs_point_values.npy", self.ecs_point_values)
+            np.save(self.problem.output_dir+"ics_point_values.npy", self.ics_point_values)
+            np.save(self.problem.output_dir+"ecs_point_values.npy", self.ecs_point_values)
 
         return
 

@@ -3,7 +3,7 @@ problem_type : "KNP-EMI"
 
 # Input and output directorie
 input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/'
-output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/5m/100c/'
+output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/5m/100c/refined_refined/'
 
 # Numerical parameters 
 dt : 0.00005 # Timestep size 
@@ -19,9 +19,9 @@ physical_constants:
 C_M : 0.02 # membrane capacitance
 
 # Mesh and meshtags files 
-mesh_file      : "geometries/GC/5m/100c/mesh.xdmf"
-cell_tag_file  : "geometries/GC/5m/100c/mesh.xdmf"
-facet_tag_file : "geometries/GC/5m/100c/facets.xdmf"
+mesh_file      : "geometries/GC/5m/100c/mesh_refined_refined.xdmf"
+cell_tag_file  : "geometries/GC/5m/100c/mesh_refined_refined.xdmf"
+facet_tag_file : "geometries/GC/5m/100c/mesh_refined_refined.xdmf"
 mesh_conversion_factor: 1e-9
 
 ics_tags  : !range [2, 102] # Intracellular space cell tags 
@@ -38,16 +38,16 @@ stimulus_region :
 point_evaluation :
   ics_points : [[3805, 2316, 3535]]
   ecs_points : [[1725, 3760, 3142]]
-
+  
 initial_conditions:
-  phi_m_n : -0.06696676576070593
-  phi_m_g : -0.07988206841052596
-  Na_i_n : 10.33203686815071
-  Na_i_g : 11.476992450841406
-  Na_e : 104.77271832466624
-  K_i_n : 120.93497281991183
-  K_i_g : 145.29893688280288
-  K_e : 5.350486585687897
-  Cl_i_n : 9.569405793802652
-  Cl_i_g : 7.269701571283507
-  Cl_e : 152.9992940552764
+  phi_m_n : -0.06696676576070638
+  phi_m_g : -0.07988206841052604
+  Na_i_n : 10.332036868150855
+  Na_i_g : 11.476992450841575
+  Na_e : 104.7727183246682
+  K_i_n : 120.93497281991118
+  K_i_g : 145.2989368827977
+  K_e : 5.350486585687688
+  Cl_i_n : 9.569405793802513
+  Cl_i_g : 7.269701571283548
+  Cl_e : 152.99929405527774
