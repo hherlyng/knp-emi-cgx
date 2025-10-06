@@ -15,7 +15,7 @@ def test_L2_norm_of_potentials():
 		# Create problem and initialize ionic models
 		tags = {'intra': 1, 'extra': 2, 'boundary': 3, 'membrane': 4}
 		problem_square = ProblemKNPEMI(config_file='./tests/test_config.yml')
-		HH = HH_model(problem_square)
+		HH = HodgkinHuxley(problem_square)
 		ionic_models = [HH]
 		problem_square.init_ionic_model(ionic_models)
 
