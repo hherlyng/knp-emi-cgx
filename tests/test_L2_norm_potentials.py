@@ -18,9 +18,11 @@ def test_L2_norm_of_potentials():
 		HH = HodgkinHuxley(problem_square)
 		ionic_models = [HH]
 		problem_square.init_ionic_model(ionic_models)
+                problem_square.set_initial_conditions()
+                problem_square.setup_variational_form()
 
 		# Create solver
-		solver_square = SolverKNPEMI(problem_square)
+		solver_square = SolverKNPEMI(problem_square, view_input=False)
 		solver_square.solve()
 
 		# Extract the solutions of the potentials

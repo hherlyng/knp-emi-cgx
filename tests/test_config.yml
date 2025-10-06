@@ -23,3 +23,15 @@ ics_tags  : [1] # Intracellular space cell tags
 ecs_tags  : [2] # Extracellular space cell tags
 boundary_tags : [3] # Boundary facet tags
 membrane_tags : [4] # Membrane (interface) facet tags
+
+initial_conditions:
+  phi_m : -0.06774
+  Na_i : 12
+  Na_e : 100
+  K_i  : 125
+  K_e  : 4
+  Cl_i : 137
+  Cl_e : 104
+  n : 0.27622914792
+  m : 0.03791834627
+  h : 0.68848921811

@@ -178,6 +178,9 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                 self.K_e_init.value = self.initial_conditions['K_e'] # Extracellular K+ concentration
                 self.Cl_i_init.value = self.initial_conditions['Cl_i'] # Intracellular Cl- concentration
                 self.Cl_e_init.value = self.initial_conditions['Cl_e'] # Extracellular Cl- concentration
+                self.n_init.value = self.initial_conditions['n'] # K+ activation gating variable
+                self.m_init.value = self.initial_conditions['m'] # Na+ activation gating variable
+                self.h_init.value = self.initial_conditions['h'] # Na+ inactivation gating variable
             else:
                 self.phi_m_n_init.value = self.initial_conditions['phi_m_n'] # Neuronal membrane potential
                 self.phi_m_g_init.value = self.initial_conditions['phi_m_g'] # Glial membrane potential
@@ -190,6 +193,9 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                 self.Cl_i_n_init.value = self.initial_conditions['Cl_i_n'] # Neuronal intracellular Cl- concentration
                 self.Cl_i_g_init.value = self.initial_conditions['Cl_i_g'] # Glial intracellular Cl- concentration
                 self.Cl_e_init.value = self.initial_conditions['Cl_e'] # Extracellular Cl- concentration
+                self.n_init.value = self.initial_conditions['n'] # K+ activation gating variable
+                self.m_init.value = self.initial_conditions['m'] # Na+ activation gating variable
+                self.h_init.value = self.initial_conditions['h'] # Na+ inactivation gating variable
 
         # Set initial electric potentials
         self.phi_m_prev = dfx.fem.Function(self.V)
