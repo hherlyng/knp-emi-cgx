@@ -21,7 +21,7 @@ class SolverKNPEMI(object):
 
     def __init__(self, problem: ProblemKNPEMI, view_input, use_direct_solver: bool=True,
                  save_xdmfs: bool=False, save_pngs: bool=False, save_cpoints: bool=False,
-                 save_data: bool=False, save_mat: bool=False):
+                 save_dat: bool=False, save_mat: bool=False):
         """ Constructor. """
 
         self.problem    = problem                 # The KNP-EMI problem
@@ -31,6 +31,7 @@ class SolverKNPEMI(object):
         self.save_xdmfs = save_xdmfs              # Option to save .xdmf output 
         self.save_pngs  = save_pngs               # Option to save .png  output
         self.save_cpoints = save_cpoints
+        self.save_dat = save_dat                  # Option to save .npy output
         self.save_mat   = save_mat                # Option to save the system matrix
         self.out_file_prefix = problem.output_dir # The output file directory
         self.view_input = view_input
@@ -363,7 +364,7 @@ class SolverKNPEMI(object):
                 if self.save_cpoints:
                     print("\nCheckpoints saved in ", self.out_file_prefix)
                 
-                if self.save_data:
+                if self.save_dat:
                     self.save_data()
                     print("\nCheckpoints saved in ", self.out_file_prefix)
                 
