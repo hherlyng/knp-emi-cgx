@@ -26,6 +26,7 @@ jobs:
       - name: install python packages
         run: |
           python3 -m pip install . --no-build-isolation
+          python3 -m pip install scifem --no-build-isolation
 
       - name: run tests
         run: |
