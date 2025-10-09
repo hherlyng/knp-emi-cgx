@@ -9,7 +9,7 @@ on:
 
 env:
   DEB_PYTHON_INSTALL_LAYOUT: deb_system
-  PIP_NO_BUILD_ISOLATION: 0
+#  PIP_NO_BUILD_ISOLATION: 1
 
 defaults:
   run:
@@ -25,7 +25,7 @@ jobs:
 
       - name: install python packages
         run: |
-          python3 -m pip install .
+          python3 -m pip install . --no-build-isolation
 
       - name: run tests
         run: |

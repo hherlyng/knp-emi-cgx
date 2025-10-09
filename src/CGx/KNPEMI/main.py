@@ -54,7 +54,7 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 						  use_direct_solver=True,
 						  save_pngs=True,
 						  save_cpoints=True,
-						  save_mat=False
+						  save_data=True
 						)
 	solver.solve()
 

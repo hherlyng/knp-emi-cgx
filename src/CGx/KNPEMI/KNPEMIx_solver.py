@@ -21,7 +21,7 @@ class SolverKNPEMI(object):
 
     def __init__(self, problem: ProblemKNPEMI, view_input, use_direct_solver: bool=True,
                  save_xdmfs: bool=False, save_pngs: bool=False, save_cpoints: bool=False,
-                 save_mat: bool=False):
+                 save_data: bool=False, save_mat: bool=False):
         """ Constructor. """
 
         self.problem    = problem                 # The KNP-EMI problem
@@ -363,7 +363,9 @@ class SolverKNPEMI(object):
                 if self.save_cpoints:
                     print("\nCheckpoints saved in ", self.out_file_prefix)
                 
-                self.save_data()
+                if self.save_data:
+                    self.save_data()
+                    print("\nCheckpoints saved in ", self.out_file_prefix)
                 
                 print("\nTotal setup time:", setup_timer)
                 print("Total assembly time:", sum(self.assembly_time))
