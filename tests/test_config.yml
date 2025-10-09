@@ -15,9 +15,9 @@ physical_constants:
 C_M : 0.02 # membrane capacitance
 
 # Mesh and meshtags files 
-mesh_file      : "./src/CGx/KNPEMI/input/geometries/square32.xdmf"
-cell_tag_file  : "./src/CGx/KNPEMI/input/geometries/square32.xdmf"
-facet_tag_file : "./src/CGx/KNPEMI/input/geometries/square32_facets.xdmf"
+mesh_file      : "./square32.xdmf"
+cell_tag_file  : "./square32.xdmf"
+facet_tag_file : "./square32_facets.xdmf"
 
 ics_tags  : [1] # Intracellular space cell tags
 ecs_tags  : [2] # Extracellular space cell tags
