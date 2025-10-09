@@ -26,8 +26,8 @@ def test_L2_norm_of_potentials():
 		solver_square.solve()
 
 		# Extract the solutions of the potentials
-		phi_i = solver_square.problem.wh[0].sub(solver_square.problem.N_ions)
-		phi_e = solver_square.problem.wh[1].sub(solver_square.problem.N_ions)
+		phi_i = solver_square.problem.wh[0][solver_square.problem.N_ions]
+		phi_e = solver_square.problem.wh[1][solver_square.problem.N_ions]
 
 		# Calculate the L2 norms
 		phi_i_L2_local  = dfx.fem.assemble_scalar(dfx.fem.form(ufl.inner(phi_i, phi_i) * problem_square.dx(tags['intra'])))
