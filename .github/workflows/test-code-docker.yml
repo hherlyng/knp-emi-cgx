@@ -22,6 +22,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install system build dependencies
+        run: |
+          apt-get update
+          apt-get install -y build-essential python3-dev libffi-dev
       
       - name: Upgrade pip, setuptools, and build
         run: python3 -m pip install --upgrade pip setuptools build
