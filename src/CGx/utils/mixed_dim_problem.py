@@ -149,12 +149,18 @@ class MixedDimensionalProblem(ABC):
         # Set physical parameters
         if 'physical_constants' in config:
             consts = config['physical_constants']
-            if 'T' in consts: self.T = consts['T']
-            if 'R' in consts: self.R = consts['R']
-            if 'F' in consts: self.F = consts['F']
-            self.psi = self.R*self.T/self.F
+            if 'T' in consts: self.T_value = consts['T']
+            if 'R' in consts: self.R_value = consts['R']
+            if 'F' in consts: self.F_value = consts['F']
+            self.psi_value = self.R_value*self.T_value/self.F_value
+        else:
+            print("Setting all constants equal to 1.0.")
+            self.T_value = self.R_value = self.F_value = self.psi_value = 1.0
 
-        if 'C_M' in config: self.C_M = config['C_M']
+        if 'C_M' in config:
+            self.C_M_value = config['C_M']
+        else:
+            self.C_M_value = 1.0
 
         # Scaling mesh factor (default 1)
         if 'mesh_conversion_factor' in config: self.mesh_conversion_factor = float(config['mesh_conversion_factor'])
@@ -166,7 +172,18 @@ class MixedDimensionalProblem(ABC):
         if 'dirichlet_bcs' in config: self.dirichlet_bcs = config['dirichlet_bcs']
 
         # Verification test flag
-        if 'MMS_test' in config: self.MMS_test = config['MMS_test']
+        if 'MMS_test' in config: 
+            self.MMS_test = True
+            self.dirichlet_bcs = True
+            try:
+                self.N_mesh = config['MMS_test']['N_mesh']
+            except:
+                raise RuntimeError('For MMS test, provide number of mesh cells "N_mesh" in input file.')
+            
+            try:
+                self.dim = config['MMS_test']['dim']
+            except:
+                raise RuntimeError('For MMS test, provide dimension "dim" in input file.')
 
         # Initial membrane potential
         if 'phi_m_init' in config: self.phi_m_init = config['phi_m_init']
@@ -250,7 +267,7 @@ class MixedDimensionalProblem(ABC):
             self.find_initial_conditions = False # No need to find initial conditions
         else:
             self.find_initial_conditions = True # Need to find initial conditions
-
+        
     def parse_tags(self, tags: dict):
 
         allowed_tags = {'intra', 'extra', 'membrane', 'boundary', 'glia', 'neuron'}
@@ -293,14 +310,14 @@ class MixedDimensionalProblem(ABC):
             self.neuron_tags = self.gamma_tags
         
         if 'boundary' in tags_set:
-            self.boundary_tag = tags['boundary']
+            self.boundary_tags = tags['boundary']
         else:
             print('Setting default: boundary tag = 1.')
 
         # Transform ints or lists to tuples
         if isinstance(self.intra_tags, int) or isinstance(self.intra_tags, list): self.intra_tags = tuple(self.intra_tags,)
         if isinstance(self.extra_tag, int) or isinstance(self.extra_tag, list): self.extra_tag = tuple(self.extra_tag,)
-        if isinstance(self.boundary_tag, int) or isinstance(self.boundary_tag, list): self.boundary_tag = tuple(self.boundary_tag,)
+        if isinstance(self.boundary_tags, int) or isinstance(self.boundary_tags, list): self.boundary_tags = tuple(self.boundary_tags,)
         if isinstance(self.gamma_tags, int) or isinstance(self.gamma_tags, list): self.gamma_tags = tuple(self.gamma_tags,)
         if isinstance(self.glia_tags, int) or isinstance(self.glia_tags, list): self.glia_tags = tuple(self.glia_tags,)
         if isinstance(self.neuron_tags, int) or isinstance(self.neuron_tags, list): self.neuron_tags = tuple(self.neuron_tags,)
@@ -386,8 +403,6 @@ class MixedDimensionalProblem(ABC):
             self.mesh.geometry.x[:] *= self.mesh_conversion_factor
         
         else:
-            self.dim=2
-            self.N_mesh = 8
 
             if self.dim==2:
                 self.mesh = dfx.mesh.create_unit_square(comm=MPI.COMM_WORLD, nx=self.N_mesh, ny=self.N_mesh, ghost_mode=self.ghost_mode)
@@ -401,17 +416,44 @@ class MixedDimensionalProblem(ABC):
                 self.boundaries = mark_boundaries_cube_MMS(self.mesh)
                 self.gamma_tags = (1, 2, 3, 4, 5, 6)
 
-            self.boundary_tag = 8
-            
+            # Create facet entities, facet-to-cell connectivity and cell-to-cell connectivity
+            self.mesh.topology.create_entities(self.mesh.topology.dim-1)
+            self.mesh.topology.create_connectivity(self.mesh.topology.dim-1, self.mesh.topology.dim)
+            self.mesh.topology.create_connectivity(self.mesh.topology.dim, self.mesh.topology.dim)
+
+        # Generate integration entities for interior facet integrals
+        # to ensure consistent direction of facet normal vector
+        # across the cellular membranes
+        subdomain_data_list = []
+        for tag in self.gamma_tags:
+            gamma_facets = self.boundaries.find(tag)
+            gamma_integration_data = dfx.fem.compute_integration_domains(
+                        dfx.fem.IntegralType.interior_facet,
+                        self.mesh.topology,
+                        gamma_facets,
+                        self.boundaries.dim
+                        )
+            ordered_gamma_integration_data = gamma_integration_data.reshape(-1, 4).copy()
+            switch = self.subdomains.values[ordered_gamma_integration_data[:, 0]] \
+                    > self.subdomains.values[ordered_gamma_integration_data[:, 2]]
+            if True in switch:
+                ordered_gamma_integration_data[switch, :] = ordered_gamma_integration_data[switch][:, [2, 3, 0, 1]]
+            subdomain_data_list.append((tag, ordered_gamma_integration_data.flatten()))
+        
         # Integral measures for the domain
         self.dx = ufl.Measure("dx", domain=self.mesh, subdomain_data=self.subdomains, metadata={"quadrature_degree":10}) # Volume integral measure
-        self.dS = ufl.Measure("dS", domain=self.mesh, subdomain_data=self.boundaries, metadata={"quadrature_degree":10}) # Facet integral measure
+        self.dS = ufl.Measure("dS", domain=self.mesh, subdomain_data=subdomain_data_list, metadata={"quadrature_degree":10}) # Facet integral measure
+
+        if self.MMS_test:
+            self.ds = ufl.Measure("ds", domain=self.mesh, subdomain_data=self.boundaries) # Create boundary integral measure
+            self.n_outer = ufl.FacetNormal(self.mesh) # Define outward normal on exterior boundary (\partial\Omega)
 
         if self.glia_tags is not None:
             # Store the neuron and glia computational cells
             self.neuron_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.neuron_tags]))
             self.glia_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.glia_tags]))
 
+        #-------------------------------------------------#
         # Find the point on the largest cell's membrane
         # that lies closest to the center point of the mesh.
         # The membrane potential will be measured in this point.
@@ -434,7 +476,11 @@ class MixedDimensionalProblem(ABC):
         mesh_center = np.array([x_c, y_c, z_c])
 
         # Find all membrane vertices of the cell
-        gamma_facets = self.boundaries.find(self.stimulus_tags[0])
+        if not self.MMS_test:
+            gamma_facets = self.boundaries.find(self.stimulus_tags[0])
+        else:
+            gamma_facets = np.concatenate(([self.boundaries.find(tag) for tag in self.gamma_tags]))
+
         # gamma_facets = self.boundaries.find(66) # Always take the tag of the largest cell #10m, 100c stimulated in 66
         # gamma_facets = self.boundaries.find(3)
         # gamma_facets = self.boundaries.find(4) # unit square
@@ -566,9 +612,6 @@ class MixedDimensionalProblem(ABC):
         Cl_i_0 = self.Cl_i_init.value # [Mm]
         Cl_e_0 = self.Cl_e_init.value # [Mm]
         phi_m_0 = self.phi_m_init.value # [V]
-        n_0 = self.n_init.value
-        m_0 = self.m_init.value
-        h_0 = self.h_init.value
 
         # ATP pump
         I_hat = 0.449 # Maximum pump strength [A/m^2]
@@ -586,6 +629,12 @@ class MixedDimensionalProblem(ABC):
         beta_m  = lambda V_m: 4.e3 * np.exp(-V_m/18.)
         alpha_h = lambda V_m: 0.07e3 * np.exp(-V_m/20.)
         beta_h  = lambda V_m: 1.e3 / (np.exp((30. - V_m)/10.) + 1)
+
+        # Gating variables
+        phi_m_0_gating = (phi_m_0 - phi_rest)*1e3 # Convert to mV 
+        n_0 = alpha_n(phi_m_0_gating) / (alpha_n(phi_m_0_gating) + beta_n(phi_m_0_gating))
+        m_0 = alpha_m(phi_m_0_gating) / (alpha_m(phi_m_0_gating) + beta_m(phi_m_0_gating))
+        h_0 = alpha_h(phi_m_0_gating) / (alpha_h(phi_m_0_gating) + beta_h(phi_m_0_gating))
 
         # Nernst potential
         E = lambda z_k, c_ki, c_ke: R*T/(z_k*F) * np.log(c_ke/c_ki)
@@ -666,7 +715,7 @@ class MixedDimensionalProblem(ABC):
                 
                     if t > 0:
                         init = sol_[-1]
-
+                    # Integrate ODE system
                     sol = odeint(lambda x, t: two_compartment_rhs(x, t, args=init[:-3]), init, [t, t+dt])
 
                     if np.allclose(sol[0], sol[-1], rtol=1e-12):
@@ -765,7 +814,7 @@ class MixedDimensionalProblem(ABC):
                                         ),
                                         op=MPI.SUM
                                         ) # [m^3]
-
+            
             # Membrane potential initial conditions
             phi_m_0_n = phi_m_0 # Neuronal
             phi_m_0_g = self.phi_m_g_init.value # Glial [V]
@@ -875,6 +924,7 @@ class MixedDimensionalProblem(ABC):
                     if t > 0:
                         init = sol_[-1]
 
+                    # Integrate ODE system
                     sol = odeint(lambda x, t: three_compartment_rhs(x, t, args=init[:-3]), init, [t, t+dt])
 
                     if np.allclose(sol[0], sol[-1], rtol=1e-12):
@@ -958,7 +1008,7 @@ class MixedDimensionalProblem(ABC):
             self.m_init.value = m_init_val
             self.h_init.value = h_init_val
 
-        print("Steady-state initial conditions determined and written to file.")
+        print("Steady-state initial conditions determined by solving ODE system.")
     
     @abstractmethod
     def init(self):

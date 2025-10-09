@@ -2,12 +2,12 @@
 problem_type : "KNP-EMI"
 
 # Input and output directories
-output_dir : './output/mms/'
+input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/'
+output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/mms/'
 
 # Numerical parameters 
 dt : 1.0e-5 # Timestep size 
 time_steps : 1 # Number of timesteps
-T  : 1.0e-5 # Simulation end time
 
 # Problem constants (in consistent units)
 physical_constants:
@@ -24,5 +24,10 @@ facet_tag_file : "geometries/square64_facets.xdmf"
 
 ics_tags  : [1] # Intracellular space cell tags
 ecs_tags  : [2] # Extracellular space cell tags
-boundary_tags : [3] # Boundary facet tags
-membrane_tags : [4] # Membrane (interface) facet tags
+boundary_tags : [8] # Boundary facet tags
+membrane_tags : [1, 2, 3, 4] # Membrane (interface) facet tags
+stimulus_tags : []
+
+MMS_test:
+  N_mesh : 128
+  dim : 3

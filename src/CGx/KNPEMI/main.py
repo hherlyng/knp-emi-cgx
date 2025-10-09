@@ -24,9 +24,7 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 	problem = ProblemKNPEMI(yaml_file)
 
 	# Set ionic models
-	if problem.MMS_test:
-		ionic_models = [PassiveModel(problem, tags=(1, 2, 3, 4))]
-	elif yaml_file=="square_config.yaml":
+	if yaml_file=="square_config.yaml":
 		HH = HodgkinHuxley(problem)
 		ATP = ATPPump(problem)
 		NeuronalCT = NeuronalCotransporters(problem)
@@ -40,8 +38,8 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 
 		ionic_models = [HH, ATP, NeuronalCT, GlialCT, KirNa]
 
-	problem.init_ionic_model(ionic_models)
 	problem.set_initial_conditions()
+	problem.init_ionic_model(ionic_models)
 
 	tic = time.perf_counter()
 	problem.setup_variational_form()
@@ -53,7 +51,7 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 	solver = SolverKNPEMI(problem,
 						  view_input=view_ksp,
 						  save_xdmfs=True,
-						  use_direct_solver=False,
+						  use_direct_solver=True,
 						  save_pngs=True,
 						  save_cpoints=True,
 						  save_mat=False

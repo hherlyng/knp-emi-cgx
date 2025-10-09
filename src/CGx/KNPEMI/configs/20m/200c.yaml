@@ -7,7 +7,7 @@ output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/20m/200c/'
 
 # Numerical parameters 
 dt : 0.0000125 # Timestep size 
-time_steps : 200 # Number of timesteps
+time_steps : 50 # Number of timesteps
 #T  : 50 # Simulation end time
 
 # Problem constants (in consistent units)
@@ -35,4 +35,32 @@ point_evaluation :
   ics_point : [3805, 2316, 3535]
   ecs_point : [3595, 7263, 13844]
 
-stimulus_region : [4450, 4550]
+stimulus_region : 
+  range : [4450, 4550]
+  direction : "x"
+
+point_evaluation :
+  ics_points : [
+    [4468, 12218, 7400],
+    [5181, 12218, 7798]
+]
+  ecs_points : [
+    [4227, 12025, 7816],
+    [17186, 12025, 4877]
+]
+
+initial_conditions :
+  phi_m_n : -0.066939791060818
+  phi_m_g : -0.079875539485060
+  Na_i_n: 10.431084680709397
+  Na_i_g: 12.013860783665171
+  Na_e: 143.753404359751670
+  K_i_n: 136.837718650921090
+  K_i_g: 162.020104812561357
+  K_e: 5.869736058766616
+  Cl_i_n: 7.765709927109350
+  Cl_i_g: 5.950968724185778
+  Cl_e: 125.354264964667266
+  n : 0.288415859664900
+  m : 0.042006575552607
+  h : 0.661933751713038

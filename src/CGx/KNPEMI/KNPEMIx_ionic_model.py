@@ -290,6 +290,8 @@ class HodgkinHuxley(IonicModel):
         p.m.x.array[:] = p.m_init.value
         p.h.x.array[:] = p.h_init.value
 
+        PETSc.Sys.Print("Initial n, m, h:", p.n_init.value, p.m_init.value, p.h_init.value)
+
         # Set modulo time variable
         p.t_mod = dfx.fem.Constant(p.mesh, 0.0)
 
