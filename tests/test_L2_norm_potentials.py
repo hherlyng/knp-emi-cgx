@@ -18,8 +18,8 @@ def test_L2_norm_of_potentials():
 		HH = HodgkinHuxley(problem_square)
 		ionic_models = [HH]
 		problem_square.init_ionic_model(ionic_models)
-                problem_square.set_initial_conditions()
-                problem_square.setup_variational_form()
+		problem_square.set_initial_conditions()
+		problem_square.setup_variational_form()
 
 		# Create solver
 		solver_square = SolverKNPEMI(problem_square, view_input=False)
@@ -33,7 +33,7 @@ def test_L2_norm_of_potentials():
 		phi_i_L2_local  = dfx.fem.assemble_scalar(dfx.fem.form(ufl.inner(phi_i, phi_i) * problem_square.dx(tags['intra'])))
 		phi_i_L2_global = solver_square.comm.allreduce(phi_i_L2_local, op=MPI.SUM)
 		phi_i_L2_global = np.sqrt(phi_i_L2_global)
-		
+
 		phi_e_L2_local  = dfx.fem.assemble_scalar(dfx.fem.form(ufl.inner(phi_e, phi_e) * problem_square.dx(tags['extra'])))
 		phi_e_L2_global = solver_square.comm.allreduce(phi_e_L2_local, op=MPI.SUM)
 		phi_e_L2_global = np.sqrt(phi_e_L2_global)
@@ -49,7 +49,7 @@ def test_L2_norm_of_potentials():
 		print("Calculated: ", phi_e_L2_global)
 		percentage_error_i = abs(phi_i_L2_global - saved_L2_phi_i)/saved_L2_phi_i*100
 		percentage_error_e = abs(phi_e_L2_global - saved_L2_phi_e)/saved_L2_phi_e*100
-		
+
 		assert all([percentage_error_i < 1, percentage_error_e < 1])
 
 if __name__=='__main__':
