@@ -743,7 +743,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         self.g_Cl_leak   = Constant(self.mesh, dfx.default_scalar_type(0.25)) # Cl leak conductivity (S/m**2) (Constant)
         self.g_Cl_leak_g = Constant(self.mesh, dfx.default_scalar_type(0.50)) # Cl leak conductivity (S/m**2) (Constant)
         self.a_syn     = Constant(self.mesh, dfx.default_scalar_type(1e-3)) # Synaptic time constant (s)
-        self.g_syn_bar = Constant(self.mesh, dfx.default_scalar_type(300)) # Synaptic conductivity (S/m**2)
+        self.g_syn_bar = Constant(self.mesh, dfx.default_scalar_type(20)) # Synaptic conductivity (S/m**2)
         self.D_Na = Constant(self.mesh, dfx.default_scalar_type(1.33e-9)) # Diffusion coefficients Na (m/s^2) (Constant)
         self.D_K  = Constant(self.mesh, dfx.default_scalar_type(1.96e-9)) # Diffusion coefficients K (m/s^2) (Constant)
         self.D_Cl = Constant(self.mesh, dfx.default_scalar_type(2.03e-9)) # diffusion coefficients Cl (m/s^2) (Constant)

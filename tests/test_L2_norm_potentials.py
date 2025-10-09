@@ -40,13 +40,14 @@ def test_L2_norm_of_potentials():
 
 		# Calculate the percentage errors and assert that they're smaller than 1%, when
 		# comparing the calculated L2 norms of the potentials with previously saved values.
-		saved_L2_phi_i = 1.260917622218289e-10
-		saved_L2_phi_e = 0.04110939137294667
+		saved_L2_phi_i = 1.9331311559715952e-11
+		saved_L2_phi_e = 0.020961705521519262
 
-		print("Saved: ", saved_L2_phi_i)
-		print("Calculated: ", phi_i_L2_global)
-		print("Saved: ", saved_L2_phi_e)
-		print("Calculated: ", phi_e_L2_global)
+		print("Saved phi_i:\t", saved_L2_phi_i)
+		print("Calculated phi_i:\t", phi_i_L2_global)
+		print("Saved phi_e:\t", saved_L2_phi_e)
+		print("Calculated phi_e:\t", phi_e_L2_global)
+
 		percentage_error_i = abs(phi_i_L2_global - saved_L2_phi_i)/saved_L2_phi_i*100
 		percentage_error_e = abs(phi_e_L2_global - saved_L2_phi_e)/saved_L2_phi_e*100
 
