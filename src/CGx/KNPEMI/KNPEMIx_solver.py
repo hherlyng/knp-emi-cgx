@@ -17,11 +17,17 @@ from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
 pprint = print # Allows flushing from arbitrary rank
 print = PETSc.Sys.Print # Automatically flushes output to stream in parallel
 
-class SolverKNPEMI(object):
+class SolverKNPEMI:
 
-    def __init__(self, problem: ProblemKNPEMI, view_input, use_direct_solver: bool=True,
-                 save_xdmfs: bool=False, save_pngs: bool=False, save_cpoints: bool=False,
-                 save_dat: bool=False, save_mat: bool=False):
+    def __init__(self,
+                problem: ProblemKNPEMI,
+                view_input: bool,
+                use_direct_solver: bool=True,
+                save_xdmfs: bool=False,
+                save_pngs: bool=False,
+                save_cpoints: bool=False,
+                save_dat: bool=False,
+                save_mat: bool=False):
         """ Constructor. """
 
         self.problem    = problem                 # The KNP-EMI problem
@@ -194,6 +200,9 @@ class SolverKNPEMI(object):
     def create_and_set_nullspace(self):
         """ Create null space for the electric potential in the case that the potentials are 
         only determined up to a constant for the pure Neumann boundary conditions case. """
+
+        print("Creating and setting null space ...")
+
         p = self.problem # For ease of notation
 
         ns_vec = multiphenicsx.fem.petsc.create_vector_block(p.L, restriction=p.restriction)
@@ -214,10 +223,10 @@ class SolverKNPEMI(object):
                 idx += 1
         ns_vec.normalize()
         
-        # Create the PETSc nullspace vector and check that it is a valid nullspace of A
+        # Create the PETSc null space vector and check that it is a valid nullspace of A
         nullspace = PETSc.NullSpace().create(vectors=[ns_vec], comm=self.comm)
         assert nullspace.test(self.A) # Check that the nullspace is created correctly
-        
+
         # Set the nullspace
         if self.direct_solver:
             self.A.setNullSpace(nullspace)
@@ -274,6 +283,13 @@ class SolverKNPEMI(object):
             tic = time.perf_counter()
             self.assemble()
 
+            # Time the assembly
+            assembly_time     = time.perf_counter() - tic
+            max_assembly_time = self.comm.allreduce(assembly_time, op=MPI.MAX)
+            self.tot_assembly_time += max_assembly_time
+            self.assembly_time.append(max_assembly_time)
+            print(f"Time dependent assembly in {max_assembly_time:0.4f} seconds")
+
             if self.save_mat:
                 if self.problem.MMS_test:
                     print("Saving Amat_MMS ...")
@@ -283,22 +299,9 @@ class SolverKNPEMI(object):
                     dump(self.A, 'output/Amat')
                 exit()
 
-            # Time the assembly
-            assembly_time     = time.perf_counter() - tic
-            max_assembly_time = self.comm.allreduce(assembly_time, op=MPI.MAX)
-            self.tot_assembly_time += max_assembly_time
-            self.assembly_time.append(max_assembly_time)
-            print(f"Time dependent assembly in {max_assembly_time:0.4f} seconds")
-
             # Perform initial timestep setup
             if i==0:
                 tic = time.perf_counter()
-
-                # if not p.dirichlet_bcs:
-                #     # Handle the nullspace of the electric potentials in the case of 
-                #     # pure Neumann boundary conditions
-                #     self.create_and_set_nullspace()
-
                 # Finalize configuration of PETSc structures
                 if self.direct_solver: 
                     self.ksp.setOperators(self.A)
@@ -309,6 +312,11 @@ class SolverKNPEMI(object):
                 else: 
                     # Set operators of iterative solver
                     self.ksp.setOperators(self.A, self.P_) if self.use_P_mat else self.ksp.setOperators(self.A)
+
+                if not p.dirichlet_bcs:
+                    # Handle the nullspace of the electric potentials in the case of 
+                    # pure Neumann boundary conditions
+                    self.create_and_set_nullspace()
 
                 # Add contribution to setup time
                 setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
@@ -438,13 +446,12 @@ class SolverKNPEMI(object):
             self.h_t = []
             self.out_gate_string = self.out_file_prefix + 'gating.png'
 
-        if self.comm.rank==p.owner_rank_membrane_vertex:
-            self.v_t.append(1000 * p.phi_m_prev.eval(x=p.min_point, cells=p.membrane_cell)) # Converted to mV
+        self.v_t.append(1000 * scifem.evaluate_function(p.phi_m_prev, p.png_point)) # Converted to mV
 
-            if hasattr(p, 'n'):
-                self.n_t.append(p.n.eval(x=p.min_point, cells=p.membrane_cell))
-                self.m_t.append(p.m.eval(x=p.min_point, cells=p.membrane_cell))
-                self.h_t.append(p.h.eval(x=p.min_point, cells=p.membrane_cell))
+        if hasattr(p, 'n'):
+            self.n_t.append(scifem.evaluate_function(p.n, p.png_point))
+            self.m_t.append(scifem.evaluate_function(p.m, p.png_point))
+            self.h_t.append(scifem.evaluate_function(p.h, p.png_point))
 
             
     def save_png(self):
@@ -453,13 +460,12 @@ class SolverKNPEMI(object):
 
         p = self.problem
 
-        if self.comm.rank==p.owner_rank_membrane_vertex:
-            self.v_t.append(1000 * p.phi_m_prev.eval(x=p.min_point, cells=p.membrane_cell)) # Converted to mV
-            
-            if hasattr(p, 'n'):
-                self.n_t.append(p.n.eval(x=p.min_point, cells=p.membrane_cell))
-                self.m_t.append(p.m.eval(x=p.min_point, cells=p.membrane_cell))
-                self.h_t.append(p.h.eval(x=p.min_point, cells=p.membrane_cell))
+        self.v_t.append(1000 * scifem.evaluate_function(p.phi_m_prev, p.png_point)) # Converted to mV
+        
+        if hasattr(p, 'n'):
+            self.n_t.append(scifem.evaluate_function(p.n, p.png_point))
+            self.m_t.append(scifem.evaluate_function(p.m, p.png_point))
+            self.h_t.append(scifem.evaluate_function(p.h, p.png_point))
 
     def init_point_data(self):
         
@@ -467,11 +473,13 @@ class SolverKNPEMI(object):
         
         self.ics_point_values = np.zeros((self.time_steps+1, p.num_variables, len(p.ics_points)))
         self.ecs_point_values = np.zeros((self.time_steps+1, p.num_variables, len(p.ecs_points)))
+        self.gamma_point_values = np.zeros((self.time_steps+1, len(p.gamma_points)))
 
         for j in range(p.num_variables):
             self.ics_point_values[0, j] = scifem.evaluate_function(p.u_p[0][j], p.ics_points).T
             self.ecs_point_values[0, j] = scifem.evaluate_function(p.u_p[1][j], p.ecs_points).T
-                
+
+        self.gamma_point_values[0] = scifem.evaluate_function(p.phi_m_prev, p.gamma_points).T
 
     def save_point_data(self, i: int):
         """ Save function values evaluated in two points (one in ICS and one in the ECS)
@@ -482,7 +490,9 @@ class SolverKNPEMI(object):
         for j in range(p.num_variables):
             self.ics_point_values[i, j] = scifem.evaluate_function(p.u_p[0][j], p.ics_points).T
             self.ecs_point_values[i, j] = scifem.evaluate_function(p.u_p[1][j], p.ecs_points).T
-    
+
+        self.gamma_point_values[i] = scifem.evaluate_function(p.phi_m_prev, p.gamma_points).T
+
     def print_figures(self):
         """ Output .png plot of:
         - the membrane potential
@@ -497,70 +507,103 @@ class SolverKNPEMI(object):
         # Aliases
         dt = float(self.problem.dt.value)
         time_steps = self.time_steps
+        times = np.linspace(0, 1000 * time_steps * dt, time_steps + 1)
 
-        if self.comm.rank==self.problem.owner_rank_membrane_vertex:
+        # Save plot of membrane potential
+        fig, ax = plt.subplots()    
+        ax.plot(times, np.array(self.v_t).flatten())
+        ax.set_xlabel('Time [ms]')
+        ax.set_ylabel('Membrane potential [mV]')
+        fig.savefig(self.out_v_string)
 
-            # Save plot of membrane potential
-            plt.figure(0)        
-            plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.v_t)
-            plt.xlabel('Time (ms)')
-            plt.ylabel('Membrane potential (mV)')
-            plt.savefig(self.out_v_string)
+        # save plot of gating variables
+        if hasattr(self.problem, 'n'):
+            fig, ax = plt.subplots()
+            ax.plot(times, np.array(self.n_t).flatten(), label='n')
+            ax.plot(times, np.array(self.m_t).flatten(), label='m')
+            ax.plot(times, np.array(self.h_t).flatten(), label='h')
+            ax.set_xlabel('Time [ms]')
+            ax.legend()
+            fig.savefig(self.out_gate_string)
 
-            # save plot of gating variables
-            if hasattr(self.problem, 'n'):
-                plt.figure(1)
-                plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.n_t, label='n')
-                plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.m_t, label='m')
-                plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.h_t, label='h')
-                plt.legend()
-                plt.xlabel('Time (ms)')
-                plt.savefig(self.out_gate_string)
+        if hasattr(self.problem, 'gamma_points'):
+            # Plot membrane potential in points on gamma
+            fig, ax = plt.subplots()
+            ax.plot(times, self.gamma_point_values[:, :], color='green')
+
+            ax.set_xlabel('Time [ms]')
+            ax.set_ylabel('Membrane potential [mV]', color='green')
+            ax.legend()
+
+            fig.savefig(self.out_file_prefix + 'point_evaluation_phi_m.png')
         
         if self.problem.point_evaluation:
-            plt.figure(4)
-            plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.ics_point_values[:, 0, :], label='ICS Na+')
-            ax = plt.twinx()
-            ax.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.ecs_point_values[:, 0, :], '--', label='ECS Na+')
-            plt.xlabel('Time (ms)')
-            plt.ylabel('Concentration (mM)')
-            plt.legend()
-            plt.savefig(self.out_file_prefix + 'point_evaluation_Na.png')
 
-            plt.figure(5)
-            plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.ics_point_values[:, 1, :], label='ICS K+')
-            plt.xlabel('Time (ms)')
-            plt.ylabel('Concentration (mM)')
-            ax = plt.twinx()
-            ax.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.ecs_point_values[:, 1, :], '--', label='ECS K+')
-            plt.legend()
-            plt.savefig(self.out_file_prefix + 'point_evaluation_K.png')
-            
-            plt.figure(6)
-            plt.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.ics_point_values[:, 2, :], label='ICS Cl-')
-            plt.xlabel('Time (ms)')
-            plt.ylabel('Concentration (mM)')
-            ax = plt.twinx()
-            ax.plot(np.linspace(0, 1000*time_steps*dt, time_steps + 1), self.ecs_point_values[:, 2, :], '--', label='ECS Cl-')
-            plt.legend()
-            plt.savefig(self.out_file_prefix + 'point_evaluation_Cl.png')
+            # Sodium (Na+)
+            fig, ax1 = plt.subplots()
+            ax2 = ax1.twinx()
+            ax1.plot(times, self.ics_point_values[:, 0, :], label='ICS Na+', color='blue')
+            ax2.plot(times, self.ecs_point_values[:, 0, :], '--', label='ECS Na+', color='red')
+
+            ax1.set_xlabel('Time [ms]')
+            ax1.set_ylabel('ICS Na+ Concentration [mM’', color='blue')
+            ax2.set_ylabel('ECS Na+ Concentration [mM]', color='red')
+
+            # Combine legends from both axes
+            lines_1, labels_1 = ax1.get_legend_handles_labels()
+            lines_2, labels_2 = ax2.get_legend_handles_labels()
+            fig.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper right')
+
+            fig.savefig(self.out_file_prefix + 'point_evaluation_Na.png')
+
+            # Potassium (K+)
+            fig, ax1 = plt.subplots()
+            ax2 = ax1.twinx()
+            ax1.plot(times, self.ics_point_values[:, 1, :], label='ICS K+', color='green')
+            ax2.plot(times, self.ecs_point_values[:, 1, :], '--', label='ECS K+', color='orange')
+
+            ax1.set_xlabel('Time [ms]')
+            ax1.set_ylabel('ICS K+ Concentration [mM]', color='green')
+            ax2.set_ylabel('ECS K+ Concentration [mM]', color='orange')
+
+            lines_1, labels_1 = ax1.get_legend_handles_labels()
+            lines_2, labels_2 = ax2.get_legend_handles_labels()
+            fig.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper right')
+
+            fig.savefig(self.out_file_prefix + 'point_evaluation_K.png')
+
+            # Chloride (Cl-)
+            fig, ax1 = plt.subplots()
+            ax2 = ax1.twinx()
+            ax1.plot(times, self.ics_point_values[:, 2, :], label='ICS Cl-', color='purple')
+            ax2.plot(times, self.ecs_point_values[:, 2, :], '--', label='ECS Cl-', color='brown')
+
+            ax1.set_xlabel('Time [ms]')
+            ax1.set_ylabel('ICS Cl- Concentration [mM]', color='purple')
+            ax2.set_ylabel('ECS Cl- Concentration [mM]', color='brown')
+
+            lines_1, labels_1 = ax1.get_legend_handles_labels()
+            lines_2, labels_2 = ax2.get_legend_handles_labels()
+            fig.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper right')
+
+            fig.savefig(self.out_file_prefix + 'point_evaluation_Cl.png')
 
         # Save iteration history
         if not self.direct_solver:
-            plt.figure(2)
-            plt.plot(self.iterations)
-            plt.xlabel('Time step')
-            plt.ylabel('Number of iterations')
-            plt.savefig(self.out_file_prefix + 'iterations.png')
+            fig, ax = plt.subplots()
+            ax.plot(self.iterations)
+            ax.set_xlabel('Timestep')
+            ax.set_ylabel('Number of iterations')
+            fig.savefig(self.out_file_prefix + 'iterations.png')
 
         # save runtime data
-        plt.figure(3)
-        plt.plot(self.assembly_time, label='assembly')
-        plt.plot(self.solve_time, label='solve')
-        plt.legend()
-        plt.xlabel('Time step')
-        plt.ylabel('Time (s)')
-        plt.savefig(self.out_file_prefix + 'timings.png')
+        fig, ax = plt.subplots()
+        ax.plot(self.assembly_time, label='assembly')
+        ax.plot(self.solve_time, label='solve')
+        ax.set_xlabel('Timestep')
+        ax.set_ylabel('Time [s]')
+        ax.legend()
+        fig.savefig(self.out_file_prefix + 'timings.png')
 
     def init_xdmf_savefile(self):
         """ Initialize .xdmf files for writing output. The mesh with meshtags is written to file,
@@ -650,8 +693,11 @@ class SolverKNPEMI(object):
     def save_data(self):
         """ Save numpy data. """
 
-        if self.comm.rank==self.problem.owner_rank_membrane_vertex:
-            np.save(self.problem.output_dir+"phi_m.npy", np.array(self.v_t))
+        
+        np.save(self.problem.output_dir+"phi_m.npy", np.array(self.v_t))
+        
+        if hasattr(self.problem, 'gamma_points'):
+            np.save(self.problem.output_dir+"gamma_point_values.npy", self.gamma_point_values)
 
         if self.problem.point_evaluation:
             np.save(self.problem.output_dir+"ics_point_values.npy", self.ics_point_values)
@@ -660,7 +706,7 @@ class SolverKNPEMI(object):
         return
 
     # Default iterative solver parameters
-    ksp_rtol           = 1e-6
+    ksp_rtol           = 1e-8
     ksp_max_it         = 1000	
     ksp_type           = 'gmres' # cg
     pc_type            = 'hypre' # lu, fieldsplit, hypre

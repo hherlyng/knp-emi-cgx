@@ -9,7 +9,7 @@ from mpi4py   import MPI
 from petsc4py import PETSc
 
 # Kir-function used in ionic pump (Halnes et al. 2013(?))
-def f_Kir(K_e_init, K_e, E_K_init, delta_phi, phi_m):
+def f_Kir(K_e_init, K_e, E_K_init, delta_phi, phi_m) -> ufl.Coefficient:
 
     A = 1 + ufl.exp(0.433)
     B = 1 + ufl.exp(-(0.1186 + E_K_init) / 0.0441)
@@ -52,7 +52,7 @@ class IonicModel(ABC):
 # Passive membrane model: I_ch = phi_M
 class PassiveModel(IonicModel):
     """ Ionic current is the membrane potential."""
-    def __init__(self, KNPEMIx_problem, tags=None):
+    def __init__(self, KNPEMIx_problem, tags: tuple=None):
         super().__init__(KNPEMIx_problem, tags)
 
     def _init(self):
@@ -61,7 +61,7 @@ class PassiveModel(IonicModel):
     def __str__(self):
         return f"Passive"
 
-    def _eval(self, ion_idx):	
+    def _eval(self, ion_idx: int) -> ufl.Coefficient:	
         I_ch = self.problem.phi_m_prev	
         return I_ch
 
@@ -77,7 +77,7 @@ class KirNaKPumpModel(IonicModel):
     # -k_dec * ([K]e − [K]e_0) both for K and Na
     use_decay_currents = False
 
-    def __init__(self, KNPEMIx_problem, tags=None):
+    def __init__(self, KNPEMIx_problem, tags: tuple=None):
 
         super().__init__(KNPEMIx_problem, tags)
 
@@ -106,8 +106,8 @@ class KirNaKPumpModel(IonicModel):
                     * (1.0 / (1.0 + self.P_K_e/ue_p[1]))
                     * self.rho_pump
                         )
-        
-    def _eval(self, ion_idx):
+
+    def _eval(self, ion_idx: int) -> ufl.Coefficient:
 
         # Aliases		
         p = self.problem
@@ -148,7 +148,7 @@ class KirNaKPumpModel(IonicModel):
 
 class GlialCotransporters(IonicModel):
 
-    def __init__(self, KNPEMIx_problem, tags=None):
+    def __init__(self, KNPEMIx_problem, tags: tuple=None):
          
          super().__init__(KNPEMIx_problem, tags)
 
@@ -166,7 +166,7 @@ class GlialCotransporters(IonicModel):
         g_NKCC1 = 2e-2 # [S / m^2]
         self.S_NKCC1 = dfx.fem.Constant(p.mesh, g_NKCC1 * p.psi.value)
 
-    def _eval(self, ion_idx: int):
+    def _eval(self, ion_idx: int) -> ufl.Coefficient:
 
         p = self.problem
         ion   = p.ion_list[ion_idx]
@@ -189,7 +189,7 @@ class GlialCotransporters(IonicModel):
 
 class NeuronalCotransporters(IonicModel):
 
-    def __init__(self, KNPEMIx_problem, tags=None):
+    def __init__(self, KNPEMIx_problem, tags: tuple=None):
          
          super().__init__(KNPEMIx_problem, tags)
 
@@ -204,7 +204,7 @@ class NeuronalCotransporters(IonicModel):
         self.S_KCC2 = dfx.fem.Constant(mesh, 0.0034)
         self.S_NKCC1 = dfx.fem.Constant(mesh, 0.023)
 
-    def _eval(self, ion_idx: int):
+    def _eval(self, ion_idx: int) -> ufl.Coefficient:
 
         p = self.problem
         ion   = p.ion_list[ion_idx]
@@ -229,7 +229,7 @@ class NeuronalCotransporters(IonicModel):
 
 class ATPPump(IonicModel):
 
-    def __init__(self, KNPEMIx_problem, tags=None):
+    def __init__(self, KNPEMIx_problem, tags: tuple=None):
 
         super().__init__(KNPEMIx_problem, tags)
 
@@ -244,7 +244,7 @@ class ATPPump(IonicModel):
         self.m_K = dfx.fem.Constant(mesh, dfx.default_scalar_type(2.0)) # ECS K+ pump threshold [mM]
         self.m_Na = dfx.fem.Constant(mesh, dfx.default_scalar_type(7.7)) # ICS Na+ pump threshold [mM]
 
-    def _eval(self, ion_idx: int):
+    def _eval(self, ion_idx: int) -> ufl.Coefficient:
 
         p = self.problem
         ion   = p.ion_list[ion_idx]
@@ -265,14 +265,14 @@ class ATPPump(IonicModel):
 # Hodgkin–Huxley 
 class HodgkinHuxley(IonicModel):
 
-    def __init__(self, KNPEMIx_problem, tags=None,
+    def __init__(self, KNPEMIx_problem, tags: tuple=None,
                  use_Rush_Lar: bool=True, time_steps_ODE: int=25):
 
         super().__init__(KNPEMIx_problem, tags)
 
         self.use_Rush_Lar = use_Rush_Lar
         self.time_steps_ODE = time_steps_ODE
-        self.T = 10e-3 # Stimulus period
+        self.T = 1.0#20e-3 # Stimulus period [s]
 
     def __str__(self):
         return 'Hodgkin-Huxley'
@@ -295,7 +295,7 @@ class HodgkinHuxley(IonicModel):
         # Set modulo time variable
         p.t_mod = dfx.fem.Constant(p.mesh, 0.0)
 
-    def _eval(self, ion_idx: int):	
+    def _eval(self, ion_idx: int) -> ufl.Coefficient:
         """ Evaluate and return the passive channel current for ion number 'ion_idx'.
 
         Parameters
@@ -327,7 +327,10 @@ class HodgkinHuxley(IonicModel):
 
         return I_ch
 
-    def _add_stimulus(self, ion_idx: int, range: list | np.ndarray = None, dir: str = None):
+    def _add_stimulus(self,
+                    ion_idx: int,
+                    range: list | np.ndarray=None,
+                    dir: str=None) -> ufl.Coefficient:
         """ Evaluate and return the stimulus part of the channel current for ion number 'ion_idx'.
 
         Parameters

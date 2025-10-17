@@ -353,6 +353,140 @@ class MixedDimensionalProblem(ABC):
         print('# Membrane tags = ', len(gamma_tags))
         print('# Ionic models  = ', len(self.ionic_models), '\n')
 
+    def get_min_and_max_coordinates(self):
+        if self.mesh.geometry.dim==3:
+            xx, yy, zz = [self.mesh.geometry.x[:, i] for i in range(self.mesh.geometry.dim)]
+            z_min = self.comm.allreduce(zz.min(), op=MPI.MIN)
+            z_max = self.comm.allreduce(zz.max(), op=MPI.MAX)
+        else:
+            xx, yy = [self.mesh.geometry.x[:, i] for i in range(self.mesh.geometry.dim)]
+
+        x_min = self.comm.allreduce(xx.min(), op=MPI.MIN)
+        x_max = self.comm.allreduce(xx.max(), op=MPI.MAX)
+        y_min = self.comm.allreduce(yy.min(), op=MPI.MIN)
+        y_max = self.comm.allreduce(yy.max(), op=MPI.MAX)
+
+        return [x_min, x_max, y_min, y_max, z_min, z_max] if self.mesh.geometry.dim==3 else [x_min, x_max, y_min, y_max]
+    
+    def calculate_mesh_center(self):
+
+        if self.mesh.geometry.dim==3:
+            x_min, x_max, y_min, y_max, z_min, z_max = self.get_min_and_max_coordinates()
+            z_c = (z_max + z_min) / 2
+        else:
+            x_min, x_max, y_min, y_max = self.get_min_and_max_coordinates()
+            z_c = 0.0
+
+        x_c = (x_max + x_min) / 2
+        y_c = (y_max + y_min) / 2
+
+        return np.array([x_c, y_c, z_c])
+
+    def initialize_injection_site(self, delta: float):
+        def injection_site_marker_function(x, tol=1e-14):
+        
+            lower_bound = lambda x, i, bound: x[i] >= bound - tol
+            upper_bound = lambda x, i, bound: x[i] <= bound + tol
+
+            return (
+                lower_bound(x, 0, self.x_L)
+                & lower_bound(x, 1, self.y_L)
+                & lower_bound(x, 2, self.z_L)
+                & upper_bound(x, 0, self.x_U)
+                & upper_bound(x, 1, self.y_U)
+                & upper_bound(x, 2, self.z_U)
+            )
+
+        # Initialize ion injection region 
+        mesh_center = self.calculate_mesh_center()
+        x_c, y_c, z_c = mesh_center
+        
+        self.x_L = (x_c - delta) 
+        self.y_L = (y_c - delta)
+        self.z_L = (z_c - delta)
+        self.x_U = (x_c + delta)
+        self.y_U = (y_c + delta)
+        self.z_U = (z_c + delta)
+
+        # Find injection site cells and compute the
+        # volume of that region
+        self.injection_cells  = dfx.mesh.locate_entities(self.mesh,
+                                                        self.mesh.topology.dim,
+                                                        injection_site_marker_function)
+        ct = dfx.mesh.meshtags(self.mesh,
+                            self.mesh.topology.dim,
+                            self.injection_cells,
+                            np.full_like(self.injection_cells, 1, dtype=np.int32)
+                            )
+        self.dx_inj = ufl.Measure("dx", domain=self.mesh, subdomain_data=ct)
+        self.injection_volume = self.comm.allreduce(
+                                    dfx.fem.assemble_scalar(
+                                        dfx.fem.form(
+                                            1.0 * self.dx_inj(1)
+                                        )
+                                    ), 
+                                    op=MPI.SUM
+                                )
+
+    def find_membrane_point_closest_to_centroid(self, gamma_facets: list | np.ndarray, within_stimulus_region: bool=False):
+        """ Find the point on the largest cell's membrane
+        that lies closest to the center point of the mesh.
+        The membrane potential will be measured in this point.
+        """
+        # First, calculate the center point of the mesh
+        mesh_center = self.calculate_mesh_center()
+
+        # Get all membrane vertices of the given membrane facets
+        gamma_vertices = dfx.mesh.compute_incident_entities(
+                                                    self.mesh.topology,
+                                                    gamma_facets,
+                                                    self.mesh.topology.dim-1,
+                                                    0
+                                                )
+        num_local_gamma_vertices = self.mesh.topology.index_map(0).size_local
+        gamma_vertices = np.unique(gamma_vertices)[gamma_vertices < num_local_gamma_vertices]
+        gamma_coords = self.mesh.geometry.x[gamma_vertices]
+        if within_stimulus_region:
+            assert self.stimulus_region, print("No stimulus region defined.")
+            # Pick one point within the stimulus region
+            gamma_coords = gamma_coords[
+                                np.logical_and(
+                                    gamma_coords[:, self.stimulus_region_direction] > self.stimulus_region_range[0],
+                                    gamma_coords[:, self.stimulus_region_direction] < self.stimulus_region_range[1]
+                                )
+                            ]
+        
+        # Find the vertex that lies closest to the cell's centroid
+        distances = np.sum((gamma_coords - mesh_center)**2, axis=1)
+        if len(distances)>0:
+            # Rank has points to evaluate
+            argmin_local = np.argmin(distances)
+            min_dist_local = distances[argmin_local]
+            min_vertex = gamma_vertices[argmin_local]
+        else:
+            # Set distance to infinity and placeholder vertex
+            min_dist_local = np.inf
+            min_vertex = -1
+            
+        # Communicate to find the vertex with minimal distance
+        # from the center point
+        min_eval = (min_dist_local, self.comm.rank)
+        reduced = self.comm.allreduce(min_eval, op=MPI.MINLOC)
+        self.owner_rank_membrane_vertex = reduced[1]
+
+        if self.comm.rank==self.owner_rank_membrane_vertex:
+            # Set the measurement point
+            self.min_point = self.mesh.geometry.x[min_vertex]
+            pprint("Phi m measurement point: ", self.min_point, flush=True)
+
+            # Find the cell that contains the vertex and store
+            # the owning process
+            bb_tree = dfx.geometry.bb_tree(self.mesh, self.mesh.topology.dim)
+            cell_candidates = dfx.geometry.compute_collisions_points(bb_tree, self.min_point)
+            colliding_cells = dfx.geometry.compute_colliding_cells(self.mesh, cell_candidates, self.min_point)
+            cc = colliding_cells.links(0)[0]
+            self.membrane_cell = np.array(cc)
+
     def setup_domain(self):
 
         print("Reading mesh from XDMF file...")
@@ -453,130 +587,93 @@ class MixedDimensionalProblem(ABC):
             self.neuron_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.neuron_tags]))
             self.glia_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.glia_tags]))
 
-        #-------------------------------------------------#
-        # Find the point on the largest cell's membrane
-        # that lies closest to the center point of the mesh.
-        # The membrane potential will be measured in this point.
-        # First, calculate the center point of the mesh
-        if self.mesh.geometry.dim==3:
-            xx, yy, zz = [self.mesh.geometry.x[:, i] for i in range(self.mesh.geometry.dim)]
-            z_min = self.comm.allreduce(zz.min(), op=MPI.MIN)
-            z_max = self.comm.allreduce(zz.max(), op=MPI.MAX)
-            z_c = (z_max + z_min) / 2
-        else:
-            xx, yy = [self.mesh.geometry.x[:, i] for i in range(self.mesh.geometry.dim)]
-            z_c = 0.0
-        x_min = self.comm.allreduce(xx.min(), op=MPI.MIN)
-        x_max = self.comm.allreduce(xx.max(), op=MPI.MAX)
-        y_min = self.comm.allreduce(yy.min(), op=MPI.MIN)
-        y_max = self.comm.allreduce(yy.max(), op=MPI.MAX)
-
-        x_c = (x_max + x_min) / 2
-        y_c = (y_max + y_min) / 2
-        mesh_center = np.array([x_c, y_c, z_c])
-
-        # Find all membrane vertices of the cell
-        if not self.MMS_test:
-            gamma_facets = self.boundaries.find(self.stimulus_tags[0])
-        else:
+        #-------------------------------------------------#        
+        # Find vertices for evaluating the membrane potential
+        if self.MMS_test:
             gamma_facets = np.concatenate(([self.boundaries.find(tag) for tag in self.gamma_tags]))
-
-        # gamma_facets = self.boundaries.find(66) # Always take the tag of the largest cell #10m, 100c stimulated in 66
-        # gamma_facets = self.boundaries.find(3)
-        # gamma_facets = self.boundaries.find(4) # unit square
-        # gamma_facets = self.boundaries.find(89) # Always take the tag of the largest cell #20m, 100c stimulated in 88
-        # gamma_facets = self.boundaries.find(self.gamma_tags[-1]) # Always take the tag of the largest cell
-        gamma_vertices = dfx.mesh.compute_incident_entities(
-                                                        self.mesh.topology,
-                                                        gamma_facets,
-                                                        self.mesh.topology.dim-1,
-                                                        0
-        )
-        num_local_gamma_vertices = self.mesh.topology.index_map(0).size_local
-        gamma_vertices = np.unique(gamma_vertices)[gamma_vertices < num_local_gamma_vertices]
-        gamma_coords = self.mesh.geometry.x[gamma_vertices]
-        if self.stimulus_region:
-            gamma_coords = gamma_coords[
-                                np.logical_and(
-                                    gamma_coords[:, self.stimulus_region_direction] > self.stimulus_region_range[0],
-                                    gamma_coords[:, self.stimulus_region_direction] < self.stimulus_region_range[1]
-                                )
-                            ]
-        
-        # Find the vertex that lies closest to the cell's centroid
-        distances = np.sum((gamma_coords - mesh_center)**2, axis=1)
-        if len(distances)>0:
-            # Rank has points to evaluate
-            argmin_local = np.argmin(distances)
-            min_dist_local = distances[argmin_local]
-            min_vertex = gamma_vertices[argmin_local]
+            self.find_membrane_point_closest_to_centroid(gamma_facets)
         else:
-            # Set distance to infinity and placeholder vertex
-            min_dist_local = np.inf
-            min_vertex = -1
-        # Communicate to find the vertex with minimal distance
-        # from the center point
-        min_eval = (min_dist_local, self.comm.rank)
-        reduced = self.comm.allreduce(min_eval, op=MPI.MINLOC)
-        self.owner_rank_membrane_vertex = reduced[1]
-
-        if self.comm.rank==self.owner_rank_membrane_vertex:
-            # Set the measurement point
-            self.min_point = self.mesh.geometry.x[min_vertex]
-            pprint("Phi m measurement point: ", self.min_point, flush=True)
-
-            # Find the cell that contains the vertex and store
-            # the owning process
-            bb_tree = dfx.geometry.bb_tree(self.mesh, self.mesh.topology.dim)
-            cell_candidates = dfx.geometry.compute_collisions_points(bb_tree, self.min_point)
-            colliding_cells = dfx.geometry.compute_colliding_cells(self.mesh, cell_candidates, self.min_point)
-            cc = colliding_cells.links(0)[0]
-            self.membrane_cell = np.array(cc)
-            
-        if self.source_terms=="ion_injection":
-            def injection_site_marker_function(x, tol=1e-14):
-            
-                lower_bound = lambda x, i, bound: x[i] >= bound - tol
-                upper_bound = lambda x, i, bound: x[i] <= bound + tol
-
-                return (
-                    lower_bound(x, 0, self.x_L)
-                    & lower_bound(x, 1, self.y_L)
-                    & lower_bound(x, 2, self.z_L)
-                    & upper_bound(x, 0, self.x_U)
-                    & upper_bound(x, 1, self.y_U)
-                    & upper_bound(x, 2, self.z_U)
+            gamma_facets = self.boundaries.find(self.stimulus_tags[0])
+            if not self.stimulus_region:
+                self.find_membrane_point_closest_to_centroid(gamma_facets)
+            else:
+                gamma_vertices = dfx.mesh.compute_incident_entities(
+                                                                self.mesh.topology,
+                                                                gamma_facets,
+                                                                self.mesh.topology.dim-1,
+                                                                0
                 )
+                num_local_gamma_vertices = self.mesh.topology.index_map(0).size_local
+                gamma_vertices = np.unique(gamma_vertices)[gamma_vertices < num_local_gamma_vertices]
+                gamma_coords = self.mesh.geometry.x[gamma_vertices]
+                stim_dir = self.stimulus_region_direction
+                stim_range = self.stimulus_region_range
+                stimulus_region_mask = np.logical_and(
+                                        gamma_coords[:, stim_dir] > stim_range[0],
+                                        gamma_coords[:, stim_dir] < stim_range[1]
+                                    )
+                # Pick one point within the stimulus region
+                filtered_gamma_coords = gamma_coords[stimulus_region_mask]
+                
+                # Find point local to each process, set None if process
+                # does not own any vertices 
+                local_gamma_point = None
+                if len(filtered_gamma_coords)>0:
+                    local_gamma_point = filtered_gamma_coords[0]
 
-            # Initialize ion injection region 
+                # Gather all points and filter out Nones
+                global_gamma_points = self.comm.allgather(local_gamma_point)
+                global_gamma_points = [point for point in global_gamma_points if point is not None]
+
+                gamma_points = [global_gamma_points[0]]
+
+                # Find more points "downstream" of the stimulus
+                coords = self.mesh.geometry.x[:, stim_dir]
+
+                coord_min = self.comm.allreduce(coords.min(), op=MPI.MIN)
+                coord_max = self.comm.allreduce(coords.max(), op=MPI.MAX)
+
+                step = 5*(stim_range[1] - stim_range[0])
+                i = 1
+                lower_threshold = stim_range[0] + i*step
+                upper_threshold = stim_range[1] + i*step
+                while lower_threshold < coord_max:
+                    lower_threshold = stim_range[0] + i*step
+                    upper_threshold = stim_range[1] + i*step
+                    mask = np.logical_and(
+                                        gamma_coords[:, stim_dir] > lower_threshold,
+                                        gamma_coords[:, stim_dir] < upper_threshold
+                                    )
+                    # Filter membrane coordinates with the mask
+                    filtered_gamma_coords = gamma_coords[mask]
+                    
+                    # Find point local to each process, set None if process
+                    # does not own any vertices 
+                    local_gamma_point = None
+                    if len(filtered_gamma_coords)>0:
+                        local_gamma_point = filtered_gamma_coords[0]
+
+                    # Gather all points and filter out Nones
+                    global_gamma_points = self.comm.allgather(local_gamma_point)
+                    global_gamma_points = [point for point in global_gamma_points if point is not None]
+                    if len(global_gamma_points)>0:
+                        gamma_points.append(global_gamma_points[0])
+                    else:
+                        break # No more points found
+                    
+                    # Increment index
+                    i += 1
+                
+                # Convert to numpy array
+                self.gamma_points = np.array(gamma_points)
+                self.png_point = np.array([self.gamma_points[0]])
+                    
+        # Initialize injection site properties
+        if self.source_terms=="ion_injection":
+            x_min, x_max, _ = self.get_min_and_max_coordinates()
             domain_scale = x_max - x_min
             delta = domain_scale / 10
-            self.x_L = (x_c - delta) 
-            self.y_L = (y_c - delta)
-            self.z_L = (z_c - delta)
-            self.x_U = (x_c + delta)
-            self.y_U = (y_c + delta)
-            self.z_U = (z_c + delta)
-
-            # Find injection site cells and compute the
-            # volume of that region
-            self.injection_cells  = dfx.mesh.locate_entities(self.mesh,
-                                                            self.mesh.topology.dim,
-                                                            injection_site_marker_function)
-            ct = dfx.mesh.meshtags(self.mesh,
-                                self.mesh.topology.dim,
-                                self.injection_cells,
-                                np.full_like(self.injection_cells, 1, dtype=np.int32)
-                                )
-            self.dx_inj = ufl.Measure("dx", domain=self.mesh, subdomain_data=ct)
-            self.injection_volume = self.comm.allreduce(
-                                        dfx.fem.assemble_scalar(
-                                            dfx.fem.form(
-                                                1.0 * self.dx_inj(1)
-                                            )
-                                        ), 
-                                        op=MPI.SUM
-                                    )
+            self.initialize_injection_site(delta=delta)
 
     def find_steady_state_initial_conditions(self):
 

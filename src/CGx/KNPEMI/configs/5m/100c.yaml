@@ -3,11 +3,11 @@ problem_type : "KNP-EMI"
 
 # Input and output directorie
 input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/'
-output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/5m/100c/'
+output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/5m/100c/normal_frequency/'
 
 # Numerical parameters 
 dt : 0.00005 # Timestep size 
-time_steps : 50 # Number of timesteps
+time_steps : 1000 # Number of timesteps
 #T  : 50 # Simulation end time
 
 # Problem constants (in consistent units)
@@ -36,21 +36,21 @@ stimulus_region :
   direction : "x"
 
 point_evaluation :
-  ics_points : [[3805, 2316, 3535]]
-  ecs_points : [[1725, 3760, 3142]]
+  ics_points : [[1200, 3102, 3497], [1200, 3302, 3476]]
+  ecs_points : [[1200, 3113, 3607], [1200, 1334, 3934]]
 
 initial_conditions:
-  phi_m_n : -0.066974854917678
-  phi_m_g : -0.079884998826192
-  Na_i_n : 10.426017346829969
-  Na_i_g : 12.006477418142456
-  Na_e : 143.156710614484268
-  K_i_n : 137.035881471088913
-  K_i_g : 161.921539894082144
-  K_e : 5.864764144670947
-  Cl_i_n : 8.151081961101442
-  Cl_i_g : 6.254366938079339
-  Cl_e : 131.796829439939557
-  n : 0.287896308681118
-  m : 0.041829568603541
-  h : 0.663077548666231
+  phi_m_n : -0.0670443297126126
+  phi_m_g : -0.0799328878823035
+  Na_i_n : 10.345788923988843
+  Na_i_g : 11.495762660524452
+  Na_e : 104.7285488852373
+  K_i_n : 120.99824978184357
+  K_i_g : 144.85699310364114
+  K_e : 5.323349623858066
+  Cl_i_n : 6.943825811255652
+  Cl_i_g : 5.285142827368608
+  Cl_e : 111.4558332808939
+  n : 0.28686820508967165
+  m : 0.0414808688899272
+  h : 0.6653313038578419

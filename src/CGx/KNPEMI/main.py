@@ -50,10 +50,10 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 	# Create solver and solve
 	solver = SolverKNPEMI(problem,
 						  view_input=view_ksp,
-						  save_xdmfs=True,
+						  save_xdmfs=False,
 						  use_direct_solver=False,
 						  save_pngs=True,
-						  save_cpoints=True,
+						  save_cpoints=False,
 						  save_dat=True
 						)
 	solver.solve()
