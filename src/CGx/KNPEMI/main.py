@@ -28,7 +28,7 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 		HH = HodgkinHuxley(problem)
 		ATP = ATPPump(problem)
 		NeuronalCT = NeuronalCotransporters(problem)
-		ionic_models = [HH, ATP, NeuronalCT]
+		ionic_models = [NeuronalCT, HH, ATP]
 	else:
 		HH = HodgkinHuxley(problem, tags=problem.neuron_tags)
 		ATP = ATPPump(problem, tags=problem.neuron_tags)
@@ -39,7 +39,7 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 		ionic_models = [HH, ATP, NeuronalCT, GlialCT, KirNa]
 
 	problem.set_initial_conditions()
-	problem.init_ionic_model(ionic_models)
+	problem.init_ionic_models(ionic_models)
 
 	tic = time.perf_counter()
 	problem.setup_variational_form()

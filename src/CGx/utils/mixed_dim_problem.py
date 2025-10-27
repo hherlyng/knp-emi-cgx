@@ -11,8 +11,9 @@ from abc             import ABC, abstractmethod
 from mpi4py          import MPI
 from petsc4py        import PETSc
 from dolfinx.fem     import Constant
+from CGx.KNPEMI.KNPEMIx_ionic_model import HodgkinHuxley, IonicModel
 from CGx.utils.misc  import flatten_list, mark_boundaries_cube_MMS, mark_boundaries_square_MMS, mark_subdomains_cube, mark_subdomains_square, range_constructor
-from scipy.integrate import odeint
+from scipy.integrate import odeint, solve_ivp
 
 pprint = print
 print = PETSc.Sys.Print # Automatically flushes output to stream in parallel
@@ -113,14 +114,14 @@ class MixedDimensionalProblem(ABC):
             raise RuntimeError('Provide cell_tag_file and facet_tag_file fields in input file.')
 
         if 'dt' in config:
-            self.dt = config['dt']
+            self.dt = float(config['dt'])
         else:
             raise RuntimeError('Provide dt (timestep size) field in input file.')
         
         if 'time_steps' in config:
-            self.time_steps = config['time_steps']
+            self.time_steps = int(config['time_steps'])
         elif 'T' in config:
-            self.time_steps = int(config['T'] / config['dt'])
+            self.time_steps = int(float(config['T']) / float(config['dt']))
         else:
             raise RuntimeError('Provide final time T or time_steps field in input file.')
 
@@ -245,6 +246,19 @@ class MixedDimensionalProblem(ABC):
         else:
             self.point_evaluation = False
 
+        if 'stimulus' in config:
+            try:
+                self.g_syn_bar_val = config['stimulus']['g_syn_bar']
+                self.a_syn_val = config['stimulus']['a_syn']
+                self.T_stim_val = config['stimulus']['T_stim']
+            except:
+                raise RuntimeError('For stimulus, provide g_syn_bar, a_syn and T in input file.')
+        else:
+            # Default stimulus of a single action potential with strength 40 S/m^2,
+            self.g_syn_bar_val = 40.0
+            self.a_syn_val = 1e-3
+            self.T_stim_val = 1.0
+
         if 'stimulus_region' in config:
             self.stimulus_region = True
             self.stimulus_region_range = np.array(config['stimulus_region']['range'])*self.mesh_conversion_factor
@@ -322,33 +336,34 @@ class MixedDimensionalProblem(ABC):
         if isinstance(self.glia_tags, int) or isinstance(self.glia_tags, list): self.glia_tags = tuple(self.glia_tags,)
         if isinstance(self.neuron_tags, int) or isinstance(self.neuron_tags, list): self.neuron_tags = tuple(self.neuron_tags,)
 
-    def init_ionic_model(self, ionic_models):
+    def init_ionic_models(self, ionic_models: IonicModel | list[IonicModel]):
 
         self.ionic_models = ionic_models
         self.gating_variables = False # Initialize with no gating variables in the models
 
         # Initialize list
-        ionic_tags = []
+        ionic_tags = set()
     
         # Check that all intracellular space tags are present in some ionic model
         for model in self.ionic_models:
+
             model._init()
+
             for tag in model.tags:
-                if tag not in ionic_tags:
-                    ionic_tags.append(tag)
+                ionic_tags.add(tag)
+
             print("Added tags for ionic model: ", model.__str__())
 
-            if model.__str__()=="Hodgkin-Huxley":
+            if isinstance(model, HodgkinHuxley):
                 self.gating_variables = True
                 print("Gating variables flag set to True.")
         
-        ionic_tags = sorted(flatten_list(ionic_tags))
+        ionic_tags = sorted(ionic_tags)
         gamma_tags = sorted(flatten_list([self.gamma_tags]))
 
         if ionic_tags != gamma_tags and not self.MMS_test:
             raise RuntimeError('Mismatch between membrane tags and ionic models tags.' \
                 + f'\nIonic models tags: {ionic_tags}\nMembrane tags: {gamma_tags}')
-        
         
         print('# Membrane tags = ', len(gamma_tags))
         print('# Ionic models  = ', len(self.ionic_models), '\n')
@@ -443,6 +458,7 @@ class MixedDimensionalProblem(ABC):
                                                     self.mesh.topology.dim-1,
                                                     0
                                                 )
+        self.gamma_vertices = gamma_vertices
         num_local_gamma_vertices = self.mesh.topology.index_map(0).size_local
         gamma_vertices = np.unique(gamma_vertices)[gamma_vertices < num_local_gamma_vertices]
         gamma_coords = self.mesh.geometry.x[gamma_vertices]
@@ -476,16 +492,17 @@ class MixedDimensionalProblem(ABC):
 
         if self.comm.rank==self.owner_rank_membrane_vertex:
             # Set the measurement point
-            self.min_point = self.mesh.geometry.x[min_vertex]
-            pprint("Phi m measurement point: ", self.min_point, flush=True)
+            self.png_point = self.mesh.geometry.x[min_vertex]
+            pprint("Phi m measurement point: ", self.png_point, flush=True)
 
-            # Find the cell that contains the vertex and store
-            # the owning process
-            bb_tree = dfx.geometry.bb_tree(self.mesh, self.mesh.topology.dim)
-            cell_candidates = dfx.geometry.compute_collisions_points(bb_tree, self.min_point)
-            colliding_cells = dfx.geometry.compute_colliding_cells(self.mesh, cell_candidates, self.min_point)
-            cc = colliding_cells.links(0)[0]
-            self.membrane_cell = np.array(cc)
+            # Recast point array in a shape that enables point evaluation with scifem
+            if self.mesh.geometry.dim==2:
+                self.png_point = np.array([[self.png_point[0], self.png_point[1]]])
+            else:
+                self.png_point = np.array([self.png_point])
+        
+            # Broadcast to all processes
+            self.comm.bcast(self.png_point, root=self.owner_rank_membrane_vertex)
 
     def setup_domain(self):
 
@@ -568,8 +585,15 @@ class MixedDimensionalProblem(ABC):
                         self.boundaries.dim
                         )
             ordered_gamma_integration_data = gamma_integration_data.reshape(-1, 4).copy()
-            switch = self.subdomains.values[ordered_gamma_integration_data[:, 0]] \
-                    > self.subdomains.values[ordered_gamma_integration_data[:, 2]]
+            if np.all(self.intra_tags < self.extra_tag):
+                switch = self.subdomains.values[ordered_gamma_integration_data[:, 0]] \
+                       > self.subdomains.values[ordered_gamma_integration_data[:, 2]]
+            elif np.all(self.intra_tags > self.extra_tag):
+                switch = self.subdomains.values[ordered_gamma_integration_data[:, 0]] \
+                       < self.subdomains.values[ordered_gamma_integration_data[:, 2]]
+            else:
+                raise RuntimeError('Intracellular tags must be all smaller or all larger than extracellular tag.')
+            
             if True in switch:
                 ordered_gamma_integration_data[switch, :] = ordered_gamma_integration_data[switch][:, [2, 3, 0, 1]]
             subdomain_data_list.append((tag, ordered_gamma_integration_data.flatten()))
@@ -596,6 +620,7 @@ class MixedDimensionalProblem(ABC):
             gamma_facets = self.boundaries.find(self.stimulus_tags[0])
             if not self.stimulus_region:
                 self.find_membrane_point_closest_to_centroid(gamma_facets)
+                self.gamma_points = self.png_point
             else:
                 gamma_vertices = dfx.mesh.compute_incident_entities(
                                                                 self.mesh.topology,
@@ -696,7 +721,7 @@ class MixedDimensionalProblem(ABC):
         phi_rest = self.phi_rest.value  # Resting potential [V]
 
         # Define timespan for ODE solver
-        timestep = 1e-6 # [s]
+        timestep = 1e-7 # [s]
         max_time = 1
         num_timesteps = int(max_time / timestep)
         times = np.linspace(0, max_time, num_timesteps+1)
@@ -742,8 +767,8 @@ class MixedDimensionalProblem(ABC):
         I_ATP = lambda Na_i, K_e: I_hat / (par_1(K_e)**2 * par_2(Na_i)**3)
 
         # Cotransporter currents
-        I_KCC2 = lambda K_i, K_e, Cl_i, Cl_e: S_KCC2 * np.log((K_i * Cl_i)/(K_e*Cl_e))
-        I_NKCC1_n = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: S_NKCC1 * 1 / (1 + np.exp(16 - K_e)) * np.log((Na_i * K_i * Cl_i**2)/(Na_e * K_e * Cl_e**2))
+        I_KCC2 = lambda K_i, K_e, Cl_i, Cl_e: S_KCC2 * np.log((K_e * Cl_e)/(K_i*Cl_i))
+        I_NKCC1_n = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: S_NKCC1 * 1 / (1 + np.exp(16 - K_e)) * np.log((Na_e * K_e * Cl_e**2)/(Na_i * K_i * Cl_i**2))
 
 
         if self.glia_tags is None:
@@ -752,21 +777,24 @@ class MixedDimensionalProblem(ABC):
                                     dfx.fem.assemble_scalar(
                                         dfx.fem.form(1*self.dx(self.intra_tags))
                                         ),
-                                        op=MPI.SUM
-                                        ) # [m^3]
+                                    op=MPI.SUM
+                                ) # [m^3]
             vol_e = self.comm.allreduce(
                                     dfx.fem.assemble_scalar(
                                         dfx.fem.form(1*self.dx(self.extra_tag))
                                         ),
-                                        op=MPI.SUM
-                                        ) # [m^3]
+                                    op=MPI.SUM
+                                ) # [m^3]
             area_g = self.comm.allreduce(
                                     dfx.fem.assemble_scalar(
                                         dfx.fem.form(1*self.dS(self.gamma_tags))
                                         ),
-                                        op=MPI.SUM
-                                        ) # [m^2]
-
+                                    op=MPI.SUM
+                                ) # [m^2]
+            
+            if self.mesh.geometry.dim==2:
+                area_g *= 1e-6 # Convert from m to m^2 assuming 1 um depth
+            
             if self.comm.rank==0:
 
                 def two_compartment_rhs(x, t, args):
@@ -786,9 +814,22 @@ class MixedDimensionalProblem(ABC):
                     E_Cl = E(z_Cl, Cl_i_, Cl_e_)
 
                     # Calculate ionic currents
-                    I_Na = (g_Na_leak + g_Na_bar * m**3 * h) * (phi_m_ - E_Na) + 3*I_ATP(Na_i_, K_e_) + I_NKCC1_n(Na_i_, Na_e_, K_i_, K_e_, Cl_i_, Cl_e_)
-                    I_K = (g_K_leak + g_K_bar * n**4)* (phi_m_ - E_K) - 2*I_ATP(Na_i_, K_e_) + I_NKCC1_n(Na_i_, Na_e_, K_i_, K_e_, Cl_i_, Cl_e_) + I_KCC2(K_i_, K_e_, Cl_i_, Cl_e_)
-                    I_Cl = g_Cl_leak * (phi_m_ - E_Cl) - 2*I_NKCC1_n(Na_i_, Na_e_, K_i_, K_e_, Cl_i_, Cl_e_) - I_KCC2(K_i_, K_e_, Cl_i_, Cl_e_)
+                    I_Na = (
+                            (g_Na_leak + g_Na_bar * m**3 * h) * (phi_m_ - E_Na)
+                            + 3*I_ATP(Na_i_, K_e_)
+                            - I_NKCC1_n(Na_i_, Na_e_, K_i_, K_e_, Cl_i_, Cl_e_)
+                        )
+                    I_K  = (
+                            (g_K_leak + g_K_bar * n**4)* (phi_m_ - E_K)
+                            - 2*I_ATP(Na_i_, K_e_)
+                            - I_NKCC1_n(Na_i_, Na_e_, K_i_, K_e_, Cl_i_, Cl_e_)
+                            + I_KCC2(K_i_, K_e_, Cl_i_, Cl_e_)
+                        )
+                    I_Cl = (
+                            -g_Cl_leak * (phi_m_ - E_Cl)
+                            + 2*I_NKCC1_n(Na_i_, Na_e_, K_i_, K_e_, Cl_i_, Cl_e_)
+                            - I_KCC2(K_i_, K_e_, Cl_i_, Cl_e_)
+                        )
                     I_ion = I_Na + I_K + I_Cl # Total current
 
                     # Define right-hand expressions
@@ -803,7 +844,7 @@ class MixedDimensionalProblem(ABC):
                     rhs_m = alpha_m(phi_m_gating) * (1 - m) - beta_m(phi_m_gating) * m
                     rhs_h = alpha_h(phi_m_gating) * (1 - h) - beta_h(phi_m_gating) * h
 
-                    return [rhs_phi, rhs_Na_i, rhs_Na_e, rhs_K_i, rhs_K_e, -rhs_Cl_i, -rhs_Cl_e, rhs_n, rhs_m, rhs_h]
+                    return [rhs_phi, rhs_Na_i, rhs_Na_e, rhs_K_i, rhs_K_e, rhs_Cl_i, rhs_Cl_e, rhs_n, rhs_m, rhs_h]
 
                 init = [phi_m_0, Na_i_0, Na_e_0, K_i_0, K_e_0, Cl_i_0, Cl_e_0, n_0, m_0, h_0]
                 sol_ = init
@@ -811,37 +852,44 @@ class MixedDimensionalProblem(ABC):
                 for t, dt in zip(times, np.diff(times)):
                 
                     if t > 0:
-                        init = sol_[-1]
+                        init = sol_
+                        
                     # Integrate ODE system
-                    sol = odeint(lambda x, t: two_compartment_rhs(x, t, args=init[:-3]), init, [t, t+dt])
-
-                    if np.allclose(sol[0], sol[-1], rtol=1e-12):
+                    sol = solve_ivp(
+                            lambda t, x: two_compartment_rhs(x, t, args=init[:-3]),
+                            [t, t+dt],
+                            init,
+                            method='BDF',
+                            rtol=1e-6,
+                            atol=1e-9
+                        )
+                    
+                    sol_ = sol.y[:, -1] # Update previous solution
+                    
+                    if np.allclose(sol.y[:, 0], sol_, rtol=1e-6):
                         # Current solution equals previous solution
                         print("Steady state reached.")
                         break
-
-                    sol_ = sol # Update initial condition
 
                     # Checks
                     if np.isclose(t, max_time):
                         print("Max time reached without finding steady state. Exiting.")
                         break
 
-                    if any(np.isnan(sol[-1])):
+                    if any(np.isnan(sol_)):
                         print("NaN values in solution. Exiting.")
                         break
 
-                sol = sol[-1] # Get solutions at final time
-                phi_m_init_val = sol[0]
-                Na_i_init_val = sol[1]
-                Na_e_init_val = sol[2]
-                K_i_init_val = sol[3]
-                K_e_init_val = sol[4]
-                Cl_i_init_val = sol[5]
-                Cl_e_init_val = sol[6]
-                n_init_val = sol[7]
-                m_init_val = sol[8]
-                h_init_val = sol[9]
+                phi_m_init_val = sol_[0]
+                Na_i_init_val = sol_[1]
+                Na_e_init_val = sol_[2]
+                K_i_init_val = sol_[3]
+                K_e_init_val = sol_[4]
+                Cl_i_init_val = sol_[5]
+                Cl_e_init_val = sol_[6]
+                n_init_val = sol_[7]
+                m_init_val = sol_[8]
+                h_init_val = sol_[9]
             else:
                 # Placeholders on non-root processes
                 phi_m_init_val = None
@@ -885,32 +933,32 @@ class MixedDimensionalProblem(ABC):
                                     dfx.fem.assemble_scalar(
                                         dfx.fem.form(1*self.dx(self.neuron_tags))
                                         ),
-                                        op=MPI.SUM
-                                        ) # [m^3]
+                                    op=MPI.SUM
+                                ) # [m^3]
             vol_i_g = self.comm.allreduce(
                                     dfx.fem.assemble_scalar(
                                         dfx.fem.form(1*self.dx(self.glia_tags))
                                         ),
-                                        op=MPI.SUM
-                                        ) # [m^3]
+                                    op=MPI.SUM
+                                ) # [m^3]
             area_g_n = self.comm.allreduce(
                                     dfx.fem.assemble_scalar(
                                         dfx.fem.form(1*self.dS(self.neuron_tags))
                                         ),
-                                        op=MPI.SUM
-                                        ) # [m^2]
+                                    op=MPI.SUM
+                                ) # [m^2]
             area_g_g = self.comm.allreduce(
                                     dfx.fem.assemble_scalar(
                                         dfx.fem.form(1*self.dS(self.glia_tags))
                                         ),
-                                        op=MPI.SUM
-                                        ) # [m^2]
+                                    op=MPI.SUM
+                                ) # [m^2]
             vol_e = self.comm.allreduce(
                                     dfx.fem.assemble_scalar(
                                         dfx.fem.form(1*self.dx(self.extra_tag))
                                         ),
-                                        op=MPI.SUM
-                                        ) # [m^3]
+                                    op=MPI.SUM
+                                ) # [m^3]
             
             # Membrane potential initial conditions
             phi_m_0_n = phi_m_0 # Neuronal
@@ -937,11 +985,11 @@ class MixedDimensionalProblem(ABC):
             # Cotransporter strength and current
             g_KCC1 = 7e-1 # [S / m^2]
             S_KCC1 = g_KCC1 * R*T / F
-            I_KCC1 = lambda K_i, K_e, Cl_i, Cl_e: S_KCC1 * np.log((K_i * Cl_i) / (K_e * Cl_e))
+            I_KCC1 = lambda K_i, K_e, Cl_i, Cl_e: S_KCC1 * np.log((K_e * Cl_e) / (K_i * Cl_i))
 
             g_NKCC1_g = 2e-2 # [S / m^2]
             S_NKCC1_g = g_NKCC1_g * R*T / F
-            I_NKCC1_g = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: S_NKCC1_g * np.log((Na_i * K_i * Cl_i**2)/(Na_e * K_e * Cl_e**2))
+            I_NKCC1_g = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: S_NKCC1_g * np.log((Na_e * K_e * Cl_e**2)/(Na_i * K_i * Cl_i**2))
 
             if self.comm.rank==0:
 
@@ -964,9 +1012,22 @@ class MixedDimensionalProblem(ABC):
                     E_Cl_n = E(z_Cl, Cl_i_n_, Cl_e_)
 
                     # Calculate neuronal ionic currents
-                    I_Na_n = (g_Na_leak + g_Na_bar * m**3 * h) * (phi_m_n_ - E_Na_n) + 3*I_ATP(Na_i_n_, K_e_) + I_NKCC1_n(Na_i_n_, Na_e_, K_i_n_, K_e_, Cl_i_n_, Cl_e_)
-                    I_K_n = (g_K_leak + g_K_bar * n**4)* (phi_m_n_ - E_K_n) - 2*I_ATP(Na_i_n_, K_e_) + I_NKCC1_n(Na_i_n_, Na_e_, K_i_n_, K_e_, Cl_i_n_, Cl_e_) + I_KCC2(K_i_n_, K_e_, Cl_i_n_, Cl_e_)
-                    I_Cl_n = g_Cl_leak * (phi_m_n_ - E_Cl_n) - 2*I_NKCC1_n(Na_i_n_, Na_e_, K_i_n_, K_e_, Cl_i_n_, Cl_e_) - I_KCC2(K_i_n_, K_e_, Cl_i_n_, Cl_e_)
+                    I_Na_n = (
+                            (g_Na_leak + g_Na_bar * m**3 * h) * (phi_m_n_ - E_Na_n)
+                            + 3*I_ATP(Na_i_n_, K_e_)
+                            - I_NKCC1_n(Na_i_n_, Na_e_, K_i_n_, K_e_, Cl_i_n_, Cl_e_)
+                        )
+                    I_K_n = (
+                            (g_K_leak + g_K_bar * n**4)* (phi_m_n_ - E_K_n)
+                            - 2*I_ATP(Na_i_n_, K_e_)
+                            - I_NKCC1_n(Na_i_n_, Na_e_, K_i_n_, K_e_, Cl_i_n_, Cl_e_)
+                            + I_KCC2(K_i_n_, K_e_, Cl_i_n_, Cl_e_)
+                        )
+                    I_Cl_n = (
+                             -g_Cl_leak * (phi_m_n_ - E_Cl_n)
+                            + 2*I_NKCC1_n(Na_i_n_, Na_e_, K_i_n_, K_e_, Cl_i_n_, Cl_e_)
+                            - I_KCC2(K_i_n_, K_e_, Cl_i_n_, Cl_e_)
+                        )
                     I_ion_n = I_Na_n + I_K_n + I_Cl_n # Total neuronal ionic current
 
                     # Glial mechanisms
@@ -977,9 +1038,22 @@ class MixedDimensionalProblem(ABC):
                     
                     # Calculate glial ionic currents
                     delta_phi_K = phi_m_g_ - E_K_g
-                    I_Na_g = g_Na_leak_g * (phi_m_g_ - E_Na_g) + 3*I_glia_pump(Na_i_g_, K_e_) + I_NKCC1_g(Na_i_g_, Na_e_, K_i_g_, K_e_, Cl_i_g_, Cl_e_)
-                    I_K_g = g_K_leak_g * f_Kir(x[4], K_e_, delta_phi_K, phi_m_g_) * (phi_m_g_ - E_K_g) - 2*I_glia_pump(Na_i_g_, K_e_) + I_NKCC1_g(Na_i_g_, Na_e_, K_i_g_, K_e_, Cl_i_g_, Cl_e_) + I_KCC1(K_i_g_, K_e_, Cl_i_g_, Cl_e_)
-                    I_Cl_g = g_Cl_leak_g * (phi_m_g_ - E_Cl_g) - 2*I_NKCC1_g(Na_i_g_, Na_e_, K_i_g_, K_e_, Cl_i_g_, Cl_e_) - I_KCC1(K_i_g_, K_e_, Cl_i_g_, Cl_e_)
+                    I_Na_g = (
+                            g_Na_leak_g * (phi_m_g_ - E_Na_g)
+                            + 3*I_glia_pump(Na_i_g_, K_e_)
+                            - I_NKCC1_g(Na_i_g_, Na_e_, K_i_g_, K_e_, Cl_i_g_, Cl_e_)
+                        )
+                    I_K_g = (
+                            g_K_leak_g * f_Kir(x[4], K_e_, delta_phi_K, phi_m_g_) * (phi_m_g_ - E_K_g)
+                            - 2*I_glia_pump(Na_i_g_, K_e_)
+                            - I_NKCC1_g(Na_i_g_, Na_e_, K_i_g_, K_e_, Cl_i_g_, Cl_e_)
+                            + I_KCC1(K_i_g_, K_e_, Cl_i_g_, Cl_e_)
+                        )
+                    I_Cl_g = (
+                             -g_Cl_leak_g * (phi_m_g_ - E_Cl_g)
+                            + 2*I_NKCC1_g(Na_i_g_, Na_e_, K_i_g_, K_e_, Cl_i_g_, Cl_e_)
+                            - I_KCC1(K_i_g_, K_e_, Cl_i_g_, Cl_e_)
+                        )
                     I_ion_g = I_Na_g + I_K_g + I_Cl_g
 
                     # Define right-hand expressions
@@ -998,17 +1072,17 @@ class MixedDimensionalProblem(ABC):
                     rhs_Cl_i_g = -I_Cl_g * area_g_g / vol_i_g
                     rhs_Cl_e_g =  I_Cl_g * area_g_g / vol_e
                     rhs_Na_e = rhs_Na_e_n + rhs_Na_e_g
-                    rhs_K_e = rhs_K_e_n + rhs_K_e_g
+                    rhs_K_e  = rhs_K_e_n + rhs_K_e_g
                     rhs_Cl_e = rhs_Cl_e_n + rhs_Cl_e_g
                     rhs_n = alpha_n(phi_m_gating) * (1 - n) - beta_n(phi_m_gating) * n
                     rhs_m = alpha_m(phi_m_gating) * (1 - m) - beta_m(phi_m_gating) * m
                     rhs_h = alpha_h(phi_m_gating) * (1 - h) - beta_h(phi_m_gating) * h
 
                     return [
-                        rhs_phi_n, rhs_Na_i_n, rhs_Na_e, rhs_K_i_n, rhs_K_e, -rhs_Cl_i_n, -rhs_Cl_e, # Neuronal variables
-                        rhs_phi_g, rhs_Na_i_g, rhs_K_i_g, -rhs_Cl_i_g, # Glial variables
+                        rhs_phi_n, rhs_Na_i_n, rhs_Na_e, rhs_K_i_n, rhs_K_e, rhs_Cl_i_n, rhs_Cl_e, # Neuronal variables
+                        rhs_phi_g, rhs_Na_i_g, rhs_K_i_g, rhs_Cl_i_g, # Glial variables
                         rhs_n, rhs_m, rhs_h # Gating variables
-                            ]
+                        ]
 
                 init = [
                     phi_m_0_n, Na_i_0, Na_e_0, K_i_0, K_e_0, Cl_i_0, Cl_e_0,
@@ -1019,42 +1093,48 @@ class MixedDimensionalProblem(ABC):
                 for t, dt in zip(times, np.diff(times)):
                 
                     if t > 0:
-                        init = sol_[-1]
-
+                        init = sol_
+                        
                     # Integrate ODE system
-                    sol = odeint(lambda x, t: three_compartment_rhs(x, t, args=init[:-3]), init, [t, t+dt])
-
-                    if np.allclose(sol[0], sol[-1], rtol=1e-12):
+                    sol = solve_ivp(
+                            lambda t, x: three_compartment_rhs(x, t, args=init[:-3]),
+                            [t, t+dt],
+                            init,
+                            method='BDF',
+                            rtol=1e-6,
+                            atol=1e-9
+                        )
+                    
+                    sol_ = sol.y[:, -1] # Update previous solution
+                    
+                    if np.allclose(sol.y[:, 0], sol_, rtol=1e-6):
                         # Current solution equals previous solution
                         print("Steady state reached.")
                         break
-
-                    sol_ = sol # Update initial condition
 
                     # Checks
                     if np.isclose(t, max_time):
                         print("Max time reached without finding steady state. Exiting.")
                         break
 
-                    if any(np.isnan(sol[-1])):
+                    if any(np.isnan(sol_)):
                         print("NaN values in solution. Exiting.")
                         break
-
-                sol = sol[-1] # Get solutions at final time
-                phi_m_n_init_val = sol[0]
-                Na_i_n_init_val = sol[1]
-                Na_e_init_val = sol[2]
-                K_i_n_init_val = sol[3]
-                K_e_init_val = sol[4]
-                Cl_i_n_init_val = sol[5]
-                Cl_e_init_val = sol[6]
-                phi_m_g_init_val = sol[7]
-                Na_i_g_init_val = sol[8]
-                K_i_g_init_val = sol[9]
-                Cl_i_g_init_val = sol[10]
-                n_init_val = sol[11]
-                m_init_val = sol[12]
-                h_init_val = sol[13]
+                        
+                phi_m_n_init_val = sol_[0]
+                Na_i_n_init_val = sol_[1]
+                Na_e_init_val = sol_[2]
+                K_i_n_init_val = sol_[3]
+                K_e_init_val = sol_[4]
+                Cl_i_n_init_val = sol_[5]
+                Cl_e_init_val = sol_[6]
+                phi_m_g_init_val = sol_[7]
+                Na_i_g_init_val = sol_[8]
+                K_i_g_init_val = sol_[9]
+                Cl_i_g_init_val = sol_[10]
+                n_init_val = sol_[11]
+                m_init_val = sol_[12]
+                h_init_val = sol_[13]
 
             else:
                 # Placeholders on non-root processes

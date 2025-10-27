@@ -8,64 +8,47 @@ from abc      import ABC, abstractmethod
 from mpi4py   import MPI
 from petsc4py import PETSc
 
-# Kir-function used in ionic pump (Halnes et al. 2013(?))
-def f_Kir(K_e_init, K_e, E_K_init, delta_phi, phi_m) -> ufl.Coefficient:
-
-    A = 1 + ufl.exp(0.433)
-    B = 1 + ufl.exp(-(0.1186 + E_K_init) / 0.0441)
-    C = 1 + ufl.exp((delta_phi + 0.0185) / 0.0425)
-    D = 1 + ufl.exp(-(0.1186 + phi_m) / 0.0441)
-
-    f = ufl.sqrt(K_e / K_e_init) * A*B / (C*D)
-
-    return f
-
-#################################
-
 class IonicModel(ABC):
 
-	# constructor
-	def __init__(self, KNPEMIx_problem, tags=None):
+    def __init__(self, KNPEMIx_problem, tags=None):
+        """ Constructor for the base IonicModel class. """
+        self.problem = KNPEMIx_problem	
+        self.tags = tags
 
-		self.problem = KNPEMIx_problem	
-		self.tags = tags
+        # If tags are not specified, all the membrane tags are used
+        if self.tags == None:
+            self.tags = self.problem.gamma_tags
 
-		# if tags are not specified we use all the intra tags
-		if self.tags == None:
-			self.tags = self.problem.gamma_tags
+        # Transform int to tuple if needed
+        if isinstance(self.tags, int): self.tags = (self.tags,)
 
-		# trasform int in tuple if needed
-		if isinstance(self.tags, int): self.tags = (self.tags,)
-	
+    @abstractmethod
+    def _init(self):
+        # Abstract method that must be implemented by concrete subclasses.
+        # Initialize membrane model-dependent quantities
+        pass
+        
+    @abstractmethod
+    def _eval(self, ion_idx):
+        # Abstract method that must be implemented by concrete subclasses.
+        pass
 
-	@abstractmethod
-	def _init(self):
-		# Abstract method that must be implemented by concrete subclasses.
-		# Init ion-independent quantities
-		pass
-			
-	@abstractmethod
-	def _eval(self, ion_idx):
-		# Abstract method that must be implemented by concrete subclasses.
-		pass
-
-# Passive membrane model: I_ch = phi_M
 class PassiveModel(IonicModel):
-    """ Ionic current is the membrane potential."""
+    
     def __init__(self, KNPEMIx_problem, tags: tuple=None):
+        """ Constructor for the passive ionic model. """
         super().__init__(KNPEMIx_problem, tags)
 
     def _init(self):
         pass
 
     def __str__(self):
-        return f"Passive"
+        return f"Passive model"
 
     def _eval(self, ion_idx: int) -> ufl.Coefficient:	
-        I_ch = self.problem.phi_m_prev	
-        return I_ch
+        """ Returns the membrane potential as ionic current. """
+        return self.problem.phi_m_prev
 
-# Ionic K pump
 class KirNaKPumpModel(IonicModel):
 
     # Potassium buffering parameters
@@ -78,6 +61,7 @@ class KirNaKPumpModel(IonicModel):
     use_decay_currents = False
 
     def __init__(self, KNPEMIx_problem, tags: tuple=None):
+        """ Constructor for the Kir-Na pump ionic model. """
 
         super().__init__(KNPEMIx_problem, tags)
 
@@ -89,12 +73,12 @@ class KirNaKPumpModel(IonicModel):
         self.P_K_e = dfx.fem.Constant(p.mesh, self.P_K_e_val)
         if self.use_decay_currents:
             self.k_dec = dfx.fem.Constant(p.mesh, self.k_dec_val)
-            
 
     def __str__(self):
         return f'Inward-rectifying K current passive model with Na/K/ATPase pump'
 
     def _init(self):
+        """ Initialize Kir-Na pump parameters. """
 
         p = self.problem
 
@@ -103,11 +87,23 @@ class KirNaKPumpModel(IonicModel):
 
         self.pump_coeff = (
                         1.0 / (1.0 + (self.P_Na_i/ui_p[0])**(3/2))
-                    * (1.0 / (1.0 + self.P_K_e/ue_p[1]))
-                    * self.rho_pump
-                        )
+                     * (1.0 / (1.0 + self.P_K_e/ue_p[1]))
+                     * self.rho_pump
+                    )
 
     def _eval(self, ion_idx: int) -> ufl.Coefficient:
+        """ Evaluate and return the ionic channel current for ion number 'ion_idx'.
+
+        Parameters
+        ----------
+        ion_idx : int
+            Ion index.
+
+        Returns
+        -------
+        I_ch_k : ufl.Coefficient
+            The ionic channel current.
+        """
 
         # Aliases		
         p = self.problem
@@ -117,15 +113,15 @@ class KirNaKPumpModel(IonicModel):
         ion   = p.ion_list[ion_idx]
         z     = ion['z']
             
-        # f_kir function	
+        # Evaluate f_kir function depending on ion
         if ion['name'] == 'K':
             
             # Kir-Na variable		
             delta_phi  = phi_m - ion['E']
-            f_kir = f_Kir(p.K_e_init, ue_p[ion_idx], self.E_K_init, delta_phi, phi_m)
+            f_kir = self.f_Kir(p.K_e_init, ue_p[ion_idx], self.E_K_init, delta_phi, phi_m)
             
             # ATP pump current
-            I_ATP = -2*F*z*self.pump_coeff
+            I_ATP = -2*F*self.pump_coeff
 
         else:
             # Kir-Na variable
@@ -133,22 +129,33 @@ class KirNaKPumpModel(IonicModel):
 
             # ATP pump current
             if ion['name'] == 'Na':
-                I_ATP = 3*F*z*self.pump_coeff
+                I_ATP = 3*F*self.pump_coeff
             else:
                 I_ATP = 0.0
 
-        I_ch = f_kir*ion['g_leak_g']*(phi_m - ion['E']) + I_ATP
+        I_ch_k = f_kir*ion['g_leak_g']*(phi_m - ion['E']) + I_ATP
 
         if self.use_decay_currents:
             if ion['name'] == 'K' or ion['name'] == 'Na':
-                I_ch -= F*z*self.k_dec*(ue_p[1] - p.K_e_init)  
+                I_ch_k -= F*z*self.k_dec*(ue_p[1] - p.K_e_init)  
         
-        return I_ch
+        return I_ch_k
+    
+    def f_Kir(self, K_e_init, K_e, E_K_init, delta_phi, phi_m) -> ufl.Coefficient:
+        """ Evaluate and return the Kir-Na function f_kir defined in Halnes et al. 2013(?). """
+        A = 1 + ufl.exp(0.433)
+        B = 1 + ufl.exp(-(0.1186 + E_K_init) / 0.0441)
+        C = 1 + ufl.exp((delta_phi + 0.0185) / 0.0425)
+        D = 1 + ufl.exp(-(0.1186 + phi_m) / 0.0441)
 
+        f = ufl.sqrt(K_e / K_e_init) * A*B / (C*D)
+
+        return f
 
 class GlialCotransporters(IonicModel):
 
     def __init__(self, KNPEMIx_problem, tags: tuple=None):
+         """ Constructor for the KCC1/NKCC1 glial cotransporter ionic model. """
          
          super().__init__(KNPEMIx_problem, tags)
 
@@ -156,6 +163,7 @@ class GlialCotransporters(IonicModel):
          return "KCC1/NKCC1 Cotransporters"
 
     def _init(self):	
+        """ Initialize glial cotransporter parameters. """
         
         p = self.problem
 
@@ -167,6 +175,18 @@ class GlialCotransporters(IonicModel):
         self.S_NKCC1 = dfx.fem.Constant(p.mesh, g_NKCC1 * p.psi.value)
 
     def _eval(self, ion_idx: int) -> ufl.Coefficient:
+        """ Evaluate and return the ionic channel current for ion number 'ion_idx'.
+
+        Parameters
+        ----------
+        ion_idx : int
+            Ion index.
+
+        Returns
+        -------
+        ufl.Coefficient
+            The ionic channel current.
+        """
 
         p = self.problem
         ion   = p.ion_list[ion_idx]
@@ -177,26 +197,42 @@ class GlialCotransporters(IonicModel):
         c_Cl_i = p.u_p[0][2]
         c_Cl_e = p.u_p[1][2]
 
-        I_KCC1 = self.S_KCC1 * ufl.ln((c_K_i * c_Cl_i) / (c_K_e * c_Cl_e))
-        I_NKCC1 = self.S_NKCC1 * ufl.ln((c_Na_i * c_K_i * c_Cl_i**2)/(c_Na_e * c_K_e * c_Cl_e**2))
+        I_KCC1 = (self.S_KCC1
+                    * ufl.ln(
+                        (c_K_e * c_Cl_e)
+                            /
+                        (c_K_i*c_Cl_i)
+                    )
+                )
+        I_NKCC1 = (
+                    self.S_NKCC1 / (1 + ufl.exp(16. - c_K_e))
+                    * 
+                    ufl.ln(
+                        (c_Na_e * c_K_e * c_Cl_e**2)
+                            /
+                        (c_Na_i * c_K_i * c_Cl_i**2)
+                        )
+                    )
 
         if ion["name"]=="Na":
-            return I_NKCC1
+            return -I_NKCC1
         elif ion["name"]=="K":
-            return I_NKCC1 + I_KCC1
+            return (-I_NKCC1 - I_KCC1)
         else:
-            return -(2*I_NKCC1 + I_KCC1)
+            return (2*I_NKCC1 + I_KCC1)
 
 class NeuronalCotransporters(IonicModel):
 
     def __init__(self, KNPEMIx_problem, tags: tuple=None):
+         """ Constructor for the KCC2/NKCC1 neuronal cotransporter ionic model. """
          
          super().__init__(KNPEMIx_problem, tags)
 
     def __str__(self):
          return "KCC2/NKCC1 Cotransporters"
 
-    def _init(self):	
+    def _init(self):
+        """ Initialize neuronal cotransporter parameters. """	
 
         mesh = self.problem.mesh
 
@@ -205,31 +241,57 @@ class NeuronalCotransporters(IonicModel):
         self.S_NKCC1 = dfx.fem.Constant(mesh, 0.023)
 
     def _eval(self, ion_idx: int) -> ufl.Coefficient:
+        """ Evaluate and return the ionic channel current for ion number 'ion_idx'.
+
+        Parameters
+        ----------
+        ion_idx : int
+            Ion index.
+
+        Returns
+        -------
+        ufl.Coefficient
+            The ionic channel current.
+        """
 
         p = self.problem
-        ion   = p.ion_list[ion_idx]
+        ion    = p.ion_list[ion_idx]
         c_Na_i = p.u_p[0][0]
         c_Na_e = p.u_p[1][0]
-        c_K_i = p.u_p[0][1]
-        c_K_e = p.u_p[1][1]
+        c_K_i  = p.u_p[0][1]
+        c_K_e  = p.u_p[1][1]
         c_Cl_i = p.u_p[0][2]
         c_Cl_e = p.u_p[1][2]
 
-        I_KCC2 = self.S_KCC2 * ufl.ln((c_K_i * c_Cl_i)/(c_K_e*c_Cl_e))
-        I_NKCC1 = (self.S_NKCC1 * 1 / (1 + ufl.exp(16. - c_K_e))
-                * ufl.ln((c_Na_i * c_K_i * c_Cl_i**2)/(c_Na_e * c_K_e * c_Cl_e**2)))
+        I_KCC2 = (self.S_KCC2
+                    * ufl.ln(
+                        (c_K_e * c_Cl_e)
+                            /
+                        (c_K_i*c_Cl_i)
+                    )
+                )
+        I_NKCC1 = (
+                    self.S_NKCC1 / (1 + ufl.exp(16. - c_K_e))
+                    * 
+                    ufl.ln(
+                        (c_Na_e * c_K_e * c_Cl_e**2)
+                            /
+                        (c_Na_i * c_K_i * c_Cl_i**2)
+                        )
+                    )
 
         if ion["name"]=="Na":
-            return I_NKCC1
+            return -I_NKCC1
         elif ion["name"]=="K":
-            return I_NKCC1 + I_KCC2
+            return (-I_NKCC1 - I_KCC2)
         else:
-            return -(2*I_NKCC1 + I_KCC2)
+            return (2*I_NKCC1 + I_KCC2)
 
 
 class ATPPump(IonicModel):
 
     def __init__(self, KNPEMIx_problem, tags: tuple=None):
+        """ Constructor for the Na/K/ATPase pump ionic model. """
 
         super().__init__(KNPEMIx_problem, tags)
 
@@ -237,21 +299,34 @@ class ATPPump(IonicModel):
         return "Na/K/ATPase pump"
     
     def _init(self):	
-        
+        """ Initialize neuronal ATP pump parameters. """
+
         mesh = self.problem.mesh
 
-        self.I_hat = dfx.fem.Constant(mesh, 0.449) # Maximum pump strength [A/m^2]
+        self.I_hat = dfx.fem.Constant(mesh, 0.0449) # Maximum pump strength [A/m^2]
         self.m_K = dfx.fem.Constant(mesh, dfx.default_scalar_type(2.0)) # ECS K+ pump threshold [mM]
         self.m_Na = dfx.fem.Constant(mesh, dfx.default_scalar_type(7.7)) # ICS Na+ pump threshold [mM]
 
     def _eval(self, ion_idx: int) -> ufl.Coefficient:
+        """ Evaluate and return the ionic channel current for ion number 'ion_idx'.
+
+        Parameters
+        ----------
+        ion_idx : int
+            Ion index.
+
+        Returns
+        -------
+        ufl.Coefficient
+            The ionic channel current.
+        """
 
         p = self.problem
-        ion   = p.ion_list[ion_idx]
+        ion    = p.ion_list[ion_idx]
         c_Na_i = p.u_p[0][0]
-        c_K_e = p.u_p[1][1]
+        c_K_e  = p.u_p[1][1]
 
-        par_1 = 1 + self.m_K / c_K_e
+        par_1 = 1 + self.m_K  / c_K_e
         par_2 = 1 + self.m_Na / c_Na_i
         I_ATP = self.I_hat / (par_1**2 * par_2**3)
 
@@ -260,24 +335,24 @@ class ATPPump(IonicModel):
         elif ion["name"]=="K":
             return -2*I_ATP        
         else:
-            return 0.0
+            return dfx.fem.Constant(p.mesh, 0.0)
 
-# Hodgkin–Huxley 
 class HodgkinHuxley(IonicModel):
 
     def __init__(self, KNPEMIx_problem, tags: tuple=None,
                  use_Rush_Lar: bool=True, time_steps_ODE: int=25):
-
+        """ Constructor for the Hodgkin-Huxley ionic model. """
         super().__init__(KNPEMIx_problem, tags)
 
         self.use_Rush_Lar = use_Rush_Lar
         self.time_steps_ODE = time_steps_ODE
-        self.T = 1.0#20e-3 # Stimulus period [s]
+        self.T = KNPEMIx_problem.T_stim.value # Stimulus period [s]
 
     def __str__(self):
         return 'Hodgkin-Huxley'
 
-    def _init(self):	
+    def _init(self):
+        """ Initialize gating variables and time modulo variable used in the Hodgkin-Huxley model. """
 
         # Alias
         p = self.problem		
@@ -296,7 +371,7 @@ class HodgkinHuxley(IonicModel):
         p.t_mod = dfx.fem.Constant(p.mesh, 0.0)
 
     def _eval(self, ion_idx: int) -> ufl.Coefficient:
-        """ Evaluate and return the passive channel current for ion number 'ion_idx'.
+        """ Evaluate and return the (passive) ionic channel current for ion number 'ion_idx'.
 
         Parameters
         ----------
@@ -305,32 +380,31 @@ class HodgkinHuxley(IonicModel):
 
         Returns
         -------
-        I_ch : float
-            The value of the passive channel current.
+        ufl.Coefficient
+            The ionic channel current.
         """
         # Aliases		
         p     = self.problem		
         ion   = p.ion_list[ion_idx]
-        phi_m = p.phi_m_prev
 
-        # Leak currents
-        ion['g_k'] = ion['g_leak']
+        # Add leak conductivity to the channel conductivity
+        g_k = ion['g_leak']
 
         # Voltage-gated currents
         if ion['name'] == 'Na': 
-            ion['g_k'] += p.g_Na_bar*p.m**3*p.h
+            g_k += p.g_Na_bar*p.m**3*p.h
 
         elif ion['name'] == 'K':
-            ion['g_k'] += p.g_K_bar*p.n**4				
+            g_k += p.g_K_bar*p.n**4
 
-        I_ch = ion['g_k']*(phi_m - ion['E'])
-
-        return I_ch
+        # Return the total contribution to the channel current
+        return g_k * (p.phi_m_prev - ion['E'])
 
     def _add_stimulus(self,
                     ion_idx: int,
                     range: list | np.ndarray=None,
-                    dir: str=None) -> ufl.Coefficient:
+                    dir: str=None
+                ) -> ufl.Coefficient:
         """ Evaluate and return the stimulus part of the channel current for ion number 'ion_idx'.
 
         Parameters
@@ -369,7 +443,8 @@ class HodgkinHuxley(IonicModel):
         # Return stimulus
         return mask * g_syn_fac * (p.phi_m_prev - ion["E"])
 
-    def update_gating_variables(self):		
+    def update_gating_variables(self):
+        """ Update the gating variables n, m, h using either the Rush-Larsen method or Forward Euler. """
 
         tic = time.perf_counter()
 
@@ -379,7 +454,7 @@ class HodgkinHuxley(IonicModel):
         h = self.problem.h
         phi_m_prev = self.problem.phi_m_prev
         dt_ode     = float(self.problem.dt.value) / self.time_steps_ODE
-        
+
         # Set membrane potential
         with phi_m_prev.x.petsc_vec.localForm() as loc_phi_m_prev:
             V_M = 1000*(loc_phi_m_prev[:] - self.problem.phi_rest.value) # convert phi_m to mV	
@@ -437,4 +512,5 @@ class HodgkinHuxley(IonicModel):
         PETSc.Sys.Print(f"ODE step in {ODE_step_time:0.4f} seconds")   	
     
     def update_t_mod(self):
+        """ Update the modulo time variable used for synaptic stimulus. """
         self.problem.t_mod.value = np.mod(self.problem.t.value, self.T)

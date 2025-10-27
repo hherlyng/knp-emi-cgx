@@ -7,8 +7,8 @@ output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/'
 
 # Numerical parameters 
 dt : 0.00005 # Timestep size 
-time_steps : 50 # Number of timesteps
-T  : 50 # Simulation end time
+# time_steps : 50 # Number of timesteps
+T  : 70e-3 # Simulation end time
 
 # Problem constants (in consistent units)
 physical_constants:
@@ -36,13 +36,18 @@ point_evaluation :
   ecs_points : [[0.2, 0.2]]
 
 initial_conditions :
- phi_m : -0.06705629181057103
- Na_i  :  10.304099935959401
- Na_e  :  100.56530002134596
- K_i   :  120.09996505012622
- K_e   :  5.300011649957375
- Cl_i  :  7.4107546772687884
- Cl_e  :  118.8630817742425
- n : 0.2866924477719923
- m : 0.04142109976073126
- h : 0.6656981918902046
+ phi_m : -0.07164498093230537
+ Na_i  :  11.999258232496413
+ Na_e  :  100.00024725590798
+ K_i   :  123.99958901171851
+ K_e   :  4.000136996084069
+ Cl_i  :  4.0004095588042965
+ Cl_e  :  119.99986348039974
+ n : 0.2265098389885508
+ m : 0.023493158969007607
+ h : 0.7725145543788019
+
+stimulus :
+  g_syn_bar : 10 # Maximum synaptic conductance
+  a_syn : 0.001 # Synaptic time constant
+  T_stim : 40e-3 # Stimulus period

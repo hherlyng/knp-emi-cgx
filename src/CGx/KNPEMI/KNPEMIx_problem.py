@@ -10,8 +10,9 @@ from dolfinx.fem import Constant
 from ufl      import grad, inner, dot
 from mpi4py   import MPI
 from petsc4py import PETSc
-from CGx.utils.mixed_dim_problem import MixedDimensionalProblem
 from CGx.utils.setup_mms import ExactSolutionsKNPEMI
+from CGx.utils.mixed_dim_problem import MixedDimensionalProblem
+from CGx.KNPEMI.KNPEMIx_ionic_model import HodgkinHuxley
 import basix.ufl
 
 print = PETSc.Sys.Print # Automatically flushes output to stream in parallel
@@ -83,12 +84,12 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         cells_intra = self.subdomains.indices[intra_indices]
         cells_extra = self.subdomains.indices[extra_indices]
 
-        dofs_intra = dfx.fem.locate_dofs_topological(self.V, self.subdomains.dim, cells_intra)
-        dofs_extra = dfx.fem.locate_dofs_topological(self.V, self.subdomains.dim, cells_extra)
-        
-        self.interior = multiphenicsx.fem.DofMapRestriction(self.V.dofmap, dofs_intra)
-        self.exterior = multiphenicsx.fem.DofMapRestriction(self.V.dofmap, dofs_extra)
-        
+        self.dofs_intra = dfx.fem.locate_dofs_topological(self.V, self.subdomains.dim, cells_intra)
+        self.dofs_extra = dfx.fem.locate_dofs_topological(self.V, self.subdomains.dim, cells_extra)
+
+        self.interior = multiphenicsx.fem.DofMapRestriction(self.V.dofmap, self.dofs_intra)
+        self.exterior = multiphenicsx.fem.DofMapRestriction(self.V.dofmap, self.dofs_extra)
+
         # Get interior and exterior dofs
         self.restriction = [None] * num_variables_total
         self.restriction[:self.num_variables] = [self.interior] * self.num_variables
@@ -320,8 +321,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         psi = self.psi # RT / F
 
         # Restrictions for traces
-        i_res = "+"  # Intracellular restriction
-        e_res = "-"  # Extracellular restriction
+        i_res = "+"  # Intracellular facet restriction
+        e_res = "-"  # Extracellular facet restriction
 
         # Define integral measures
         dxi = self.dx(self.intra_tags)
@@ -370,7 +371,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             ion['E'] = (psi/z) * ufl.ln(ue_p[idx] / ui_p[idx])
 
             # Initialize dictionary of ionic channel
-            ion['I_ch'] = dict.fromkeys(self.gamma_tags)
+            ion['I_ch'] = dict.fromkeys(self.gamma_tags, 0)
 
             # Loop over ionic models
             for model in self.ionic_models:
@@ -378,21 +379,27 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                 # Loop over ionic model tags
                 for gamma_tag in model.tags:
 
-                    ion['I_ch'][gamma_tag] = model._eval(idx)
-        
+                    I_ch_k_ = model._eval(idx)
+                    
                     # Add stimulus current if the current cell membrane belongs to
                     # a cell that is stimulated
-                    if gamma_tag in self.stimulus_tags:
-                        if ion['name']=='Na' and model.__str__()=='Hodgkin-Huxley':
-                            if self.stimulus_region:
-                                stim = model._add_stimulus(idx, range=self.stimulus_region_range, dir=self.stimulus_region_direction)
-                            else:
-                                stim = model._add_stimulus(idx)
-                            # self.stim, self.stim_expr = model._add_stimulus(idx)
-                            ion['I_ch'][gamma_tag] += stim
+                    if (gamma_tag in self.stimulus_tags
+                        and ion['name']=='Na'
+                        and isinstance(model, HodgkinHuxley)
+                        ):
+                        
+                        if self.stimulus_region:
+                            stim = model._add_stimulus(idx, range=self.stimulus_region_range, dir=self.stimulus_region_direction)
+                        else:
+                            stim = model._add_stimulus(idx)
+                        
+                        I_ch_k_ += stim
+
+                    # Add contributions to ionic channel current
+                    ion['I_ch'][gamma_tag] += I_ch_k_
 
                     # Add contribution to total channel current
-                    I_ch[gamma_tag] += ion['I_ch'][gamma_tag]
+                    I_ch[gamma_tag] += I_ch_k_
 
         # Initialize variational form
         a = ufl.ZeroBaseForm(None)
@@ -469,7 +476,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                 # Exterior boundary terms (zero in "physical problem")
                 L -=  dt * dot(ion['J_k_e'], self.n_outer) * vke * self.ds # Equation for k_e
                 L += F*z * dot(ion['J_k_e'], self.n_outer) * vphi_e * self.ds # Equation for phi_e
-        
+
         # Weak form - potential equations
         a -= dt * inner(J_phi_i, grad(vphi_i)) * dxi
         a -= dt * inner(J_phi_e, grad(vphi_e)) * dxe
@@ -477,10 +484,10 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         # Weak form - trace terms
         a += C_M/F * (phi_i(i_res) - phi_e(e_res)) * vphi_i(i_res) * dS
         a += C_M/F * (phi_e(e_res) - phi_i(i_res)) * vphi_e(e_res) * dS
-        
+
         for gamma_tag in self.gamma_tags:
             L += 1/F * (dt*I_ch[gamma_tag] - C_M*self.phi_m_prev) * (vphi_e(e_res) - vphi_i(i_res)) * dS(gamma_tag)
-        
+
         if self.MMS_test:
             # Phi source terms
             L -= dt * inner(self.src_terms['f_phi_i'], vphi_i) * dxi # Equation for phi_i
@@ -742,8 +749,9 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         self.g_K_leak_g  = Constant(self.mesh, dfx.default_scalar_type(16.96)) # K leak conductivity (S/m**2)
         self.g_Cl_leak   = Constant(self.mesh, dfx.default_scalar_type(0.25)) # Cl leak conductivity (S/m**2) (Constant)
         self.g_Cl_leak_g = Constant(self.mesh, dfx.default_scalar_type(0.50)) # Cl leak conductivity (S/m**2) (Constant)
-        self.a_syn     = Constant(self.mesh, dfx.default_scalar_type(1e-3)) # Synaptic time constant (s)
-        self.g_syn_bar = Constant(self.mesh, dfx.default_scalar_type(150)) # Synaptic conductivity (S/m**2)
+        self.g_syn_bar = Constant(self.mesh, dfx.default_scalar_type(self.g_syn_bar_val)) # Synaptic conductivity (S/m**2)
+        self.a_syn     = Constant(self.mesh, dfx.default_scalar_type(self.a_syn_val)) # Synaptic time constant (s)
+        self.T_stim    = Constant(self.mesh, dfx.default_scalar_type(self.T_stim_val)) # Synaptic stimulus time (s)
         self.D_Na = Constant(self.mesh, dfx.default_scalar_type(1.33e-9)) # Diffusion coefficients Na (m/s^2) (Constant)
         self.D_K  = Constant(self.mesh, dfx.default_scalar_type(1.96e-9)) # Diffusion coefficients K (m/s^2) (Constant)
         self.D_Cl = Constant(self.mesh, dfx.default_scalar_type(2.03e-9)) # diffusion coefficients Cl (m/s^2) (Constant)
@@ -766,7 +774,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
         # Neuro+glia
         self.phi_m_n_init = Constant(self.mesh, self.phi_m_init.value)
-        self.phi_m_g_init = Constant(self.mesh, -0.080) # [V]
+        self.phi_m_g_init = Constant(self.mesh, -0.085) # [V]
         self.Na_i_n_init = Constant(self.mesh, self.Na_i_init.value)
         self.K_i_n_init = Constant(self.mesh, self.K_i_init.value)
         self.Cl_i_n_init = Constant(self.mesh, self.Cl_i_init.value)

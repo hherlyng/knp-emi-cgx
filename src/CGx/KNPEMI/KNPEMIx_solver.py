@@ -13,6 +13,8 @@ from petsc4py       import PETSc
 from CGx.utils      import restructure_xdmf
 from CGx.utils.misc import dump
 from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
+from CGx.KNPEMI.KNPEMIx_ionic_model import HodgkinHuxley
+import ufl
 
 pprint = print # Allows flushing from arbitrary rank
 print = PETSc.Sys.Print # Automatically flushes output to stream in parallel
@@ -271,14 +273,14 @@ class SolverKNPEMI:
             # Print timestep and time
             print('\nTime step ', i + 1)
             print('t (ms) = ', 1000 * float(t.value))               
-
+    
             # Update ODE-based ionic models
             if p.gating_variables:
                 for model in p.ionic_models:
-                    if model.__str__() == "Hodgkin-Huxley":
+                    if isinstance(model, HodgkinHuxley):
                         model.update_t_mod()
                         model.update_gating_variables()
-            
+
             # Assemble system matrix and RHS vector
             tic = time.perf_counter()
             self.assemble()
@@ -529,7 +531,7 @@ class SolverKNPEMI:
         if hasattr(self.problem, 'gamma_points'):
             # Plot membrane potential in points on gamma
             fig, ax = plt.subplots()
-            ax.plot(times, self.gamma_point_values[:, :], color='green')
+            ax.plot(times, 1e3*self.gamma_point_values[:, :], color='green') # Converted to mV
 
             ax.set_xlabel('Time [ms]')
             ax.set_ylabel('Membrane potential [mV]', color='green')
@@ -706,7 +708,7 @@ class SolverKNPEMI:
         return
 
     # Default iterative solver parameters
-    ksp_rtol           = 1e-8
+    ksp_rtol           = 1e-7
     ksp_max_it         = 1000	
     ksp_type           = 'gmres' # cg
     pc_type            = 'hypre' # lu, fieldsplit, hypre
