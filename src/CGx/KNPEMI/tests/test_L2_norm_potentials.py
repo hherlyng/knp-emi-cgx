@@ -1,6 +1,6 @@
 from CGx.KNPEMI.KNPEMIx_solver 	 	import SolverKNPEMI
 from CGx.KNPEMI.KNPEMIx_problem 	import ProblemKNPEMI
-from CGx.KNPEMI.KNPEMIx_ionic_model import *
+from CGx.KNPEMI.KNPEMIx_ionic_model     import HodgkinHuxley
 
 def test_L2_norm_of_potentials():
 		""" Solve the KNP-EMI problem on a unit square and assert that the calculated
@@ -15,9 +15,8 @@ def test_L2_norm_of_potentials():
 		# Create problem and initialize ionic models
 		tags = {'intra': 1, 'extra': 2, 'boundary': 3, 'membrane': 4}
 		problem_square = ProblemKNPEMI(input_file='./square32.xdmf', tags=tags, dt=5e-5)
-		HH = HH_model(problem_square)
-		ionic_models = [HH]
-		problem_square.init_ionic_model(ionic_models)
+		HH = HodgkinHuxley(problem_square)
+		problem_square.init_ionic_models([HH])
 
 		# Create solver
 		solver_square = SolverKNPEMI(problem_square, time_steps=10, direct=True)
