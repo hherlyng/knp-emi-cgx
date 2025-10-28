@@ -1,6 +1,10 @@
+from mpi4py import MPI
+import ufl
+import numpy as np
+import dolfinx as dfx
 from CGx.KNPEMI.KNPEMIx_solver 	 	import SolverKNPEMI
 from CGx.KNPEMI.KNPEMIx_problem 	import ProblemKNPEMI
-from CGx.KNPEMI.KNPEMIx_ionic_model import *
+from CGx.KNPEMI.KNPEMIx_ionic_model import HodgkinHuxley
 
 def test_L2_norm_of_potentials():
 		""" Solve the KNP-EMI problem on a unit square and assert that the calculated
@@ -16,8 +20,7 @@ def test_L2_norm_of_potentials():
 		tags = {'intra': 1, 'extra': 2, 'boundary': 3, 'membrane': 4}
 		problem_square = ProblemKNPEMI(config_file='./tests/test_config.yml')
 		HH = HodgkinHuxley(problem_square)
-		ionic_models = [HH]
-		problem_square.init_ionic_model(ionic_models)
+		problem_square.init_ionic_models([HH])
 		problem_square.set_initial_conditions()
 		problem_square.setup_variational_form()
 
