@@ -10,10 +10,9 @@ import dolfinx as dfx
 from abc             import ABC, abstractmethod
 from mpi4py          import MPI
 from petsc4py        import PETSc
-from dolfinx.fem     import Constant
 from CGx.KNPEMI.KNPEMIx_ionic_model import HodgkinHuxley, IonicModel
 from CGx.utils.misc  import flatten_list, mark_boundaries_cube_MMS, mark_boundaries_square_MMS, mark_subdomains_cube, mark_subdomains_square, range_constructor
-from scipy.integrate import odeint, solve_ivp
+from scipy.integrate import solve_ivp
 
 pprint = print
 print = PETSc.Sys.Print # Automatically flushes output to stream in parallel
