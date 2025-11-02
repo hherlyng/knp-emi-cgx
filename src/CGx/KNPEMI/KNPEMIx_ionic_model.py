@@ -513,4 +513,4 @@ class HodgkinHuxley(IonicModel):
     
     def update_t_mod(self):
         """ Update the modulo time variable used for synaptic stimulus. """
-        self.problem.t_mod.value = np.mod(self.problem.t.value, self.T)
+        self.problem.t_mod.value = np.mod(self.problem.t.value + 1e-10, self.T) # Add a small number to t to avoid floating-point precision problems
