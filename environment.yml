@@ -24,3 +24,4 @@ dependencies:
   - ipython
   - adios4dolfinx
   - openpyxl
+  - seaborn
