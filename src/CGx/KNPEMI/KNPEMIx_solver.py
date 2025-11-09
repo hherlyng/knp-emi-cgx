@@ -460,7 +460,10 @@ class SolverKNPEMI:
         if hasattr(p, 'stim_ufl_expr'):
             self.stim_t = []
             self.stim_current_form = dfx.fem.form(p.stim_ufl_expr * p.dS(p.stimulus_tags))
-            stim_current: float = dfx.fem.assemble_scalar(self.stim_current_form)
+            stim_current: float = self.comm.allreduce(
+                                        dfx.fem.assemble_scalar(self.stim_current_form),
+                                        op=MPI.SUM
+                                    )
             self.stim_t.append(stim_current)
             
     def save_png(self):
@@ -477,7 +480,10 @@ class SolverKNPEMI:
             self.h_t.append(scifem.evaluate_function(p.h, p.png_point))
 
         if hasattr(p, 'stim_ufl_expr'):
-            stim_current: float = dfx.fem.assemble_scalar(self.stim_current_form)
+            stim_current: float = self.comm.allreduce(
+                                        dfx.fem.assemble_scalar(self.stim_current_form),
+                                        op=MPI.SUM
+                                    )
             print(f"Stimulus current at png point: {stim_current:.2e}")
             self.stim_t.append(stim_current)
 

@@ -38,4 +38,4 @@ jobs:
       - name: run tests
         run: |
           python3 ./src/CGx/utils/generate_square_mesh.py -N 32 -o './'
-          python3 ./tests/test_L2_norm_potentials.py
+          python3 ./tests/KNPEMI_electric_potentials_L2_norm.py
