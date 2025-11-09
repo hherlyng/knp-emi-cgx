@@ -601,12 +601,6 @@ class HodgkinHuxley(IonicModel):
         ODE_step_time = p.mesh.comm.allreduce(toc-tic, op=MPI.MAX)
         PETSc.Sys.Print(f"ODE step in {ODE_step_time:0.4f} seconds")   	
     
-<<<<<<< Updated upstream
-    def update_t_mod(self):
-        """ Update the modulo time variable used for synaptic stimulus. """
-        self.problem.t_mod.value = np.mod(self.problem.t.value + 1e-10, self.T) # Add a small number to t to avoid floating-point precision problems
-=======
     def update_t_mod(self, tol: float=1e-12):
         """ Update the modulo time variable used for synaptic stimuli. """
         self.t_mod.value = np.mod(self.problem.t.value + tol, self.T_stim)
->>>>>>> Stashed changes

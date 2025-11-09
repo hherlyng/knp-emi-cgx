@@ -662,21 +662,21 @@ class SolverKNPEMI:
     def init_checkpoint_file(self):
         """ Initialize checkpointing of solution functions. """
         p = self.problem
-        self.cpoint_filename: str = filename = self.out_file_prefix + "checkpoints"
-        a4d.write_mesh(filename, p.mesh)
-        a4d.write_meshtags(filename, p.mesh, meshtags=p.subdomains)
-        a4d.write_meshtags(filename, p.mesh, meshtags=p.boundaries)
+        self.cpoint_filename: str = self.out_file_prefix + "checkpoints"
+        a4d.write_mesh(self.cpoint_filename, p.mesh)
+        a4d.write_meshtags(self.cpoint_filename, p.mesh, meshtags=p.subdomains)
+        a4d.write_meshtags(self.cpoint_filename, p.mesh, meshtags=p.boundaries)
 
         # Write concentrations to file
         for idx in range(p.N_ions):
-            a4d.write_function(filename=filename, u=p.u_out_i[idx], time=0)
-            a4d.write_function(filename=filename, u=p.u_out_e[idx], time=0)
+            a4d.write_function(filename=self.cpoint_filename, u=p.u_out_i[idx], time=0)
+            a4d.write_function(filename=self.cpoint_filename, u=p.u_out_e[idx], time=0)
         
         # Write membrane potential and gating variables to file
-        a4d.write_function(filename=filename, u=p.phi_m_prev, time=0)
-        a4d.write_function(filename=filename, u=p.n, time=0)
-        a4d.write_function(filename=filename, u=p.m, time=0)
-        a4d.write_function(filename=filename, u=p.h, time=0)
+        a4d.write_function(filename=self.cpoint_filename, u=p.phi_m_prev, time=0)
+        a4d.write_function(filename=self.cpoint_filename, u=p.n, time=0)
+        a4d.write_function(filename=self.cpoint_filename, u=p.m, time=0)
+        a4d.write_function(filename=self.cpoint_filename, u=p.h, time=0)
 
         return
     
