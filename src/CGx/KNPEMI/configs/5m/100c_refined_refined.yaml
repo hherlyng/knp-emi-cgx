@@ -6,9 +6,9 @@ input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/'
 output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/5m/100c/refined_refined/'
 
 # Numerical parameters 
-dt : 0.00005 # Timestep size 
-time_steps : 100 # Number of timesteps
-#T  : 50 # Simulation end time
+dt : 0.000025 # Timestep size 
+# time_steps : 100 # Number of timesteps
+T  : 20e-3 # Simulation end time
 
 # Problem constants (in consistent units)
 physical_constants:
@@ -40,22 +40,24 @@ point_evaluation :
   ecs_points : [[1200, 3113, 3607], [1200, 1334, 3934]]
   
 initial_conditions:
-  phi_m_n : -0.06702829419210782
-  phi_m_g : -0.08483175665202246
-  Na_i_n : 10.48462066586112
-  Na_i_g : 12.129621899673538
-  Na_e : 104.13452476396668
-  K_i_n : 117.70905802468343
-  K_i_g : 172.64867984282864
-  K_e : 5.127642612776464
-  Cl_i_n : 6.955628091152141
-  Cl_i_g : 3.022291482949853
-  Cl_e : 112.17755867387186
-  n : 0.2874926923821898
-  m : 0.041579194157353894
-  h : 0.6639387630109412
+  phi_m_n : -0.071082690683513236
+  phi_m_g : -0.078070853285535674
+  Na_i_n : 12.029528270873768747
+  Na_i_g : 14.421136114602672862
+  Na_e : 140.111543169829730004
+  K_i_n : 129.907249433001112493
+  K_i_g : 100.735001928700583562
+  K_e : 4.010709034063037137
+  Cl_i_n : 5.061298535599002335
+  Cl_i_g : 4.864265957879501556
+  Cl_e : 124.876250243426014208
+  n : 0.229897261889963705
+  m : 0.025265637617126482
+  h : 0.782448548533397403
 
 stimulus :
-  g_syn_bar : 80 # Maximum synaptic conductance
-  a_syn : 0.001 # Synaptic time constant
-  T_stim : 1 # Stimulus period
+  g_syn_bar : 0.5e-9 # Maximum synaptic conductance
+  a_syn : 1e-4 # Synaptic time constant
+  T_stim : 1.0 # Stimulus period, high freq = 20 ms, normal freq = 1 s
+  # tau_syn_rise : 5e-4 # Synaptic rise time constant
+  # tau_syn_decay : 5e-3 # Synaptic decay time constant

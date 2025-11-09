@@ -54,6 +54,31 @@ class MixedDimensionalProblem(ABC):
         self.ionic_models = []
         
         print(f"Problem setup in {time.perf_counter() - tic:0.4f} seconds.\n")
+        
+    @abstractmethod
+    def init(self):
+        # Abstract method that must be implemented by concrete subclasses.
+        pass
+    
+    @abstractmethod
+    def setup_spaces(self):
+        # Abstract method that must be implemented by concrete subclasses.
+        pass
+
+    @abstractmethod
+    def setup_boundary_conditions(self):
+        # Abstract method that must be implemented by concrete subclasses.
+        pass
+    
+    @abstractmethod
+    def setup_source_terms(self):
+        # Abstract method that must be implemented by concrete subclasses.
+        pass
+
+    @abstractmethod
+    def setup_constants(self):
+        # Abstract method that must be implemented by concrete subclasses.
+        pass
 
     def read_config_file(self, config_file: yaml.__file__):
         
@@ -67,15 +92,21 @@ class MixedDimensionalProblem(ABC):
             except yaml.YAMLError as e:
                 print(e)
 
-        if 'input_dir' in config:
-            input_dir = config['input_dir']
+        if 'solver' in config:
+            self.solver_config: dict = config['solver']
         else:
-            # input directory is here
+            raise RuntimeError('Provide solver configuration in input file.')
 
+        if 'input_dir' in config:
+            input_dir: str = config['input_dir']
+        else:
+            # Input directory is assumed to be here
             input_dir = './'
         
         if 'output_dir' in config:
-            self.output_dir = config['output_dir']
+            self.output_dir: str = config['output_dir']
+
+            # Create output directory if it does not exist
             if not os.path.isdir(self.output_dir):
                 print('Output directory ' + self.output_dir + ' does not exist. Creating the directory .')
                 pathlib.Path(self.output_dir).mkdir(parents=True, exist_ok=True)
@@ -86,8 +117,8 @@ class MixedDimensionalProblem(ABC):
         
         if 'cell_tag_file' in config and 'facet_tag_file' in config:
 
-            mesh_file   = input_dir + config['cell_tag_file'] # cell tag file is also the mesh file
-            facet_file = input_dir + config['facet_tag_file']
+            mesh_file: str  = input_dir + config['cell_tag_file'] # cell tag file is also the mesh file
+            facet_file: str = input_dir + config['facet_tag_file']
 
             # Check that the files exist
             if not os.path.exists(mesh_file):
@@ -96,7 +127,7 @@ class MixedDimensionalProblem(ABC):
                 print(f'The mesh and cell tag file {mesh_file} does not exist. Provide a valid facet tag file.')
 
             # Initialize input files dictionary and set mesh and facet files
-            self.input_files = dict()
+            self.input_files: dict[str, str] = {}
             self.input_files['mesh_file']  = mesh_file
             self.input_files['facet_file'] = facet_file
 
@@ -125,7 +156,7 @@ class MixedDimensionalProblem(ABC):
             raise RuntimeError('Provide final time T or time_steps field in input file.')
 
         # Set mesh tags
-        tags = dict()
+        tags: dict[str, list[int] | int] = {}
         if 'ics_tags' in config:
             tags['intra'] = config['ics_tags'] 
         else:
@@ -135,10 +166,10 @@ class MixedDimensionalProblem(ABC):
         if 'boundary_tags' in config: tags['boundary'] = config['boundary_tags']
         if 'membrane_tags' in config: tags['membrane'] = config['membrane_tags']
         if 'stimulus_tags' in config:
-            self.stimulus_tags = config['stimulus_tags']
+            self.stimulus_tags: list[int] = config['stimulus_tags']
         else:
             # All cells are stimulated
-            self.stimulus_tags = tags['membrane']
+            self.stimulus_tags: list[int] = tags['membrane']
         if 'glia_tags' in config:
             tags['glia'] = config['glia_tags']
             tags['neuron'] = [tag for tag in config['membrane_tags'] if tag not in config['glia_tags']]
@@ -149,27 +180,30 @@ class MixedDimensionalProblem(ABC):
         # Set physical parameters
         if 'physical_constants' in config:
             consts = config['physical_constants']
-            if 'T' in consts: self.T_value = consts['T']
-            if 'R' in consts: self.R_value = consts['R']
-            if 'F' in consts: self.F_value = consts['F']
-            self.psi_value = self.R_value*self.T_value/self.F_value
+            if 'T' in consts: self.T_value: float = consts['T']
+            if 'R' in consts: self.R_value: float = consts['R']
+            if 'F' in consts: self.F_value: float = consts['F']
+            self.psi_value: float = self.R_value*self.T_value/self.F_value
         else:
             print("Setting all constants equal to 1.0.")
             self.T_value = self.R_value = self.F_value = self.psi_value = 1.0
 
         if 'C_M' in config:
-            self.C_M_value = config['C_M']
+            self.C_M_value: float = config['C_M']
         else:
             self.C_M_value = 1.0
 
         # Scaling mesh factor (default 1)
-        if 'mesh_conversion_factor' in config: self.mesh_conversion_factor = float(config['mesh_conversion_factor'])
+        if 'mesh_conversion_factor' in config:
+            self.mesh_conversion_factor = float(config['mesh_conversion_factor'])
 
         # Finite element polynomial order (default 1)
-        if 'fem_order' in config: self.fem_order = config['fem_order']
+        if 'fem_order' in config:
+            self.fem_order: int = config['fem_order']
 
         # Boundary condition type (default pure Neumann BCs)
-        if 'dirichlet_bcs' in config: self.dirichlet_bcs = config['dirichlet_bcs']
+        if 'dirichlet_bcs' in config:
+            self.dirichlet_bcs: bool = config['dirichlet_bcs']
 
         # Verification test flag
         if 'MMS_test' in config: 
@@ -185,12 +219,9 @@ class MixedDimensionalProblem(ABC):
             except:
                 raise RuntimeError('For MMS test, provide dimension "dim" in input file.')
 
-        # Initial membrane potential
-        if 'phi_m_init' in config: self.phi_m_init = config['phi_m_init']
-
         # Set electrical conductivities (for EMI)
-        if 'sigma_i' in config: self.sigma_i = config['sigma_i']
-        if 'sigma_e' in config: self.sigma_e = config['sigma_e']
+        if 'sigma_i' in config: self.sigma_i: float = config['sigma_i']
+        if 'sigma_e' in config: self.sigma_e: float = config['sigma_e']
 
         # Set ion-specific parameters (for KNP-EMI)
         if 'ion_species' in config:
@@ -204,11 +235,11 @@ class MixedDimensionalProblem(ABC):
 
                 # Perform sanity checks
                 if 'valence' not in ion_params:
-                    raise RuntimeError('Valence of ' + ion + ' must be provided.')
+                    raise RuntimeError('Valence of ion ' + ion + ' must be provided.')
                 if 'diffusivity' not in ion_params:
-                    raise RuntimeError('Diffusivity of ' + ion + ' must be provided.')
+                    raise RuntimeError('Diffusivity of ion ' + ion + ' must be provided.')
                 if 'initial' not in ion_params:
-                    raise RuntimeError('Initial condition of ' + ion + ' must be provided.')
+                    raise RuntimeError('Initial condition of ion ' + ion + ' must be provided.')
 
                 # Fill in ion dictionary
                 ion_dict['z']  = ion_params['valence']
@@ -222,8 +253,8 @@ class MixedDimensionalProblem(ABC):
                     ion_dict['f_e'] = ion_params['source']['ecs']
                 else:
                     print('Source terms for ' + ion + ' set to zero, as none were provided in the input file.')
-                    ion_dict['f_i'] = 0
-                    ion_dict['f_e'] = 0
+                    ion_dict['f_i'] = 0.0
+                    ion_dict['f_e'] = 0.0
                 
                 self.ion_list.append(ion_dict)
             
@@ -247,16 +278,22 @@ class MixedDimensionalProblem(ABC):
 
         if 'stimulus' in config:
             try:
-                self.g_syn_bar_val = config['stimulus']['g_syn_bar']
-                self.a_syn_val = config['stimulus']['a_syn']
-                self.T_stim_val = config['stimulus']['T_stim']
+                self.g_syn_bar_val: float = config['stimulus']['g_syn_bar']
+                self.a_syn_val: float = config['stimulus']['a_syn']
+                self.T_stim_val: float = config['stimulus']['T_stim']
             except:
                 raise RuntimeError('For stimulus, provide g_syn_bar, a_syn and T in input file.')
+            if 'tau_syn_rise' in config['stimulus'] or 'tau_syn_decay' in config['stimulus']:
+                try:
+                    self.tau_syn_rise: float = config['stimulus']['tau_syn_rise']
+                    self.tau_syn_decay: float = config['stimulus']['tau_syn_decay']
+                except:
+                    raise RuntimeError('For rise and decay stimulus, provide tau_syn_rise and tau_syn_decay in input file.')
         else:
             # Default stimulus of a single action potential with strength 40 S/m^2,
             self.g_syn_bar_val = 40.0
-            self.a_syn_val = 1e-3
-            self.T_stim_val = 1.0
+            self.a_syn_val     = 1e-3
+            self.T_stim_val    = 1.0
 
         if 'stimulus_region' in config:
             self.stimulus_region = True
@@ -266,20 +303,16 @@ class MixedDimensionalProblem(ABC):
                 'y' : 1,
                 'z' : 2
             }
-            self.stimulus_region_direction = axes[str(config['stimulus_region']['direction'])]
+            self.stimulus_region_direction: int = axes[str(config['stimulus_region']['direction'])]
         else:
             self.stimulus_region = False
 
         if 'initial_conditions' in config:
-            if 'filename' in config['initial_conditions']:
-                # Initial conditions provided in a file
-                self.initial_conditions = np.load(config['initial_conditions']['filename'])
-            else:
-                # Initial conditions provided as a dictionary in the config file
-                self.initial_conditions = config['initial_conditions']
-            self.find_initial_conditions = False # No need to find initial conditions
+            # Initial conditions provided as a dictionary in the config file
+            self.initial_conditions: dict[str, float] = config['initial_conditions']
+            self.find_initial_conditions = False # No need to find steady-state initial conditions
         else:
-            self.find_initial_conditions = True # Need to find initial conditions
+            self.find_initial_conditions = True # Need to find steady-state initial conditions
         
     def parse_tags(self, tags: dict):
 
@@ -298,42 +331,43 @@ class MixedDimensionalProblem(ABC):
             print("Single cell tag.")    
 
         if 'intra' in tags_set:
-            self.intra_tags = tags['intra']
+            self.intra_tags: list[int] | int = tags['intra']
         else:
             raise ValueError('Intra tag has to be provided.')
         
         if 'extra' in tags_set:
-            self.extra_tag = tags['extra']
+            self.extra_tag: int = tags['extra']
         else:
             print('Setting default: extra tag = 1.')
             self.extra_tag = 1
         
         if 'membrane' in tags_set:
-            self.gamma_tags = tags['membrane']
+            self.gamma_tags: list[int] | int = tags['membrane']
         else:
             print('Setting default: membrane tag = intra tag.')
-            self.gamma_tags = self.intra_tags
+            self.gamma_tags: list[int] | int = self.intra_tags
 
         if 'glia' in tags_set:
-            self.glia_tags = tags['glia']
-            self.neuron_tags = [tag for tag in tags['membrane'] if tag not in tags['glia']]
+            self.glia_tags: list[int] | int = tags['glia']
+            self.neuron_tags: list[int] | int = [tag for tag in tags['membrane'] if tag not in tags['glia']]
         else:
             print('Setting default: all membrane tags = neuron tags')
             self.glia_tags = None
-            self.neuron_tags = self.gamma_tags
+            self.neuron_tags: list[int] | int = self.gamma_tags
         
         if 'boundary' in tags_set:
-            self.boundary_tags = tags['boundary']
+            self.boundary_tags: list[int] | int = tags['boundary']
         else:
             print('Setting default: boundary tag = 1.')
 
         # Transform ints or lists to tuples
-        if isinstance(self.intra_tags, int) or isinstance(self.intra_tags, list): self.intra_tags = tuple(self.intra_tags,)
-        if isinstance(self.extra_tag, int) or isinstance(self.extra_tag, list): self.extra_tag = tuple(self.extra_tag,)
-        if isinstance(self.boundary_tags, int) or isinstance(self.boundary_tags, list): self.boundary_tags = tuple(self.boundary_tags,)
-        if isinstance(self.gamma_tags, int) or isinstance(self.gamma_tags, list): self.gamma_tags = tuple(self.gamma_tags,)
-        if isinstance(self.glia_tags, int) or isinstance(self.glia_tags, list): self.glia_tags = tuple(self.glia_tags,)
-        if isinstance(self.neuron_tags, int) or isinstance(self.neuron_tags, list): self.neuron_tags = tuple(self.neuron_tags,)
+        self.intra_tags = tuple(self.intra_tags,)
+        self.extra_tag = tuple(self.extra_tag,)
+        self.boundary_tags = tuple(self.boundary_tags,)
+        self.gamma_tags = tuple(self.gamma_tags,)
+        self.glia_tags = tuple(self.glia_tags,)
+        self.neuron_tags = tuple(self.neuron_tags,)
+        self.stimulus_tags = tuple(self.stimulus_tags,)
 
     def init_ionic_models(self, ionic_models: IonicModel | list[IonicModel]):
 
@@ -357,8 +391,8 @@ class MixedDimensionalProblem(ABC):
                 self.gating_variables = True
                 print("Gating variables flag set to True.")
         
-        ionic_tags = sorted(ionic_tags)
-        gamma_tags = sorted(flatten_list([self.gamma_tags]))
+        ionic_tags: list[int] | int = sorted(ionic_tags)
+        gamma_tags: list[int] | int = sorted(flatten_list([self.gamma_tags]))
 
         if ionic_tags != gamma_tags and not self.MMS_test:
             raise RuntimeError('Mismatch between membrane tags and ionic models tags.' \
@@ -367,7 +401,7 @@ class MixedDimensionalProblem(ABC):
         print('# Membrane tags = ', len(gamma_tags))
         print('# Ionic models  = ', len(self.ionic_models), '\n')
 
-    def get_min_and_max_coordinates(self):
+    def get_min_and_max_coordinates(self) -> list[float]:
         if self.mesh.geometry.dim==3:
             xx, yy, zz = [self.mesh.geometry.x[:, i] for i in range(self.mesh.geometry.dim)]
             z_min = self.comm.allreduce(zz.min(), op=MPI.MIN)
@@ -381,8 +415,8 @@ class MixedDimensionalProblem(ABC):
         y_max = self.comm.allreduce(yy.max(), op=MPI.MAX)
 
         return [x_min, x_max, y_min, y_max, z_min, z_max] if self.mesh.geometry.dim==3 else [x_min, x_max, y_min, y_max]
-    
-    def calculate_mesh_center(self):
+
+    def calculate_mesh_center(self) -> np.ndarray:
 
         if self.mesh.geometry.dim==3:
             x_min, x_max, y_min, y_max, z_min, z_max = self.get_min_and_max_coordinates()
@@ -473,43 +507,62 @@ class MixedDimensionalProblem(ABC):
         
         # Find the vertex that lies closest to the cell's centroid
         distances = np.sum((gamma_coords - mesh_center)**2, axis=1)
-        if len(distances)>0:
-            # Rank has points to evaluate
+
+        if self.comm.size==0:
+            # Running in serial
             argmin_local = np.argmin(distances)
-            min_dist_local = distances[argmin_local]
             min_vertex = gamma_vertices[argmin_local]
-        else:
-            # Set distance to infinity and placeholder vertex
-            min_dist_local = np.inf
-            min_vertex = -1
-            
-        # Communicate to find the vertex with minimal distance
-        # from the center point
-        min_eval = (min_dist_local, self.comm.rank)
-        reduced = self.comm.allreduce(min_eval, op=MPI.MINLOC)
-        self.owner_rank_membrane_vertex = reduced[1]
-
-        if self.comm.rank==self.owner_rank_membrane_vertex:
-            # Set the measurement point
-            self.png_point = self.mesh.geometry.x[min_vertex]
-            pprint("Phi m measurement point: ", self.png_point, flush=True)
-
+            png_point_ = self.mesh.geometry.x[min_vertex]
+            pprint("Phi m measurement point: ", png_point_, flush=True)
             # Recast point array in a shape that enables point evaluation with scifem
             if self.mesh.geometry.dim==2:
-                self.png_point = np.array([[self.png_point[0], self.png_point[1]]])
+                self.png_point = np.array([[png_point_[0], png_point_[1]]])
             else:
-                self.png_point = np.array([self.png_point])
+                self.png_point = np.array([png_point_])
         
-            # Broadcast to all processes
-            self.comm.bcast(self.png_point, root=self.owner_rank_membrane_vertex)
+        else:
+            # Running in parallel: each MPI rank finds its local minimum
+            # and the global minimum is found via MPI communication.
+            # The global minimum point is broadcasted to all ranks.
+            if len(distances)>0:
+                # Rank has points to evaluate
+                argmin_local = np.argmin(distances)
+                min_dist_local = distances[argmin_local]
+                min_vertex = gamma_vertices[argmin_local]
+            else:
+                # Set distance to infinity and placeholder vertex
+                min_dist_local = np.inf
+                min_vertex = -1
+
+            # Communicate to find the vertex with minimal distance
+            # from the center point
+            min_eval = (min_dist_local, self.comm.rank)
+            reduced = self.comm.allreduce(min_eval, op=MPI.MINLOC)
+            self.owner_rank_membrane_vertex = reduced[1]
+
+            if self.comm.rank==self.owner_rank_membrane_vertex:
+                # Set the measurement point
+                png_point_ = self.mesh.geometry.x[min_vertex]
+                pprint("Phi m measurement point: ", png_point_, flush=True)
+
+                # Recast point array in a shape that enables point evaluation with scifem
+                if self.mesh.geometry.dim==2:
+                    png_point = np.array([[png_point_[0], png_point_[1]]])
+                else:
+                    png_point = np.array([png_point_])
+            else:
+                png_point = None
+
+            # Broadcast membrane point to all processes
+            self.png_point = self.comm.bcast(png_point, root=self.owner_rank_membrane_vertex)
 
     def setup_domain(self):
 
         print("Reading mesh from XDMF file...")
 
         # Get mesh and facet file names
-        mesh_file = self.input_files['mesh_file']
-        ft_file = self.input_files['facet_file']
+        mesh_file: str = self.input_files['mesh_file']
+        ft_file: str   = self.input_files['facet_file']
 
         if not self.MMS_test:
             # Load mesh files with meshtags
@@ -518,9 +571,9 @@ class MixedDimensionalProblem(ABC):
                 # Cell tags and facet tags in the same file
                 with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
                     # Read mesh and cell tags
-                    self.mesh = xdmf.read_mesh(ghost_mode=self.ghost_mode)
-                    self.subdomains = xdmf.read_meshtags(self.mesh, name=self.ct_name)
-                    self.subdomains.name = "ct"    
+                    self.mesh: dfx.mesh.Mesh = xdmf.read_mesh(ghost_mode=self.ghost_mode)
+                    self.subdomains: dfx.mesh.MeshTags = xdmf.read_meshtags(self.mesh, name=self.ct_name)
+                    self.subdomains.name = "ct"
 
                     # Create facet entities, facet-to-cell connectivity and cell-to-cell connectivity
                     self.mesh.topology.create_entities(self.mesh.topology.dim-1)
@@ -528,15 +581,15 @@ class MixedDimensionalProblem(ABC):
                     self.mesh.topology.create_connectivity(self.mesh.topology.dim, self.mesh.topology.dim)
 
                     # Read facet tags
-                    self.boundaries = xdmf.read_meshtags(self.mesh, name=self.ft_name)
+                    self.boundaries: dfx.mesh.MeshTags = xdmf.read_meshtags(self.mesh, name=self.ft_name)
                     self.boundaries.name = "ft" 
             
             else:
                 # Cell tags and facet tags in separate files
                 with dfx.io.XDMFFile(MPI.COMM_WORLD, mesh_file, 'r') as xdmf:
                     # Read mesh and cell tags
-                    self.mesh = xdmf.read_mesh(ghost_mode=self.ghost_mode)
-                    self.subdomains = xdmf.read_meshtags(self.mesh, name=self.ct_name)
+                    self.mesh: dfx.mesh.Mesh = xdmf.read_mesh(ghost_mode=self.ghost_mode)
+                    self.subdomains: dfx.mesh.MeshTags = xdmf.read_meshtags(self.mesh, name=self.ct_name)
                     self.subdomains.name = "ct"
 
                 # Create facet entities, facet-to-cell connectivity and cell-to-cell connectivity
@@ -546,7 +599,7 @@ class MixedDimensionalProblem(ABC):
 
                 with dfx.io.XDMFFile(MPI.COMM_WORLD, ft_file, 'r') as xdmf:
                     # Read facet tags
-                    self.boundaries = xdmf.read_meshtags(self.mesh, name=self.ft_name)
+                    self.boundaries: dfx.mesh.MeshTags = xdmf.read_meshtags(self.mesh, name=self.ft_name)
                     self.boundaries.name = "ft"      
             
             # Scale mesh coordinates
@@ -555,15 +608,15 @@ class MixedDimensionalProblem(ABC):
         else:
 
             if self.dim==2:
-                self.mesh = dfx.mesh.create_unit_square(comm=MPI.COMM_WORLD, nx=self.N_mesh, ny=self.N_mesh, ghost_mode=self.ghost_mode)
-                self.subdomains = mark_subdomains_square(self.mesh)
-                self.boundaries = mark_boundaries_square_MMS(self.mesh)
+                self.mesh: dfx.mesh.Mesh = dfx.mesh.create_unit_square(comm=MPI.COMM_WORLD, nx=self.N_mesh, ny=self.N_mesh, ghost_mode=self.ghost_mode)
+                self.subdomains: dfx.mesh.MeshTags = mark_subdomains_square(self.mesh)
+                self.boundaries: dfx.mesh.MeshTags = mark_boundaries_square_MMS(self.mesh)
                 self.gamma_tags = (1, 2, 3, 4)
             
             elif self.dim==3:
-                self.mesh = dfx.mesh.create_unit_cube(comm=MPI.COMM_WORLD, nx=self.N_mesh, ny=self.N_mesh, nz=self.N_mesh, ghost_mode=self.ghost_mode)
-                self.subdomains = mark_subdomains_cube(self.mesh)
-                self.boundaries = mark_boundaries_cube_MMS(self.mesh)
+                self.mesh: dfx.mesh.Mesh = dfx.mesh.create_unit_cube(comm=MPI.COMM_WORLD, nx=self.N_mesh, ny=self.N_mesh, nz=self.N_mesh, ghost_mode=self.ghost_mode)
+                self.subdomains: dfx.mesh.MeshTags = mark_subdomains_cube(self.mesh)
+                self.boundaries: dfx.mesh.MeshTags = mark_boundaries_cube_MMS(self.mesh)
                 self.gamma_tags = (1, 2, 3, 4, 5, 6)
 
             # Create facet entities, facet-to-cell connectivity and cell-to-cell connectivity
@@ -612,6 +665,7 @@ class MixedDimensionalProblem(ABC):
 
         #-------------------------------------------------#        
         # Find vertices for evaluating the membrane potential
+        
         if self.MMS_test:
             gamma_facets = np.concatenate(([self.boundaries.find(tag) for tag in self.gamma_tags]))
             self.find_membrane_point_closest_to_centroid(gamma_facets)
@@ -699,6 +753,39 @@ class MixedDimensionalProblem(ABC):
             delta = domain_scale / 10
             self.initialize_injection_site(delta=delta)
 
+    def calculate_compartment_volumes_and_surface_areas(self):
+
+        self.vol_i_n = self.comm.allreduce(
+                                dfx.fem.assemble_scalar(
+                                    dfx.fem.form(1*self.dx(self.neuron_tags))
+                                    ),
+                                op=MPI.SUM
+                            ) # [m^3]
+        self.vol_i_g = self.comm.allreduce(
+                                dfx.fem.assemble_scalar(
+                                    dfx.fem.form(1*self.dx(self.glia_tags))
+                                    ),
+                                op=MPI.SUM
+                            ) # [m^3]
+        self.area_g_n = self.comm.allreduce(
+                                dfx.fem.assemble_scalar(
+                                    dfx.fem.form(1*self.dS(self.neuron_tags))
+                                    ),
+                                op=MPI.SUM
+                            ) # [m^2]
+        self.area_g_g = self.comm.allreduce(
+                                dfx.fem.assemble_scalar(
+                                    dfx.fem.form(1*self.dS(self.glia_tags))
+                                    ),
+                                op=MPI.SUM
+                            ) # [m^2]
+        self.vol_e = self.comm.allreduce(
+                                dfx.fem.assemble_scalar(
+                                    dfx.fem.form(1*self.dx(self.extra_tag))
+                                    ),
+                                op=MPI.SUM
+                            ) # [m^3]
+
     def find_steady_state_initial_conditions(self):
 
         # Get constants
@@ -767,7 +854,7 @@ class MixedDimensionalProblem(ABC):
 
         # Cotransporter currents
         I_KCC2 = lambda K_i, K_e, Cl_i, Cl_e: S_KCC2 * np.log((K_e * Cl_e)/(K_i*Cl_i))
-        I_NKCC1_n = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: S_NKCC1 * 1 / (1 + np.exp(16 - K_e)) * np.log((Na_e * K_e * Cl_e**2)/(Na_i * K_i * Cl_i**2))
+        I_NKCC1_n = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: S_NKCC1 / (1 + np.exp(16 - K_e)) * np.log((Na_e * K_e * Cl_e**2)/(Na_i * K_i * Cl_i**2))
 
 
         if self.glia_tags is None:
@@ -962,6 +1049,9 @@ class MixedDimensionalProblem(ABC):
             # Membrane potential initial conditions
             phi_m_0_n = phi_m_0 # Neuronal
             phi_m_0_g = self.phi_m_g_init.value # Glial [V]
+            Na_i_0_g = self.Na_i_g_init.value # [Mm]
+            K_i_0_g = self.K_i_g_init.value # [Mm]
+            Cl_i_0_g = self.Cl_i_g_init.value # [Mm]
 
             # Glial mechanisms
             # Kir-Na and Na/K pump mechanisms
@@ -1085,7 +1175,7 @@ class MixedDimensionalProblem(ABC):
 
                 init = [
                     phi_m_0_n, Na_i_0, Na_e_0, K_i_0, K_e_0, Cl_i_0, Cl_e_0,
-                    phi_m_0_g, Na_i_0, K_i_0, Cl_i_0, n_0, m_0, h_0,
+                    phi_m_0_g, Na_i_0_g, K_i_0_g, Cl_i_0_g, n_0, m_0, h_0,
                         ]
                 sol_ = init
 
@@ -1093,7 +1183,7 @@ class MixedDimensionalProblem(ABC):
                 
                     if t > 0:
                         init = sol_
-                        
+                    print(init)
                     # Integrate ODE system
                     sol = solve_ivp(
                             lambda t, x: three_compartment_rhs(x, t, args=init[:-3]),
@@ -1185,28 +1275,3 @@ class MixedDimensionalProblem(ABC):
             self.h_init.value = h_init_val
 
         print("Steady-state initial conditions determined by solving ODE system.")
-    
-    @abstractmethod
-    def init(self):
-        # Abstract method that must be implemented by concrete subclasses.
-        pass
-    
-    @abstractmethod
-    def setup_spaces(self):
-        # Abstract method that must be implemented by concrete subclasses.
-        pass
-
-    @abstractmethod
-    def setup_boundary_conditions(self):
-        # Abstract method that must be implemented by concrete subclasses.
-        pass
-    
-    @abstractmethod
-    def setup_source_terms(self):
-        # Abstract method that must be implemented by concrete subclasses.
-        pass
-
-    @abstractmethod
-    def setup_constants(self):
-        # Abstract method that must be implemented by concrete subclasses.
-        pass

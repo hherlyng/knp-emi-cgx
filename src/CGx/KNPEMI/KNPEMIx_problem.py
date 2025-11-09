@@ -12,6 +12,7 @@ from mpi4py   import MPI
 from petsc4py import PETSc
 from CGx.utils.setup_mms import ExactSolutionsKNPEMI
 from CGx.utils.mixed_dim_problem import MixedDimensionalProblem
+from CGx.utils.membrane_ODE_systems import MembraneODESystem
 from CGx.KNPEMI.KNPEMIx_ionic_model import HodgkinHuxley
 import basix.ufl
 
@@ -191,7 +192,62 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             print("Setting initial conditions for MMS test ...")
         elif self.find_initial_conditions:
             print("Solving ODE system to find steady-state initial conditions ...")
-            self.find_steady_state_initial_conditions()
+            comm: MPI.Comm = self.comm
+            self.calculate_compartment_volumes_and_surface_areas()
+            membrane_odes = MembraneODESystem(self, plot_flags=[True, False, True], stimulus_flag=False)
+            if comm.rank==0:
+                # Solve the membrane ODE system to find a steady-state
+                (phi_m_n_init_val, Na_i_n_init_val, Na_e_init_val, K_i_n_init_val, K_e_init_val,
+                 Cl_i_n_init_val, Cl_e_init_val, phi_m_g_init_val, Na_i_g_init_val, K_i_g_init_val, Cl_i_g_init_val,
+                 n_init_val, m_init_val, h_init_val) = membrane_odes.solve_ode_system()
+            else:
+                # Placeholders on non-root ranks
+                phi_m_n_init_val = None
+                Na_i_n_init_val = None
+                Na_e_init_val = None
+                K_i_n_init_val = None
+                K_e_init_val = None
+                Cl_i_n_init_val = None
+                Cl_e_init_val = None
+                phi_m_g_init_val = None
+                Na_i_g_init_val = None
+                K_i_g_init_val = None
+                Cl_i_g_init_val = None
+                n_init_val = None
+                m_init_val = None
+                h_init_val = None
+
+            # Communicate initial values from root process
+            phi_m_n_init_val = comm.bcast(phi_m_n_init_val, root=0)
+            Na_i_n_init_val = comm.bcast(Na_i_n_init_val, root=0)
+            Na_e_init_val = comm.bcast(Na_e_init_val, root=0)
+            K_i_n_init_val = comm.bcast(K_i_n_init_val, root=0)
+            K_e_init_val = comm.bcast(K_e_init_val, root=0)
+            Cl_i_n_init_val = comm.bcast(Cl_i_n_init_val, root=0)
+            Cl_e_init_val = comm.bcast(Cl_e_init_val, root=0)
+            phi_m_g_init_val = comm.bcast(phi_m_g_init_val, root=0)
+            Na_i_g_init_val = comm.bcast(Na_i_g_init_val, root=0)
+            K_i_g_init_val = comm.bcast(K_i_g_init_val, root=0)
+            Cl_i_g_init_val = comm.bcast(Cl_i_g_init_val, root=0)
+            n_init_val = comm.bcast(n_init_val, root=0)
+            m_init_val = comm.bcast(m_init_val, root=0)
+            h_init_val = comm.bcast(h_init_val, root=0)
+
+            # Update values of constants
+            self.phi_m_n_init.value = phi_m_n_init_val
+            self.Na_i_n_init.value = Na_i_n_init_val
+            self.Na_e_init.value = Na_e_init_val
+            self.K_i_n_init.value = K_i_n_init_val
+            self.K_e_init.value = K_e_init_val
+            self.Cl_i_n_init.value = Cl_i_n_init_val
+            self.Cl_e_init.value = Cl_e_init_val
+            self.phi_m_g_init.value = phi_m_g_init_val
+            self.Na_i_g_init.value = Na_i_g_init_val
+            self.K_i_g_init.value = K_i_g_init_val
+            self.Cl_i_g_init.value = Cl_i_g_init_val
+            self.n_init.value = n_init_val
+            self.m_init.value = m_init_val
+            self.h_init.value = h_init_val
         else:
             print("Setting initial conditions from input file ...")
             if self.glia_tags is None:
@@ -389,11 +445,14 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                         ):
                         
                         if self.stimulus_region:
-                            stim = model._add_stimulus(idx, range=self.stimulus_region_range, dir=self.stimulus_region_direction)
+                            stim: ufl.Coefficient = model._add_stimulus(idx, step=True, range=self.stimulus_region_range, dir=self.stimulus_region_direction)
                         else:
-                            stim = model._add_stimulus(idx)
+                            stim: ufl.Coefficient = model._add_stimulus(idx, step=True)
                         
                         I_ch_k_ += stim
+
+                        # Store stimulus expression for output
+                        self.stim_ufl_expr = stim
 
                     # Add contributions to ionic channel current
                     ion['I_ch'][gamma_tag] += I_ch_k_
@@ -664,9 +723,25 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         K_tot  = dfx.fem.assemble_scalar(dfx.fem.form(K_i *dxi + K_e *dxe, jit_options=self.jit_parameters))
         Cl_tot = dfx.fem.assemble_scalar(dfx.fem.form(Cl_i*dxi + Cl_e*dxe, jit_options=self.jit_parameters))
 
-        print("Total Na+ concentration: ", self.comm.allreduce(Na_tot, op=MPI.SUM))
-        print("Total K+  concentration: ", self.comm.allreduce(K_tot,  op=MPI.SUM))
-        print("Total Cl- concentration: ", self.comm.allreduce(Cl_tot, op=MPI.SUM))
+        print(f"Time {self.t.value*1e3:.2f} ms")
+        print(f"Total Na+ concentration: {self.comm.allreduce(Na_tot, op=MPI.SUM):.2e} mol")
+        print(f"Total K+  concentration: {self.comm.allreduce(K_tot,  op=MPI.SUM):.2e} mol")
+        print(f"Total Cl- concentration: {self.comm.allreduce(Cl_tot, op=MPI.SUM):.2e} mol")
+
+        for tag in self.intra_tags:
+            vol_i = dfx.fem.assemble_scalar(dfx.fem.form(1*dxi(tag), jit_options=self.jit_parameters))
+            vol_i = self.comm.allreduce(vol_i, op=MPI.SUM)
+            area_i = dfx.fem.assemble_scalar(dfx.fem.form(1*self.dS(tag), jit_options=self.jit_parameters))
+            area_i = self.comm.allreduce(area_i, op=MPI.SUM)
+            N_Na_i = dfx.fem.assemble_scalar(dfx.fem.form(Na_i*dxi(tag), jit_options=self.jit_parameters))
+            N_Na_i = self.comm.allreduce(N_Na_i, op=MPI.SUM)
+            N_K_i = dfx.fem.assemble_scalar(dfx.fem.form(K_i*dxi(tag), jit_options=self.jit_parameters))
+            N_K_i = self.comm.allreduce(N_K_i, op=MPI.SUM)
+            N_Cl_i = dfx.fem.assemble_scalar(dfx.fem.form(Cl_i*dxi(tag), jit_options=self.jit_parameters))
+            N_Cl_i = self.comm.allreduce(N_Cl_i, op=MPI.SUM)
+
+            charge = (N_Na_i + N_K_i - N_Cl_i) * self.F.value
+            print(f"  Intra tag {tag}: Volume = {vol_i:.2e} m^3, Area = {area_i:.2e} m^2, Charge = {charge:.2e} C")
 
     def print_errors(self):
         
@@ -735,7 +810,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     def setup_constants(self):
         """ Set default class variables. """
         # Physical parameters
-        self.C_M = Constant(self.mesh, dfx.default_scalar_type(self.C_M_value))  # Capacitance (F)
+        self.C_M = Constant(self.mesh, dfx.default_scalar_type(self.C_M_value))  # Capacitance (F / m^2)
         self.T   = Constant(self.mesh, dfx.default_scalar_type(self.T_value))   # Temperature (K)
         self.F   = Constant(self.mesh, dfx.default_scalar_type(self.F_value)) # Faraday's constant (C/mol)
         self.R   = Constant(self.mesh, dfx.default_scalar_type(self.R_value)) # Gas constant (J/(K*mol))
@@ -764,13 +839,13 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         self.k_dec = Constant(self.mesh, dfx.default_scalar_type(2.9e-8))	  # Decay factor for [K+]e (m/s)
 
         # Initial conditions
-        self.phi_m_init = Constant(self.mesh, dfx.default_scalar_type(-0.067))  # Membrane potential, neuronal (V) 
+        self.phi_m_init = Constant(self.mesh, dfx.default_scalar_type(-0.070))  # Membrane potential, neuronal (V) 
         self.Na_i_init  = Constant(self.mesh, dfx.default_scalar_type(12))        # Intracellular Na concentration (mol/m^3) (Constant)
-        self.Na_e_init  = Constant(self.mesh, dfx.default_scalar_type(100))       # Extracellular Na concentration (mol/m^3) (Constant)
-        self.K_i_init   = Constant(self.mesh, dfx.default_scalar_type(124))       # Intracellular K  concentration (mol/m^3) (Constant)
+        self.Na_e_init  = Constant(self.mesh, dfx.default_scalar_type(140))       # Extracellular Na concentration (mol/m^3) (Constant)
+        self.K_i_init   = Constant(self.mesh, dfx.default_scalar_type(130))       # Intracellular K  concentration (mol/m^3) (Constant)
         self.K_e_init   = Constant(self.mesh, dfx.default_scalar_type(4))         # Extracellular K  concentration (mol/m^3) (Constant)
-        self.Cl_i_init  = Constant(self.mesh, dfx.default_scalar_type(4))       # Intracellular Cl concentration (mol/m^3) (Constant)
-        self.Cl_e_init  = Constant(self.mesh, dfx.default_scalar_type(120))       # Extracellular Cl concentration (mol/m^3) (Constant)
+        self.Cl_i_init  = Constant(self.mesh, dfx.default_scalar_type(5))       # Intracellular Cl concentration (mol/m^3) (Constant)
+        self.Cl_e_init  = Constant(self.mesh, dfx.default_scalar_type(125))       # Extracellular Cl concentration (mol/m^3) (Constant)
 
         # Neuro+glia
         self.phi_m_n_init = Constant(self.mesh, self.phi_m_init.value)
@@ -778,13 +853,13 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         self.Na_i_n_init = Constant(self.mesh, self.Na_i_init.value)
         self.K_i_n_init = Constant(self.mesh, self.K_i_init.value)
         self.Cl_i_n_init = Constant(self.mesh, self.Cl_i_init.value)
-        self.Na_i_g_init = Constant(self.mesh, self.Na_i_init.value)
-        self.K_i_g_init = Constant(self.mesh, self.K_i_init.value)
-        self.Cl_i_g_init = Constant(self.mesh, self.Cl_i_init.value)
+        self.Na_i_g_init = Constant(self.mesh, dfx.default_scalar_type(15))
+        self.K_i_g_init = Constant(self.mesh, dfx.default_scalar_type(100))
+        self.Cl_i_g_init = Constant(self.mesh, dfx.default_scalar_type(5))
 
         # Initial values of gating variables
         self.n_init = Constant(self.mesh, dfx.default_scalar_type(0.276))
-        self.m_init = Constant(self.mesh, dfx.default_scalar_type(0.00379))
+        self.m_init = Constant(self.mesh, dfx.default_scalar_type(0.0379))
         self.h_init = Constant(self.mesh, dfx.default_scalar_type(0.688))
 
         # Source terms

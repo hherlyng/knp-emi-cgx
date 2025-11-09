@@ -10,11 +10,9 @@ import matplotlib.pyplot as plt
 
 from mpi4py         import MPI
 from petsc4py       import PETSc
-from CGx.utils      import restructure_xdmf
 from CGx.utils.misc import dump
 from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
 from CGx.KNPEMI.KNPEMIx_ionic_model import HodgkinHuxley
-import ufl
 
 pprint = print # Allows flushing from arbitrary rank
 print = PETSc.Sys.Print # Automatically flushes output to stream in parallel
@@ -92,11 +90,11 @@ class SolverKNPEMI:
         p = self.problem # For ease of notation
         
         # Create system matrix and right-hand side vector
-        self.A  = multiphenicsx.fem.petsc.create_matrix_block(p.a, restriction=(p.restriction, p.restriction))
-        self.b  = multiphenicsx.fem.petsc.create_vector_block(p.L, restriction=p.restriction)
-        
+        self.A: PETSc.Mat = multiphenicsx.fem.petsc.create_matrix_block(p.a, restriction=(p.restriction, p.restriction))
+        self.b: PETSc.Vec = multiphenicsx.fem.petsc.create_vector_block(p.L, restriction=p.restriction)
+
         # Create solution vector
-        self.x = multiphenicsx.fem.petsc.create_vector_block(p.L, restriction=p.restriction)
+        self.x: PETSc.Vec = multiphenicsx.fem.petsc.create_vector_block(p.L, restriction=p.restriction)
 
         # Configure Krylov solver
         self.ksp = PETSc.KSP().create(self.comm)
@@ -182,10 +180,10 @@ class SolverKNPEMI:
             opts.setValue('ksp_norm_type', self.norm_type)
             opts.setValue('ksp_initial_guess_nonzero',   self.nonzero_init_guess)
             if self.ksp_type=='hypre': opts.setValue('pc_hypre_boomeramg_max_iter', self.max_amg_iter)
-            if self.problem.mesh.geometry.dim == 3: opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.5)
+            if self.problem.mesh.geometry.dim==3: opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.5)
 
             # vector to collect number of iterations
-            self.iterations    = []
+            self.iterations = []
 
             if self.view_input:
                 opts.setValue('ksp_view', None)
@@ -209,11 +207,11 @@ class SolverKNPEMI:
 
         ns_vec = multiphenicsx.fem.petsc.create_vector_block(p.L, restriction=p.restriction)
 
-        dofmaps = [V.dofmap for V in p.V_list] # The function space dofmaps
+        dofmaps: list[multiphenicsx.fem.petsc.DofMap] = [V.dofmap for V in p.V_list] # The function space dofmaps
         functions = [dfx.fem.Function(V) for V in p.V_list] # Finite element functions in each space
         functions[p.N_ions].x.array[:] = 1.0 # Intracellular potential
         functions[2*p.N_ions+1].x.array[:] = 1.0 # Extracellular potential
-        Cs = [function.x.petsc_vec for function in functions] # Vector of constants
+        Cs: list[PETSc.Vec] = [function.x.petsc_vec for function in functions] # Vector of constants
 
         idx = 0
         with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(
@@ -239,15 +237,16 @@ class SolverKNPEMI:
             nullspace.remove(self.b)
 
     def solve(self):
+        """ Solve the KNP-EMI problem. """
         
         # Aliases
         p      = self.problem
         t      = p.t
         dt     = p.dt
         wh     = p.wh
-        
-        dofmaps = [V.dofmap for V in p.V_list] # The function space dofmaps
-        functions = [*wh[0], *wh[1]] # Finite element functions in each space
+
+        dofmaps: list[multiphenicsx.fem.petsc.DofMap] = [V.dofmap for V in p.V_list] # The function space dofmaps
+        functions: list[dfx.fem.Function] = [*wh[0], *wh[1]] # Finite element functions in each space
 
         setup_timer = 0.0
 
@@ -263,6 +262,9 @@ class SolverKNPEMI:
             p.setup_preconditioner(self.use_block_Jacobi)
             setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
             self.assemble_preconditioner()
+
+        # Print ion concentrations at t=0 to track conservation
+        p.print_conservation()
 
         # Time-stepping
         for i in range(self.time_steps):
@@ -362,7 +364,9 @@ class SolverKNPEMI:
             if p.point_evaluation: self.save_point_data(i+1)
 
             if i == self.time_steps-1:
-                # Last timestep, consolidate output files
+                # Last timestep, print info and consolidate output files
+                p.print_conservation()
+
                 if self.save_pngs:
                     self.print_figures()
                     print("\nPNG output saved in ", self.out_file_prefix)
@@ -376,7 +380,7 @@ class SolverKNPEMI:
                 
                 if self.save_dat:
                     self.save_data()
-                    print("\nCheckpoints saved in ", self.out_file_prefix)
+                    print("\nPoint data saved in ", self.out_file_prefix)
                 
                 print("\nTotal setup time:", setup_timer)
                 print("Total assembly time:", sum(self.assembly_time))
@@ -395,12 +399,12 @@ class SolverKNPEMI:
         p = self.problem # For ease of notation
 
         # Get number of dofs local to each processor and sum to rank 0
-        num_dofs = p.interior.index_map.size_local*p.num_variables + p.exterior.index_map.size_local*p.num_variables
+        num_dofs: int = p.interior.index_map.size_local*p.num_variables + p.exterior.index_map.size_local*p.num_variables
         num_dofs = self.comm.allreduce(num_dofs, op=MPI.SUM)
 
         # Get number of mesh cells local to each processor and sum to rank 0
         # Important to subtract shared dofs on the interfaces (cellular membrane, gamma)
-        num_cells = p.mesh.geometry.dofmap.__len__() - p.mesh.topology.interprocess_facets().__len__()
+        num_cells: int = p.mesh.geometry.dofmap.__len__() - p.mesh.topology.interprocess_facets().__len__()
         num_cells = self.comm.allreduce(num_cells, op=MPI.SUM)
 
         # Print problem and solver information
@@ -425,7 +429,7 @@ class SolverKNPEMI:
             print("Solver type: [" + self.ksp_type + "+" + self.pc_type + "]")
             print(f"Tolerance: {self.ksp_rtol:.2e}")
             
-            if self.use_P_mat: print("Preconditioning enabled.")
+            if self.use_P_mat: print("Preconditioner matrix P enabled.")
             
             print('Average iterations: ' + str(sum(self.iterations)/len(self.iterations)))
 
@@ -441,20 +445,23 @@ class SolverKNPEMI:
         
         self.out_v_string = self.out_file_prefix + 'v.png'
         self.v_t = []
+        self.v_t.append(1000 * scifem.evaluate_function(p.phi_m_prev, p.png_point)) # Converted to mV
+        
         if hasattr(p, 'n'):
             # Gating variables are a part of the problem
             self.n_t = []
             self.m_t = []
             self.h_t = []
             self.out_gate_string = self.out_file_prefix + 'gating.png'
-
-        self.v_t.append(1000 * scifem.evaluate_function(p.phi_m_prev, p.png_point)) # Converted to mV
-
-        if hasattr(p, 'n'):
             self.n_t.append(scifem.evaluate_function(p.n, p.png_point))
             self.m_t.append(scifem.evaluate_function(p.m, p.png_point))
             self.h_t.append(scifem.evaluate_function(p.h, p.png_point))
-
+        
+        if hasattr(p, 'stim_ufl_expr'):
+            self.stim_t = []
+            self.stim_current_form = dfx.fem.form(p.stim_ufl_expr * p.dS(p.stimulus_tags))
+            stim_current: float = dfx.fem.assemble_scalar(self.stim_current_form)
+            self.stim_t.append(stim_current)
             
     def save_png(self):
         """ Save data for the .png output of the membrane electric potential, and the gating variables if 
@@ -468,6 +475,11 @@ class SolverKNPEMI:
             self.n_t.append(scifem.evaluate_function(p.n, p.png_point))
             self.m_t.append(scifem.evaluate_function(p.m, p.png_point))
             self.h_t.append(scifem.evaluate_function(p.h, p.png_point))
+
+        if hasattr(p, 'stim_ufl_expr'):
+            stim_current: float = dfx.fem.assemble_scalar(self.stim_current_form)
+            print(f"Stimulus current at png point: {stim_current:.2e}")
+            self.stim_t.append(stim_current)
 
     def init_point_data(self):
         
@@ -508,7 +520,7 @@ class SolverKNPEMI:
 
         # Aliases
         dt = float(self.problem.dt.value)
-        time_steps = self.time_steps
+        time_steps: int = self.time_steps
         times = np.linspace(0, 1000 * time_steps * dt, time_steps + 1)
 
         # Save plot of membrane potential
@@ -527,6 +539,13 @@ class SolverKNPEMI:
             ax.set_xlabel('Time [ms]')
             ax.legend()
             fig.savefig(self.out_gate_string)
+
+        if hasattr(self.problem, 'stim_ufl_expr'):
+            fig, ax = plt.subplots()
+            ax.plot(times, np.array(self.stim_t).flatten(), label='Stimulus')
+            ax.set_xlabel('Time [ms]')
+            ax.set_ylabel('Stimulus [A/m^2]')
+            fig.savefig(self.out_file_prefix + 'stimulus.png')
 
         if hasattr(self.problem, 'gamma_points'):
             # Plot membrane potential in points on gamma
@@ -615,25 +634,23 @@ class SolverKNPEMI:
         p = self.problem # For ease of notation
 
         # Write tag data
-        filename = self.out_file_prefix + 'subdomains.xdmf'
+        filename: str = self.out_file_prefix + 'subdomains.xdmf'
         xdmf_file = dfx.io.XDMFFile(self.comm, filename, "w")
         xdmf_file.write_mesh(p.mesh)
         xdmf_file.write_meshtags(p.subdomains, p.mesh.geometry)
         xdmf_file.close()
 
         # Create solution file and write mesh to file
-        filename = self.out_file_prefix + 'solution.xdmf'
+        filename: str = self.out_file_prefix + 'solution.xdmf'
         self.xdmf_file = dfx.io.XDMFFile(self.comm, filename, "w")
         self.xdmf_file.write_mesh(p.mesh)
         self.xdmf_file.write_meshtags(p.subdomains, p.mesh.geometry)
-        self.output_filename = filename # Store the output filename for post-processing
+        self.output_filename: str = filename # Store the output filename for post-processing
 
         # Write solution functions to file
         for idx in range(p.num_variables):
             self.xdmf_file.write_function(p.u_p[0][idx], float(p.t.value))
             self.xdmf_file.write_function(p.u_p[1][idx], float(p.t.value))
-        
-        return
 
     def save_xdmf(self):
         """ Write solution functions (ion concentrations and electric potentials) to file. """
@@ -641,13 +658,11 @@ class SolverKNPEMI:
         for idx in range(self.problem.num_variables):
             self.xdmf_file.write_function(self.problem.u_p[0][idx], float(self.problem.t.value))
             self.xdmf_file.write_function(self.problem.u_p[1][idx], float(self.problem.t.value))
-
-        return
     
     def init_checkpoint_file(self):
         """ Initialize checkpointing of solution functions. """
         p = self.problem
-        self.cpoint_filename = filename = self.out_file_prefix + "checkpoints"
+        self.cpoint_filename: str = filename = self.out_file_prefix + "checkpoints"
         a4d.write_mesh(filename, p.mesh)
         a4d.write_meshtags(filename, p.mesh, meshtags=p.subdomains)
         a4d.write_meshtags(filename, p.mesh, meshtags=p.boundaries)
@@ -690,7 +705,6 @@ class SolverKNPEMI:
         
         # Run XDMF parser to restructure the data for better visualization
         # restructure_xdmf.run(self.output_filename)
-        return
 
     def save_data(self):
         """ Save numpy data. """
@@ -705,11 +719,12 @@ class SolverKNPEMI:
             np.save(self.problem.output_dir+"ics_point_values.npy", self.ics_point_values)
             np.save(self.problem.output_dir+"ecs_point_values.npy", self.ecs_point_values)
 
-        return
+        if hasattr(self.problem, 'stim_ufl_expr'):
+            np.save(self.problem.output_dir+"stimulus.npy", np.array(self.stim_t))
 
     # Default iterative solver parameters
-    ksp_rtol           = 1e-7
-    ksp_max_it         = 1000	
+    ksp_rtol           = 1e-9
+    ksp_max_it         = 5000	
     ksp_type           = 'gmres' # cg
     pc_type            = 'hypre' # lu, fieldsplit, hypre
     norm_type          = 'preconditioned'
