@@ -522,16 +522,22 @@ class HodgkinHuxley(IonicModel):
                         1.0, 0.0
                     )
         
-        p.stimulus_area = dfx.fem.assemble_scalar(
-                            dfx.fem.form(
-                                mask * p.dS(p.stimulus_tags)
-                            )
-                        )
-        p.stimulus_area = p.comm.allreduce(p.stimulus_area, op=MPI.SUM)
-        PETSc.Sys.Print(f"Stimulus area on tag {p.stimulus_tags[0]}: {p.stimulus_area:0.6e} m^2")
-        scale = 1.0 / p.stimulus_area
+        # Define the stimulus current [A/m^2]
+        stim_current = mask * p.g_syn_bar * exp_factor * (p.phi_m_prev - ion["E"]) 
 
-        return scale * mask * p.g_syn_bar * exp_factor * (p.phi_m_prev - ion["E"]) # Stimulus current [A/m^2]
+        if p.scale_stimulus:
+            # Scale the stimulus current by the surface area of the stimulus tag
+            p.stimulus_area = dfx.fem.assemble_scalar(
+                                dfx.fem.form(
+                                    mask * p.dS(p.stimulus_tags)
+                                )
+                            )
+            p.stimulus_area = p.comm.allreduce(p.stimulus_area, op=MPI.SUM)
+            PETSc.Sys.Print(f"Stimulus area on tag {p.stimulus_tags[0]}: {p.stimulus_area:0.6e} m^2")
+            scale = 1.0 / p.stimulus_area
+            stim_current *= scale
+
+        return stim_current
 
     def update_gating_variables(self):
         """ Update the gating variables n, m, h using either the Rush-Larsen method or Forward Euler. """

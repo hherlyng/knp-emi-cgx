@@ -1,0 +1,75 @@
+# KNP-EMI Config File
+problem_type : "KNP-EMI"
+
+# Input and output directories
+input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/'
+output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/benedusi2024/'
+
+# Numerical parameters 
+dt : 0.00005 # Timestep size 
+time_steps : 300 # Number of timesteps
+# T  : 100e-3 # Simulation end time
+
+# Problem constants (in consistent units)
+physical_constants:
+  T : 300   # Temperature [K]
+  F : 96485 # Faraday constant [C/mol]
+  R : 8.314 # Gas constant [J/(K*mol)]
+
+C_M : 0.02 # Membrane capacitance [F/m^2]
+
+# Mesh and meshtags files 
+mesh_file      : "geometries/square32.xdmf"
+cell_tag_file  : "geometries/square32.xdmf"
+facet_tag_file : "geometries/square32_facets.xdmf"
+
+mesh_conversion_factor: 1e-6
+
+ics_tags  : [1] # Intracellular space cell tags
+ecs_tags  : [2] # Extracellular space cell tags
+boundary_tags : [3] # Boundary facet tags
+membrane_tags : [4] # Membrane (interface) facet tags
+stimulus_tags : [4]
+
+point_evaluation :
+  ics_points : [[0.5, 0.5]]
+  ecs_points : [[0.15, 0.15]]
+
+initial_conditions :
+ phi_m : -0.06774
+ Na_i  :  12.0
+ Na_e  :  100.0
+ K_i   :  125.0
+ K_e   :  4.0
+ Cl_i  :  137.0
+ Cl_e  :  104.0
+ n : 0.276
+ m : 0.0379
+ h : 0.688
+
+stimulus :
+  conductance :
+    g_syn_bar : 40 # Maximum synaptic conductance
+    g_Na_bar_val : 1200 # Na max conductivity [S/m**2]
+    g_K_bar_val  : 360 # K max conductivity [S/m**2]
+    g_Na_leak_val   : 1.0 # Na leak conductivity [S/m**2]
+    g_K_leak_val    : 4.0 # K leak conductivity [S/m**2]
+    g_Cl_leak_val   : 0.0 # Cl leak conductivity [S/m**2]
+  a_syn : 0.002 # Synaptic time constant
+  T_stim : 10e-3 # Stimulus period
+  scale : False
+
+solver :
+  direct : True
+  output :
+    save_xdmf : False
+    save_cpoints : False
+    save_pngs : True
+    save_dat : True
+
+
+
+# -6.98860770e-02  1.15646071e+01  1.40145131e+02  1.28845363e+02
+#   4.38487915e+00  6.59021923e+00  1.24469927e+02 -8.50000000e-02
+#   1.50000000e+01  1.00000000e+02  5.00000000e+00  2.46158281e-01
+#   2.93158303e-02  7.50959989e-01

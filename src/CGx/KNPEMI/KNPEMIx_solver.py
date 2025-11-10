@@ -263,9 +263,6 @@ class SolverKNPEMI:
             setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
             self.assemble_preconditioner()
 
-        # Print ion concentrations at t=0 to track conservation
-        p.print_conservation()
-
         # Time-stepping
         for i in range(self.time_steps):
 
@@ -364,8 +361,6 @@ class SolverKNPEMI:
             if p.point_evaluation: self.save_point_data(i+1)
 
             if i == self.time_steps-1:
-                # Last timestep, print info and consolidate output files
-                p.print_conservation()
 
                 if self.save_pngs:
                     self.print_figures()

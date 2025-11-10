@@ -278,22 +278,46 @@ class MixedDimensionalProblem(ABC):
 
         if 'stimulus' in config:
             try:
-                self.g_syn_bar_val: float = config['stimulus']['g_syn_bar']
+                self.g_syn_bar_val: float = config['stimulus']['conductance']['g_syn_bar']
                 self.a_syn_val: float = config['stimulus']['a_syn']
                 self.T_stim_val: float = config['stimulus']['T_stim']
             except:
-                raise RuntimeError('For stimulus, provide g_syn_bar, a_syn and T in input file.')
+                raise RuntimeError('For stimulus, provide g_syn_bar, a_syn and T_stim in input file.')
             if 'tau_syn_rise' in config['stimulus'] or 'tau_syn_decay' in config['stimulus']:
                 try:
                     self.tau_syn_rise: float = config['stimulus']['tau_syn_rise']
                     self.tau_syn_decay: float = config['stimulus']['tau_syn_decay']
                 except:
                     raise RuntimeError('For rise and decay stimulus, provide tau_syn_rise and tau_syn_decay in input file.')
+            if 'scale' in config['stimulus']:
+                # Scale stimulus by the surface area of the stimulated membrane
+                self.scale_stimulus = config['stimulus']['scale']
+            else:
+                raise RuntimeError('Provide whether to scale stimulus strength by surface area in stimulus configuration in input file.')
+
+            self.g_Na_bar_val: float = config['stimulus']['conductance']['g_Na_bar_val'] if 'conductance' in config['stimulus'] and 'g_Na_bar_val' in config['stimulus']['conductance'] else 1200.0
+            self.g_K_bar_val: float  = config['stimulus']['conductance']['g_K_bar_val'] if 'conductance' in config['stimulus'] and 'g_K_bar_val' in config['stimulus']['conductance'] else 360.0
+            self.g_Na_leak_val: float   = config['stimulus']['conductance']['g_Na_leak_val'] if 'conductance' in config['stimulus'] and 'g_Na_leak_val' in config['stimulus']['conductance'] else 1.0
+            self.g_Na_leak_g_val: float = config['stimulus']['conductance']['g_Na_leak_g_val'] if 'conductance' in config['stimulus'] and 'g_Na_leak_g_val' in config['stimulus']['conductance'] else 1.0
+            self.g_K_leak_val: float    = config['stimulus']['conductance']['g_K_leak_val'] if 'conductance' in config['stimulus'] and 'g_K_leak_val' in config['stimulus']['conductance'] else 4.0
+            self.g_K_leak_g_val: float  = config['stimulus']['conductance']['g_K_leak_g_val'] if 'conductance' in config['stimulus'] and 'g_K_leak_g_val' in config['stimulus']['conductance'] else 16.96
+            self.g_Cl_leak_val: float   = config['stimulus']['conductance']['g_Cl_leak_val'] if 'conductance' in config['stimulus'] and 'g_Cl_leak_val' in config['stimulus']['conductance'] else 0.25
+            self.g_Cl_leak_g_val: float = config['stimulus']['conductance']['g_Cl_leak_g_val'] if 'conductance' in config['stimulus'] and 'g_Cl_leak_g_val' in config['stimulus']['conductance'] else 0.50
+            
         else:
             # Default stimulus of a single action potential with strength 40 S/m^2,
             self.g_syn_bar_val = 40.0
             self.a_syn_val     = 1e-3
             self.T_stim_val    = 1.0
+            self.scale_stimulus = False
+            self.g_Na_bar_val = 1200 # Na max conductivity [S/m**2]
+            self.g_K_bar_val   = 360 # K max conductivity [S/m**2]
+            self.g_Na_leak_val   = 1.0 # Na leak conductivity [S/m**2]
+            self.g_Na_leak_g_val = 1.0 # Na leak conductivity [S/m**2]
+            self.g_K_leak_val    = 4.0 # K leak conductivity [S/m**2]
+            self.g_K_leak_g_val  = 16.96 # K leak conductivity [S/m**2]
+            self.g_Cl_leak_val   = 0.25 # Cl leak conductivity [S/m**2]
+            self.g_Cl_leak_g_val = 0.50 # Cl leak conductivity [S/m**2]
 
         if 'stimulus_region' in config:
             self.stimulus_region = True
@@ -365,9 +389,9 @@ class MixedDimensionalProblem(ABC):
         self.extra_tag = tuple(self.extra_tag,)
         self.boundary_tags = tuple(self.boundary_tags,)
         self.gamma_tags = tuple(self.gamma_tags,)
-        self.glia_tags = tuple(self.glia_tags,)
         self.neuron_tags = tuple(self.neuron_tags,)
         self.stimulus_tags = tuple(self.stimulus_tags,)
+        if self.glia_tags is not None: self.glia_tags = tuple(self.glia_tags,)
 
     def init_ionic_models(self, ionic_models: IonicModel | list[IonicModel]):
 

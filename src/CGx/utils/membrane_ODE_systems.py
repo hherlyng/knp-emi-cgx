@@ -329,6 +329,8 @@ class MembraneODESystem:
         for t, dt in zip(times, np.diff(times)):
         
             if t > 0:
+                # Initial condition for ODE solver is
+                # solution at previous timestep
                 init = sol_
 
             # Integrate ODE system
@@ -337,8 +339,8 @@ class MembraneODESystem:
                     [t, t+dt],
                     init,
                     method='BDF',
-                    rtol=1e-8,
-                    atol=1e-9
+                    rtol=1e-6,
+                    atol=1e-8
                 )
             
             # Update previous solution
@@ -346,7 +348,7 @@ class MembraneODESystem:
 
             if self.plot: self.append_arrays(sol_)
             
-            if np.allclose(sol.y[:, 0], sol_, rtol=1e-7):
+            if np.allclose(sol.y[:, 0], sol_, rtol=1e-7, atol=1e-9):
                 # Current solution equals previous solution
                 print("Steady state reached.")
                 [print(f"Variable {j}: {sol_[j]:.18f}") for j in range(len(sol_))]

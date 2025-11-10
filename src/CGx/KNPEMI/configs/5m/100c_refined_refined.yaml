@@ -40,9 +40,11 @@ point_evaluation :
   ecs_points : [[1200, 3113, 3607], [1200, 1334, 3934]]
   
 stimulus :
-  g_syn_bar : 0.50e-10 # Maximum synaptic conductance
+  conductance :
+    g_syn_bar : 0.50e-10 # Maximum synaptic conductance
   a_syn : 5e-4 # Synaptic time constant
   T_stim : 40e-3 # Stimulus period, high freq = 20 ms, normal freq = 1 s
+  scale : True
 
 solver :
   direct : False

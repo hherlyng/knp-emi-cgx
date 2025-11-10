@@ -403,13 +403,13 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         vphi_e = ve[self.N_ions] # test function         
 
         # Initialize
-        alpha_i_sum = 0 # Sum of fractions intracellular
-        alpha_e_sum = 0 # Sum of fractions extracellular
-        J_phi_i     = 0 # Total intracellular flux
-        J_phi_e     = 0 # Total extracellular flux
+        alpha_i_sum = ufl.ZeroBaseForm(None) # Sum of fractions intracellular
+        alpha_e_sum = ufl.ZeroBaseForm(None) # Sum of fractions extracellular
+        J_phi_i     = ufl.ZeroBaseForm(None) # Total intracellular flux
+        J_phi_e     = ufl.ZeroBaseForm(None) # Total extracellular flux
 
         # Total ionic channel current
-        I_ch = dict.fromkeys(self.gamma_tags, 0)
+        I_ch = dict.fromkeys(self.gamma_tags, ufl.ZeroBaseForm(None))
 
         # Initialize parts of variational formulation
         for idx, ion in enumerate(self.ion_list):
@@ -427,7 +427,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             ion['E'] = (psi/z) * ufl.ln(ue_p[idx] / ui_p[idx])
 
             # Initialize dictionary of ionic channel
-            ion['I_ch'] = dict.fromkeys(self.gamma_tags, 0)
+            ion['I_ch'] = dict.fromkeys(self.gamma_tags, ufl.ZeroBaseForm(None))
 
             # Loop over ionic models
             for model in self.ionic_models:
@@ -490,7 +490,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             # Linearized ion fluxes
             Ji = -Di * grad(ki) - (Di*z/psi) * ki_prev * grad(phi_i)
             Je = -De * grad(ke) - (De*z/psi) * ke_prev * grad(phi_e)
-
+            
             # Add contributions to total current flux
             J_phi_i += z*Ji
             J_phi_e += z*Je
@@ -810,52 +810,52 @@ class ProblemKNPEMI(MixedDimensionalProblem):
     def setup_constants(self):
         """ Set default class variables. """
         # Physical parameters
-        self.C_M = Constant(self.mesh, dfx.default_scalar_type(self.C_M_value))  # Capacitance (F / m^2)
-        self.T   = Constant(self.mesh, dfx.default_scalar_type(self.T_value))   # Temperature (K)
-        self.F   = Constant(self.mesh, dfx.default_scalar_type(self.F_value)) # Faraday's constant (C/mol)
-        self.R   = Constant(self.mesh, dfx.default_scalar_type(self.R_value)) # Gas constant (J/(K*mol))
+        self.C_M = Constant(self.mesh, dfx.default_scalar_type(self.C_M_value))  # Capacitance [F / m^2]
+        self.T   = Constant(self.mesh, dfx.default_scalar_type(self.T_value))   # Temperature [K]
+        self.F   = Constant(self.mesh, dfx.default_scalar_type(self.F_value)) # Faraday's constant [C/mol]
+        self.R   = Constant(self.mesh, dfx.default_scalar_type(self.R_value)) # Gas constant [J/(K*mol)]
         self.psi = Constant(self.mesh, dfx.default_scalar_type(self.psi_value)) # Recurring variable
     
-        self.g_Na_bar  = Constant(self.mesh, dfx.default_scalar_type(1200)) # Na max conductivity (S/m**2)
-        self.g_K_bar   = Constant(self.mesh, dfx.default_scalar_type(360))  # K max conductivity (S/m**2)    
-        self.g_Na_leak   = Constant(self.mesh, dfx.default_scalar_type(1.0)) # Na leak conductivity (S/m**2) (Constant)
-        self.g_Na_leak_g = Constant(self.mesh, dfx.default_scalar_type(1.0)) # Na leak conductivity (S/m**2) (Constant)
-        self.g_K_leak    = Constant(self.mesh, dfx.default_scalar_type(4.0)) # K leak conductivity (S/m**2)
-        self.g_K_leak_g  = Constant(self.mesh, dfx.default_scalar_type(16.96)) # K leak conductivity (S/m**2)
-        self.g_Cl_leak   = Constant(self.mesh, dfx.default_scalar_type(0.25)) # Cl leak conductivity (S/m**2) (Constant)
-        self.g_Cl_leak_g = Constant(self.mesh, dfx.default_scalar_type(0.50)) # Cl leak conductivity (S/m**2) (Constant)
-        self.g_syn_bar = Constant(self.mesh, dfx.default_scalar_type(self.g_syn_bar_val)) # Synaptic conductivity (S/m**2)
-        self.a_syn     = Constant(self.mesh, dfx.default_scalar_type(self.a_syn_val)) # Synaptic time constant (s)
-        self.T_stim    = Constant(self.mesh, dfx.default_scalar_type(self.T_stim_val)) # Synaptic stimulus time (s)
-        self.D_Na = Constant(self.mesh, dfx.default_scalar_type(1.33e-9)) # Diffusion coefficients Na (m/s^2) (Constant)
-        self.D_K  = Constant(self.mesh, dfx.default_scalar_type(1.96e-9)) # Diffusion coefficients K (m/s^2) (Constant)
-        self.D_Cl = Constant(self.mesh, dfx.default_scalar_type(2.03e-9)) # diffusion coefficients Cl (m/s^2) (Constant)
-        self.phi_rest  = Constant(self.mesh, dfx.default_scalar_type(-0.065)) # Resting membrane potential (V)
+        self.g_Na_bar  = Constant(self.mesh, dfx.default_scalar_type(self.g_Na_bar_val)) # Na max conductivity [S/m**2]
+        self.g_K_bar   = Constant(self.mesh, dfx.default_scalar_type(self.g_K_bar_val))  # K max conductivity [S/m**2]
+        self.g_Na_leak   = Constant(self.mesh, dfx.default_scalar_type(self.g_Na_leak_val)) # Na leak conductivity [S/m**2]
+        self.g_Na_leak_g = Constant(self.mesh, dfx.default_scalar_type(self.g_Na_leak_g_val)) # Na leak conductivity [S/m**2]
+        self.g_K_leak    = Constant(self.mesh, dfx.default_scalar_type(self.g_K_leak_val)) # K leak conductivity [S/m**2]
+        self.g_K_leak_g  = Constant(self.mesh, dfx.default_scalar_type(self.g_K_leak_g_val)) # K leak conductivity [S/m**2]
+        self.g_Cl_leak   = Constant(self.mesh, dfx.default_scalar_type(self.g_Cl_leak_val)) # Cl leak conductivity [S/m**2]
+        self.g_Cl_leak_g = Constant(self.mesh, dfx.default_scalar_type(self.g_Cl_leak_g_val)) # Cl leak conductivity [S/m**2]
+        self.g_syn_bar = Constant(self.mesh, dfx.default_scalar_type(self.g_syn_bar_val)) # Synaptic conductivity [S/m**2]
+        self.a_syn     = Constant(self.mesh, dfx.default_scalar_type(self.a_syn_val)) # Synaptic time constant [s]
+        self.T_stim    = Constant(self.mesh, dfx.default_scalar_type(self.T_stim_val)) # Synaptic stimulus time [s]
+        self.D_Na = Constant(self.mesh, dfx.default_scalar_type(1.33e-9)) # Diffusion coefficients Na [m/s^2]
+        self.D_K  = Constant(self.mesh, dfx.default_scalar_type(1.96e-9)) # Diffusion coefficients K [m/s^2]
+        self.D_Cl = Constant(self.mesh, dfx.default_scalar_type(2.03e-9)) # Diffusion coefficients Cl [m/s^2]
+        self.phi_rest  = Constant(self.mesh, dfx.default_scalar_type(-0.065)) # Resting membrane potential [V]
 
         # Potassium buffering params
-        self.rho_pump = Constant(self.mesh, dfx.default_scalar_type(1.115e-6)) # maximum pump rate (mol/m**2 s)
-        self.P_Nai = Constant(self.mesh, dfx.default_scalar_type(10))          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
-        self.P_Ke  = Constant(self.mesh, dfx.default_scalar_type(1.5))         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
-        self.k_dec = Constant(self.mesh, dfx.default_scalar_type(2.9e-8))	  # Decay factor for [K+]e (m/s)
+        self.rho_pump = Constant(self.mesh, dfx.default_scalar_type(1.115e-6)) # maximum pump rate [mol/m**2 s]
+        self.P_Nai = Constant(self.mesh, dfx.default_scalar_type(10))          # [Na+]i threshold for Na+/K+ pump [mol/m^3]
+        self.P_Ke  = Constant(self.mesh, dfx.default_scalar_type(1.5))         # [K+]e  threshold for Na+/K+ pump [mol/m^3]
+        self.k_dec = Constant(self.mesh, dfx.default_scalar_type(2.9e-8))	   # Decay factor for [K+]e [m/s]
 
         # Initial conditions
-        self.phi_m_init = Constant(self.mesh, dfx.default_scalar_type(-0.070))  # Membrane potential, neuronal (V) 
-        self.Na_i_init  = Constant(self.mesh, dfx.default_scalar_type(12))        # Intracellular Na concentration (mol/m^3) (Constant)
-        self.Na_e_init  = Constant(self.mesh, dfx.default_scalar_type(140))       # Extracellular Na concentration (mol/m^3) (Constant)
-        self.K_i_init   = Constant(self.mesh, dfx.default_scalar_type(130))       # Intracellular K  concentration (mol/m^3) (Constant)
-        self.K_e_init   = Constant(self.mesh, dfx.default_scalar_type(4))         # Extracellular K  concentration (mol/m^3) (Constant)
-        self.Cl_i_init  = Constant(self.mesh, dfx.default_scalar_type(5))       # Intracellular Cl concentration (mol/m^3) (Constant)
-        self.Cl_e_init  = Constant(self.mesh, dfx.default_scalar_type(125))       # Extracellular Cl concentration (mol/m^3) (Constant)
+        self.phi_m_init = Constant(self.mesh, dfx.default_scalar_type(-0.070)) # Membrane potential [V] 
+        self.Na_i_init  = Constant(self.mesh, dfx.default_scalar_type(12))     # Intracellular Na concentration [mol/m^3]
+        self.Na_e_init  = Constant(self.mesh, dfx.default_scalar_type(140))    # Extracellular Na concentration [mol/m^3]
+        self.K_i_init   = Constant(self.mesh, dfx.default_scalar_type(130))    # Intracellular K  concentration [mol/m^3]
+        self.K_e_init   = Constant(self.mesh, dfx.default_scalar_type(4))      # Extracellular K  concentration [mol/m^3]
+        self.Cl_i_init  = Constant(self.mesh, dfx.default_scalar_type(5))      # Intracellular Cl concentration [mol/m^3]
+        self.Cl_e_init  = Constant(self.mesh, dfx.default_scalar_type(125))    # Extracellular Cl concentration [mol/m^3]
 
         # Neuro+glia
-        self.phi_m_n_init = Constant(self.mesh, self.phi_m_init.value)
-        self.phi_m_g_init = Constant(self.mesh, -0.085) # [V]
-        self.Na_i_n_init = Constant(self.mesh, self.Na_i_init.value)
-        self.K_i_n_init = Constant(self.mesh, self.K_i_init.value)
-        self.Cl_i_n_init = Constant(self.mesh, self.Cl_i_init.value)
-        self.Na_i_g_init = Constant(self.mesh, dfx.default_scalar_type(15))
-        self.K_i_g_init = Constant(self.mesh, dfx.default_scalar_type(100))
-        self.Cl_i_g_init = Constant(self.mesh, dfx.default_scalar_type(5))
+        self.phi_m_n_init = Constant(self.mesh, self.phi_m_init.value) # Membrane potential, neuronal [V] 
+        self.phi_m_g_init = Constant(self.mesh, -0.085) # Membrane potential, glial [V]
+        self.Na_i_n_init = Constant(self.mesh, self.Na_i_init.value) # Intracellular Na concentration, neuronal [mol/m^3]
+        self.K_i_n_init  = Constant(self.mesh, self.K_i_init.value)  # Intracellular K  concentration, neuronal [mol/m^3]
+        self.Cl_i_n_init = Constant(self.mesh, self.Cl_i_init.value) # Intracellular Cl concentration, neuronal [mol/m^3]
+        self.Na_i_g_init = Constant(self.mesh, dfx.default_scalar_type(15))  # Intracellular Na concentration, glial [mol/m^3]
+        self.K_i_g_init  = Constant(self.mesh, dfx.default_scalar_type(100)) # Intracellular K  concentration, glial [mol/m^3]
+        self.Cl_i_g_init = Constant(self.mesh, dfx.default_scalar_type(5))   # Intracellular Cl concentration, glial [mol/m^3]
 
         # Initial values of gating variables
         self.n_init = Constant(self.mesh, dfx.default_scalar_type(0.276))

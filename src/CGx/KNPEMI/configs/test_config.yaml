@@ -44,9 +44,9 @@ stimulus :
   T_stim : 1.0 # Stimulus period [s]
 
 solver :
-  direct : False
+  direct : True
   output :
     save_xdmf : False
     save_cpoints : False
-    save_pngs : True
-    save_dat : True
+    save_pngs : False
+    save_dat : False
