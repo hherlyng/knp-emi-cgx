@@ -15,9 +15,9 @@ physical_constants:
 C_M : 0.02 # Membrane capacitance [F/m^2]
 
 # Mesh and meshtags files 
-mesh_file      : "./square32.xdmf"
-cell_tag_file  : "./square32.xdmf"
-facet_tag_file : "./square32_facets.xdmf"
+mesh_file      : "./input/geometries/square32.xdmf"
+cell_tag_file  : "./input/geometries/square32.xdmf"
+facet_tag_file : "./input/geometries/square32_facets.xdmf"
 
 ics_tags  : [1] # Intracellular space cell tags
 ecs_tags  : [2] # Extracellular space cell tags
@@ -39,9 +39,11 @@ initial_conditions:
   h : 0.688  # Na+ inactivation gate variable
 
 stimulus :
-  g_syn_bar : 1e-9 # Maximum synaptic conductance [S/m^2]
+  conductance:
+    g_syn_bar : 1e-9 # Maximum synaptic conductance [S/m^2]
   a_syn : 5e-4 # Synaptic time constant [s]
   T_stim : 1.0 # Stimulus period [s]
+  scale: True
 
 solver :
   direct : True

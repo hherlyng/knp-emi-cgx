@@ -1,7 +1,7 @@
 import ufl
+import basix.ufl
 import multiphenicsx
 import multiphenicsx.fem
-import multiphenicsx.fem.petsc
 
 import numpy   as np
 import dolfinx as dfx
@@ -12,9 +12,8 @@ from mpi4py   import MPI
 from petsc4py import PETSc
 from CGx.utils.setup_mms import ExactSolutionsKNPEMI
 from CGx.utils.mixed_dim_problem import MixedDimensionalProblem
-from CGx.utils.membrane_ODE_systems import MembraneODESystem
+from CGx.utils.membrane_ODE_systems import TwoCompartmentMembraneODESystem, ThreeCompartmentMembraneODESystem
 from CGx.KNPEMI.KNPEMIx_ionic_model import HodgkinHuxley
-import basix.ufl
 
 print = PETSc.Sys.Print # Automatically flushes output to stream in parallel
 
@@ -194,60 +193,101 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             print("Solving ODE system to find steady-state initial conditions ...")
             comm: MPI.Comm = self.comm
             self.calculate_compartment_volumes_and_surface_areas()
-            membrane_odes = MembraneODESystem(self, plot_flags=[True, False, True], stimulus_flag=False)
-            if comm.rank==0:
-                # Solve the membrane ODE system to find a steady-state
-                (phi_m_n_init_val, Na_i_n_init_val, Na_e_init_val, K_i_n_init_val, K_e_init_val,
-                 Cl_i_n_init_val, Cl_e_init_val, phi_m_g_init_val, Na_i_g_init_val, K_i_g_init_val, Cl_i_g_init_val,
-                 n_init_val, m_init_val, h_init_val) = membrane_odes.solve_ode_system()
+            if self.glia_tags is None:
+                membrane_odes = TwoCompartmentMembraneODESystem(self, plot_flags=[True, False, True], stimulus_flag=False)
+                if comm.rank==0:
+                    # Solve the membrane ODE system to find a steady-state
+                    (phi_m_init_val, Na_i_init_val, Na_e_init_val, K_i_init_val, K_e_init_val,
+                     Cl_i_init_val, Cl_e_init_val, n_init_val, m_init_val, h_init_val) = membrane_odes.solve_ode_system()
+                else:
+                    # Placeholders on non-root ranks
+                    phi_m_init_val = None
+                    Na_i_init_val = None
+                    Na_e_init_val = None
+                    K_i_init_val = None
+                    K_e_init_val = None
+                    Cl_i_init_val = None
+                    Cl_e_init_val = None
+                    n_init_val = None
+                    m_init_val = None
+                    h_init_val = None
+                # Communicate initial values from root process
+                phi_m_init_val = comm.bcast(phi_m_init_val, root=0)
+                Na_i_init_val = comm.bcast(Na_i_init_val, root=0)
+                Na_e_init_val = comm.bcast(Na_e_init_val, root=0)
+                K_i_init_val = comm.bcast(K_i_init_val, root=0)
+                K_e_init_val = comm.bcast(K_e_init_val, root=0)
+                Cl_i_init_val = comm.bcast(Cl_i_init_val, root=0)
+                Cl_e_init_val = comm.bcast(Cl_e_init_val, root=0)
+                n_init_val = comm.bcast(n_init_val, root=0)
+                m_init_val = comm.bcast(m_init_val, root=0)
+                h_init_val = comm.bcast(h_init_val, root=0)
+                # Update values of constants
+                self.phi_m_init.value = phi_m_init_val
+                self.Na_i_init.value = Na_i_init_val
+                self.Na_e_init.value = Na_e_init_val
+                self.K_i_init.value = K_i_init_val
+                self.K_e_init.value = K_e_init_val
+                self.Cl_i_init.value = Cl_i_init_val
+                self.Cl_e_init.value = Cl_e_init_val
+                self.n_init.value = n_init_val
+                self.m_init.value = m_init_val
+                self.h_init.value = h_init_val
             else:
-                # Placeholders on non-root ranks
-                phi_m_n_init_val = None
-                Na_i_n_init_val = None
-                Na_e_init_val = None
-                K_i_n_init_val = None
-                K_e_init_val = None
-                Cl_i_n_init_val = None
-                Cl_e_init_val = None
-                phi_m_g_init_val = None
-                Na_i_g_init_val = None
-                K_i_g_init_val = None
-                Cl_i_g_init_val = None
-                n_init_val = None
-                m_init_val = None
-                h_init_val = None
+                membrane_odes = ThreeCompartmentMembraneODESystem(self, plot_flags=[True, False, True], stimulus_flag=False)
+                if comm.rank==0:
+                    # Solve the membrane ODE system to find a steady-state
+                    (phi_m_n_init_val, Na_i_n_init_val, Na_e_init_val, K_i_n_init_val, K_e_init_val,
+                    Cl_i_n_init_val, Cl_e_init_val, phi_m_g_init_val, Na_i_g_init_val, K_i_g_init_val, Cl_i_g_init_val,
+                    n_init_val, m_init_val, h_init_val) = membrane_odes.solve_ode_system()
+                else:
+                    # Placeholders on non-root ranks
+                    phi_m_n_init_val = None
+                    Na_i_n_init_val = None
+                    Na_e_init_val = None
+                    K_i_n_init_val = None
+                    K_e_init_val = None
+                    Cl_i_n_init_val = None
+                    Cl_e_init_val = None
+                    phi_m_g_init_val = None
+                    Na_i_g_init_val = None
+                    K_i_g_init_val = None
+                    Cl_i_g_init_val = None
+                    n_init_val = None
+                    m_init_val = None
+                    h_init_val = None
 
-            # Communicate initial values from root process
-            phi_m_n_init_val = comm.bcast(phi_m_n_init_val, root=0)
-            Na_i_n_init_val = comm.bcast(Na_i_n_init_val, root=0)
-            Na_e_init_val = comm.bcast(Na_e_init_val, root=0)
-            K_i_n_init_val = comm.bcast(K_i_n_init_val, root=0)
-            K_e_init_val = comm.bcast(K_e_init_val, root=0)
-            Cl_i_n_init_val = comm.bcast(Cl_i_n_init_val, root=0)
-            Cl_e_init_val = comm.bcast(Cl_e_init_val, root=0)
-            phi_m_g_init_val = comm.bcast(phi_m_g_init_val, root=0)
-            Na_i_g_init_val = comm.bcast(Na_i_g_init_val, root=0)
-            K_i_g_init_val = comm.bcast(K_i_g_init_val, root=0)
-            Cl_i_g_init_val = comm.bcast(Cl_i_g_init_val, root=0)
-            n_init_val = comm.bcast(n_init_val, root=0)
-            m_init_val = comm.bcast(m_init_val, root=0)
-            h_init_val = comm.bcast(h_init_val, root=0)
+                # Communicate initial values from root process
+                phi_m_n_init_val = comm.bcast(phi_m_n_init_val, root=0)
+                Na_i_n_init_val = comm.bcast(Na_i_n_init_val, root=0)
+                Na_e_init_val = comm.bcast(Na_e_init_val, root=0)
+                K_i_n_init_val = comm.bcast(K_i_n_init_val, root=0)
+                K_e_init_val = comm.bcast(K_e_init_val, root=0)
+                Cl_i_n_init_val = comm.bcast(Cl_i_n_init_val, root=0)
+                Cl_e_init_val = comm.bcast(Cl_e_init_val, root=0)
+                phi_m_g_init_val = comm.bcast(phi_m_g_init_val, root=0)
+                Na_i_g_init_val = comm.bcast(Na_i_g_init_val, root=0)
+                K_i_g_init_val = comm.bcast(K_i_g_init_val, root=0)
+                Cl_i_g_init_val = comm.bcast(Cl_i_g_init_val, root=0)
+                n_init_val = comm.bcast(n_init_val, root=0)
+                m_init_val = comm.bcast(m_init_val, root=0)
+                h_init_val = comm.bcast(h_init_val, root=0)
 
-            # Update values of constants
-            self.phi_m_n_init.value = phi_m_n_init_val
-            self.Na_i_n_init.value = Na_i_n_init_val
-            self.Na_e_init.value = Na_e_init_val
-            self.K_i_n_init.value = K_i_n_init_val
-            self.K_e_init.value = K_e_init_val
-            self.Cl_i_n_init.value = Cl_i_n_init_val
-            self.Cl_e_init.value = Cl_e_init_val
-            self.phi_m_g_init.value = phi_m_g_init_val
-            self.Na_i_g_init.value = Na_i_g_init_val
-            self.K_i_g_init.value = K_i_g_init_val
-            self.Cl_i_g_init.value = Cl_i_g_init_val
-            self.n_init.value = n_init_val
-            self.m_init.value = m_init_val
-            self.h_init.value = h_init_val
+                # Update values of constants
+                self.phi_m_n_init.value = phi_m_n_init_val
+                self.Na_i_n_init.value = Na_i_n_init_val
+                self.Na_e_init.value = Na_e_init_val
+                self.K_i_n_init.value = K_i_n_init_val
+                self.K_e_init.value = K_e_init_val
+                self.Cl_i_n_init.value = Cl_i_n_init_val
+                self.Cl_e_init.value = Cl_e_init_val
+                self.phi_m_g_init.value = phi_m_g_init_val
+                self.Na_i_g_init.value = Na_i_g_init_val
+                self.K_i_g_init.value = K_i_g_init_val
+                self.Cl_i_g_init.value = Cl_i_g_init_val
+                self.n_init.value = n_init_val
+                self.m_init.value = m_init_val
+                self.h_init.value = h_init_val
         else:
             print("Setting initial conditions from input file ...")
             if self.glia_tags is None:

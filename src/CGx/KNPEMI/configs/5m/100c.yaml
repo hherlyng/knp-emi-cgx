@@ -3,12 +3,12 @@ problem_type : "KNP-EMI"
 
 # Input and output directories
 input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/'
-output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/5m/100c/normal_frequency/'
+output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/5m/100c/T_stim=40ms_long/'
 
 # Numerical parameters 
 dt : 0.000025 # Timestep size 
 # time_steps : 50 # Number of timesteps
-T  : 250e-3 # Simulation end time
+T  : 1000e-3 # Simulation end time
 
 # Problem constants (in consistent units)
 physical_constants:
@@ -43,7 +43,7 @@ stimulus :
   conductance :
     g_syn_bar : 0.50e-10 # Maximum synaptic conductance
   a_syn : 5e-4 # Synaptic time constant
-  T_stim : 1000e-3 # Stimulus period, high freq = 20 ms, normal freq = 1 s
+  T_stim : 40e-3 # Stimulus period, high freq = 20 ms, normal freq = 1 s
   scale : True
 
 solver :
@@ -55,31 +55,17 @@ solver :
     save_dat : True
 
 initial_conditions:
-  # phi_m_n : -0.06774
-  # phi_m_g : -0.078070853285535674
-  # Na_i_n : 12.0
-  # Na_i_g : 14.421136114602672862
-  # Na_e : 100.0
-  # K_i_n : 125.0
-  # K_i_g : 100.735001928700583562
-  # K_e : 4.0
-  # Cl_i_n : 137.0
-  # Cl_i_g : 4.864265957879501556
-  # Cl_e : 104.0
-  # n : 0.276
-  # m : 0.0379
-  # h : 0.688
-  phi_m_n : -0.071082690683513236
-  phi_m_g : -0.078070853285535674
-  Na_i_n : 12.029528270873768747
-  Na_i_g : 14.421136114602672862
-  Na_e : 140.111543169829730004
-  K_i_n : 129.907249433001112493
-  K_i_g : 100.735001928700583562
-  K_e : 4.010709034063037137
-  Cl_i_n : 5.061298535599002335
-  Cl_i_g : 4.864265957879501556
-  Cl_e : 124.876250243426014208
-  n : 0.229897261889963705
-  m : 0.025265637617126482
-  h : 0.782448548533397403
+  phi_m_n : -0.071082075111761220
+  phi_m_g : -0.078069576395480997
+  Na_i_n : 12.029898798545003658
+  Na_i_g : 14.411671878848842709
+  Na_e : 140.113676324729539147
+  K_i_n : 129.905707014906880659
+  K_i_g : 100.746795141379337224
+  K_e : 4.011030345444695833
+  Cl_i_n : 5.062471519805969322
+  Cl_i_g : 4.861940740971256503
+  Cl_e : 124.873791508435672881
+  n : 0.229905361625143939
+  m : 0.025267578253885887
+  h : 0.782433416183704322

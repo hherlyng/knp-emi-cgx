@@ -736,7 +736,7 @@ class SolverKNPEMI:
     nonzero_init_guess = True
 
     # Default output save interval
-    save_interval     = 1 # save every nth timestep
+    save_interval     = 5 # save every nth timestep
 
     # Iteration counter and time variables
     tot_its           = 0
