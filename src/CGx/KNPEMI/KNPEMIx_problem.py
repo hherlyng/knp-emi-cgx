@@ -45,8 +45,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         self.V = dfx.fem.functionspace(self.mesh, P) # Continuous Lagrange space 
         self.V_list = [self.V.clone() for _ in range(self.num_variables_total)] # List of each variable's function space
         self.V_list_ie = [self.V_list[:self.num_variables], self.V_list[self.num_variables:]] # Separated list with intra- and extracellular variables split
-        self.R = create_real_functionspace(self.mesh) # Real function space
-        self.V_list.append(self.R) # Append real function space for Lagrange multiplier
+        self.R_space = create_real_functionspace(self.mesh) # Real function space
+        self.V_list.append(self.R_space) # Append real function space for Lagrange multiplier
         self.W = ufl.MixedFunctionSpace(*self.V_list) # Mixed function space
 
         # Functions for storing the solutions
@@ -92,7 +92,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
         self.interior = multiphenicsx.fem.DofMapRestriction(self.V.dofmap, self.dofs_intra)
         self.exterior = multiphenicsx.fem.DofMapRestriction(self.V.dofmap, self.dofs_extra)
-        self.real_restriction = multiphenicsx.fem.DofMapRestriction(self.R.dofmap, np.array([], dtype=np.int32))
+        self.real_restriction = multiphenicsx.fem.DofMapRestriction(self.R_space.dofmap, np.array([], dtype=np.int32))
 
         # Get interior and exterior dofs
         self.restriction = [None] * (self.num_variables_total + 1)
@@ -933,12 +933,16 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
         # Initial conditions
         self.phi_m_init = Constant(self.mesh, dfx.default_scalar_type(-0.070)) # Membrane potential [V] 
-        self.Na_i_init  = Constant(self.mesh, dfx.default_scalar_type(12))     # Intracellular Na concentration [mol/m^3]
-        self.Na_e_init  = Constant(self.mesh, dfx.default_scalar_type(140))    # Extracellular Na concentration [mol/m^3]
+        self.Na_i_init  = Constant(self.mesh, dfx.default_scalar_type(10))     # Intracellular Na concentration [mol/m^3]
+        self.Na_e_init  = Constant(self.mesh, dfx.default_scalar_type(145))    # Extracellular Na concentration [mol/m^3]
         self.K_i_init   = Constant(self.mesh, dfx.default_scalar_type(130))    # Intracellular K  concentration [mol/m^3]
-        self.K_e_init   = Constant(self.mesh, dfx.default_scalar_type(4))      # Extracellular K  concentration [mol/m^3]
+        self.K_e_init   = Constant(self.mesh, dfx.default_scalar_type(3))      # Extracellular K  concentration [mol/m^3]
         self.Cl_i_init  = Constant(self.mesh, dfx.default_scalar_type(5))      # Intracellular Cl concentration [mol/m^3]
-        self.Cl_e_init  = Constant(self.mesh, dfx.default_scalar_type(125))    # Extracellular Cl concentration [mol/m^3]
+        self.Cl_e_init  = Constant(self.mesh, dfx.default_scalar_type(134))    # Extracellular Cl concentration [mol/m^3]
+
+        # Init conds from "Dependence of spontaneous neuronal firing
+        # and depolarisation block on astroglial membrane
+        # transport mechanisms" (Øyehaug et al. 2012)
 
         # Neuro+glia
         self.phi_m_n_init = Constant(self.mesh, self.phi_m_init.value) # Membrane potential, neuronal [V] 
@@ -950,10 +954,10 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         self.K_i_g_init  = Constant(self.mesh, dfx.default_scalar_type(100)) # Intracellular K  concentration, glial [mol/m^3]
         self.Cl_i_g_init = Constant(self.mesh, dfx.default_scalar_type(5))   # Intracellular Cl concentration, glial [mol/m^3]
 
-        # Initial values of gating variables
-        self.n_init = Constant(self.mesh, dfx.default_scalar_type(0.276))
-        self.m_init = Constant(self.mesh, dfx.default_scalar_type(0.0379))
-        self.h_init = Constant(self.mesh, dfx.default_scalar_type(0.688))
+        # Initial values of gating variables (steady state at phi_m = -70 mV) 
+        self.n_init = Constant(self.mesh, dfx.default_scalar_type(0.24458654944007155))
+        self.m_init = Constant(self.mesh, dfx.default_scalar_type(0.028905534475191896))
+        self.h_init = Constant(self.mesh, dfx.default_scalar_type(0.7540796658225248))
 
         # Source terms
         self.Na_e_f = Constant(self.mesh, dfx.default_scalar_type(0.0))

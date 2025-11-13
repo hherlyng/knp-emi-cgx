@@ -297,15 +297,14 @@ class MixedDimensionalProblem(ABC):
             else:
                 raise RuntimeError('Provide whether to scale stimulus strength by surface area in stimulus configuration in input file.')
 
-            self.g_Na_bar_val: float = g_dict.get('g_Na_bar', 1200.0)
-            self.g_K_bar_val: float  = g_dict.get('g_K_bar', 360.0)
-            self.g_Na_leak_val: float   = g_dict.get('g_Na_leak', 1.0)
-            self.g_Na_leak_g_val: float = g_dict.get('g_Na_leak_g', 1.0)
-            self.g_K_leak_val: float    = g_dict.get('g_K_leak', 4.0)
-            self.g_K_leak_g_val: float  = g_dict.get('g_K_leak_g', 16.96)
-            self.g_Cl_leak_val: float   = g_dict.get('g_Cl_leak', 0.25)
-            self.g_Cl_leak_g_val: float = g_dict.get('g_Cl_leak_g', 0.50)
-
+            self.g_Na_bar_val: float = g_dict.get('g_Na_bar', 1200.0) # Na max conductivity [S/m**2]
+            self.g_K_bar_val: float  = g_dict.get('g_K_bar', 360.0) # K max conductivity [S/m**2]
+            self.g_Na_leak_val: float   = g_dict.get('g_Na_leak', 0.3) # Neuronal Na leak conductivity [S/m**2]
+            self.g_Na_leak_g_val: float = g_dict.get('g_Na_leak_g', 1.0) # Glial Na leak conductivity [S/m**2]
+            self.g_K_leak_val: float    = g_dict.get('g_K_leak', 0.1) # Neuronal K leak conductivity [S/m**2]
+            self.g_K_leak_g_val: float  = g_dict.get('g_K_leak_g', 16.96) # Glial K leak conductivity [S/m**2]
+            self.g_Cl_leak_val: float   = g_dict.get('g_Cl_leak', 0.25) # Neuronal Cl leak conductivity [S/m**2]
+            self.g_Cl_leak_g_val: float = g_dict.get('g_Cl_leak_g', 2.0) # Glial Cl leak conductivity [S/m**2]
         else:
             # Default stimulus of a single action potential with strength 40 S/m^2,
             self.g_syn_bar_val = 40.0
@@ -314,12 +313,12 @@ class MixedDimensionalProblem(ABC):
             self.scale_stimulus = False
             self.g_Na_bar_val = 1200 # Na max conductivity [S/m**2]
             self.g_K_bar_val   = 360 # K max conductivity [S/m**2]
-            self.g_Na_leak_val   = 1.0 # Na leak conductivity [S/m**2]
-            self.g_Na_leak_g_val = 1.0 # Na leak conductivity [S/m**2]
-            self.g_K_leak_val    = 4.0 # K leak conductivity [S/m**2]
-            self.g_K_leak_g_val  = 16.96 # K leak conductivity [S/m**2]
-            self.g_Cl_leak_val   = 0.25 # Cl leak conductivity [S/m**2]
-            self.g_Cl_leak_g_val = 0.50 # Cl leak conductivity [S/m**2]
+            self.g_Na_leak_val   = 1.0 # Neuronal Na leak conductivity [S/m**2]
+            self.g_Na_leak_g_val = 1.0 # Glial Na leak conductivity [S/m**2]
+            self.g_K_leak_val    = 4.0 # Neuronal K leak conductivity [S/m**2]
+            self.g_K_leak_g_val  = 16.96 # Glial K leak conductivity [S/m**2]
+            self.g_Cl_leak_val   = 0.25 # Neuronal Cl leak conductivity [S/m**2]
+            self.g_Cl_leak_g_val = 0.50 # Glial Cl leak conductivity [S/m**2]
 
         if 'stimulus_region' in config:
             self.stimulus_region = True

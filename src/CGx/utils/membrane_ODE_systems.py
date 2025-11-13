@@ -1,7 +1,10 @@
 from abc import abstractmethod, ABC
+from petsc4py import PETSc
 import numpy   as np
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
+
+print = PETSc.Sys.Print
 
 class MembraneODESystem(ABC):
     """ Class to solve the ODE system for initial conditions of membrane potential and ionic concentrations. """
@@ -9,8 +12,8 @@ class MembraneODESystem(ABC):
                 problem,
                 plot_flags: list[bool]=[False]*3,
                 stimulus_flag: bool=False,
-                timestep: float=1e-6,
-                max_time: float=3.0):
+                timestep: float=1e-3,
+                max_time: float=500.0):
         """ Initialize the ODE system.
 
             Parameters
@@ -34,6 +37,8 @@ class MembraneODESystem(ABC):
         self.stimulus = stimulus_flag
         self.timestep = timestep
         self.max_time = max_time
+
+        self.initialize_constants()
     
     @abstractmethod
     def initialize_constants(self):
@@ -194,13 +199,13 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
         phi_m_0 = self.phi_m_init # [V]
 
         # ATP pump
-        I_hat = 0.449 # Maximum pump strength [A/m^2]
-        m_K = 2.0 # ECS K+ pump threshold [mM]
-        m_Na = 7.7 # ICS Na+ pump threshold [mM]
+        I_hat = 0.25 # Maximum pump strength [A/m^2]
+        P_Na_i = 10          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
+        P_K_e  = 1.5         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
 
         # Cotransporters
-        S_KCC2 = 0.0034
-        S_NKCC1 = 0.023
+        S_KCC2 = 0.0068
+        S_NKCC1 = 0.00023
 
         # Hodgkin-Huxley parameters
         alpha_n = lambda V_m: 0.01e3 * (10.-V_m) / (np.exp((10. - V_m)/10.) - 1.)
@@ -219,16 +224,17 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
         E = lambda z_k, c_ki, c_ke: R*T/(z_k*F) * np.log(c_ke/c_ki)
 
         # ATP current
-        par_1 = lambda K_e: 1 + m_K / K_e
-        par_2 = lambda Na_i: 1 + m_Na / Na_i
+        par_1 = lambda K_e: 1 + P_K_e / K_e
+        par_2 = lambda Na_i: 1 + P_Na_i / Na_i
         I_ATP = lambda Na_i, K_e: \
                     I_hat / (par_1(K_e)**2 * par_2(Na_i)**3)
 
         # Cotransporter currents
+        f_NKCC1 = lambda K_e: 1 / (1 + (0.03/(K_e - K_e_0))**10) # Function that silences NKCC1 at low K_e and is zero at K_e = K_e_0
         I_KCC2 = lambda K_i, K_e, Cl_i, Cl_e: \
-                    S_KCC2 * np.log((K_e * Cl_e)/(K_i*Cl_i))
+                    S_KCC2 * np.log((K_i * Cl_i)/(K_e*Cl_e))
         I_NKCC1_n = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: \
-                        S_NKCC1 / (1 + np.exp(16 - K_e)) * np.log((Na_e * K_e * Cl_e**2)/(Na_i * K_i * Cl_i**2))
+                        S_NKCC1 * f_NKCC1(K_e) * np.log((Na_e * K_e * Cl_e**2)/(Na_i * K_i * Cl_i**2))
 
 
         # Volumes and surface areas in m^3 and m^2
@@ -254,27 +260,25 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
         C = lambda delta_phi_K: 1 + np.exp((delta_phi_K + 0.0185)/0.0425)
         D = lambda phi_m: 1 + np.exp(-(0.1186 + phi_m)/0.0441)
 
-        rho_pump = 1.12e-6	 # Maximum pump rate (mol/m**2 s)
-        P_Na_i = 10          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
-        P_K_e  = 1.5         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
+        rho_pump = 1.1*1.12e-6	 # Maximum pump rate (mol/m**2 s)
 
         # Pump expression
         I_glia_pump = lambda Na_i, K_e: rho_pump*F * (1 / (1 + (P_Na_i/Na_i)**(3/2))) * (1 / (1 + P_K_e/K_e))
 
         # Inward-rectifying K channel function
-        f_Kir = lambda K_e, delta_phi_K, phi_m: A*B/(C(delta_phi_K)*D(phi_m))*np.sqrt(K_e/(K_e_0+1e-10))
+        f_Kir = lambda K_e, delta_phi_K, phi_m: A*B/(C(delta_phi_K)*D(phi_m))*np.sqrt(K_e/(K_e_0))
 
         # Cotransporter strength and current
-        g_KCC1 = 7e-1 # [S / m^2]
+        g_KCC1 = 7e-2 # [S / m^2]
         S_KCC1 = g_KCC1 * R*T / F
-        I_KCC1 = lambda K_i, K_e, Cl_i, Cl_e: S_KCC1 * np.log((K_e * Cl_e) / (K_i * Cl_i))
+        I_KCC1 = lambda K_i, K_e, Cl_i, Cl_e: S_KCC1 * np.log((K_i * Cl_i) / (K_e * Cl_e))
 
         g_NKCC1_g = 2e-2 # [S / m^2]
         S_NKCC1_g = g_NKCC1_g * R*T / F
-        I_NKCC1_g = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: S_NKCC1_g * np.log((Na_e * K_e * Cl_e**2)/(Na_i * K_i * Cl_i**2))
+        I_NKCC1_g = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: S_NKCC1_g * f_NKCC1(K_e) * np.log((Na_e * K_e * Cl_e**2)/(Na_i * K_i * Cl_i**2))
         
         # Define right-hand side of ODE system
-        def three_compartment_rhs(t: float, x: list[float], args: list[float]) -> list[float]:
+        def three_compartment_rhs(t: float, x: list[float]) -> list[float]:
             """ Right-hand side of ODE system for three-compartment system (neuron + glia + ECS). 
             
                 Parameters
@@ -283,8 +287,6 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
                     Current time [s]
                 x : list[float]
                     Current state vector
-                args : list[float]
-                    Additional arguments (unused, but required by solve_ivp)
             """
             # Extract variables at previous timestep
             phi_m_n_ = x[0]; Na_i_n_ = x[1]; Na_e_ = x[2]; K_i_n_ = x[3]; K_e_ = x[4]; Cl_i_n_ = x[5]; Cl_e_ = x[6]
@@ -300,53 +302,61 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
             E_Cl_n = E(z_Cl, Cl_i_n_, Cl_e_)
 
             g_Na_stim = g_Na_stim_func(t) if self.stimulus else 0.0
+            
+            I_ATP_n_ = I_ATP(Na_i_n_, K_e_)
+            I_NKCC1_n_ = I_NKCC1_n(Na_i_n_, Na_e_, K_i_n_, K_e_, Cl_i_n_, Cl_e_)
+            I_KCC2_ = I_KCC2(K_i_n_, K_e_, Cl_i_n_, Cl_e_)
 
             # Calculate neuronal ionic currents
             I_Na_n = (
-                    (g_Na_leak + g_Na_bar * m**3 * h + g_Na_stim) * (phi_m_n_ - E_Na_n)
-                    + 3*I_ATP(Na_i_n_, K_e_)
-                    - I_NKCC1_n(Na_i_n_, Na_e_, K_i_n_, K_e_, Cl_i_n_, Cl_e_)
+                    (g_Na_leak + g_Na_bar * m**3 * h) * (phi_m_n_ - E_Na_n)
+                    + 3*I_ATP_n_
+                    - I_NKCC1_n_
                 )
             I_K_n = (
                     (g_K_leak + g_K_bar * n**4)* (phi_m_n_ - E_K_n)
-                    - 2*I_ATP(Na_i_n_, K_e_)
-                    - I_NKCC1_n(Na_i_n_, Na_e_, K_i_n_, K_e_, Cl_i_n_, Cl_e_)
-                    + I_KCC2(K_i_n_, K_e_, Cl_i_n_, Cl_e_)
+                    - 2*I_ATP_n_
+                    - I_NKCC1_n_
+                    + I_KCC2_
                 )
             I_Cl_n = (
-                        g_Cl_leak * (phi_m_n_ - E_Cl_n)
-                    - 2*I_NKCC1_n(Na_i_n_, Na_e_, K_i_n_, K_e_, Cl_i_n_, Cl_e_)
-                    + I_KCC2(K_i_n_, K_e_, Cl_i_n_, Cl_e_)
+                    g_Cl_leak * (phi_m_n_ - E_Cl_n)
+                    + 2*I_NKCC1_n_
+                    - I_KCC2_
                 )
             # Total neuronal ionic current [A/m^2]
-            I_ion_n = I_Na_n + I_K_n - I_Cl_n 
-
+            I_ion_n = I_Na_n + I_K_n + I_Cl_n 
+            
             # Glial mechanisms
-            # Calculate Nernst potentials
+            # Calculate Nernst potentials [V]
             E_Na_g = E(z_Na, Na_i_g_, Na_e_)
             E_K_g  = E(z_K, K_i_g_, K_e_)
             E_Cl_g = E(z_Cl, Cl_i_g_, Cl_e_)
             
             # Calculate glial ionic currents
             delta_phi_K = phi_m_g_ - E_K_g
+            I_ATP_g_ = I_glia_pump(Na_i_g_, K_e_)
+            I_NKCC1_g_ = I_NKCC1_g(Na_i_g_, Na_e_, K_i_g_, K_e_, Cl_i_g_, Cl_e_)
+            I_KCC1_ = I_KCC1(K_i_g_, K_e_, Cl_i_g_, Cl_e_)
+            
             I_Na_g = (
                     g_Na_leak_g * (phi_m_g_ - E_Na_g)
-                    + 3*I_glia_pump(Na_i_g_, K_e_)
-                    - I_NKCC1_g(Na_i_g_, Na_e_, K_i_g_, K_e_, Cl_i_g_, Cl_e_)
+                    + 3*I_ATP_g_
+                    - I_NKCC1_g_
                 )
             I_K_g = (
                     g_K_leak_g * f_Kir(K_e_, delta_phi_K, phi_m_g_) * (phi_m_g_ - E_K_g)
-                    - 2*I_glia_pump(Na_i_g_, K_e_)
-                    - I_NKCC1_g(Na_i_g_, Na_e_, K_i_g_, K_e_, Cl_i_g_, Cl_e_)
-                    + I_KCC1(K_i_g_, K_e_, Cl_i_g_, Cl_e_)
+                    - 2*I_ATP_g_
+                    - I_NKCC1_g_
+                    + I_KCC1_
                 )
             I_Cl_g = (
-                      g_Cl_leak_g * (phi_m_g_ - E_Cl_g)
-                    - 2*I_NKCC1_g(Na_i_g_, Na_e_, K_i_g_, K_e_, Cl_i_g_, Cl_e_)
-                    + I_KCC1(K_i_g_, K_e_, Cl_i_g_, Cl_e_)
+                    g_Cl_leak_g * (phi_m_g_ - E_Cl_g)
+                    + 2*I_NKCC1_g_
+                    - I_KCC1_
                 )
             # Total glial ionic current density [A/m^2]
-            I_ion_g = I_Na_g + I_K_g - I_Cl_g
+            I_ion_g = I_Na_g + I_K_g + I_Cl_g
 
             # Define right-hand expressions
             rhs_phi_n = -1/C_m * I_ion_n
@@ -395,12 +405,12 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
 
             # Integrate ODE system
             sol = solve_ivp(
-                    lambda t, x: three_compartment_rhs(t, x, args=init[:-3]),
+                    lambda t, x: three_compartment_rhs(t, x),
                     [t, t+dt],
                     init,
-                    method='BDF',
-                    rtol=1e-5,
-                    atol=1e-7
+                    method='Radau',
+                    rtol=1e-6,
+                    atol=1e-8
                 )
             
             # Update previous solution
@@ -408,15 +418,14 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
 
             if self.plot: self.append_arrays(sol_)
 
-            if np.allclose(sol.y[:, 0], sol_, rtol=1e-9, atol=1e-11):
-                # Current solution equals previous solution
-                print("Steady state reached.")
+            if np.allclose(three_compartment_rhs(t, sol_), 0.0, rtol=1e-8, atol=1e-10):
+                print("Steady state reached. Derivatives zero to within tolerance.")
                 [print(f"Variable {j}: {sol_[j]:.18f}") for j in range(len(sol_))]
                 break
 
             # Checks
-            if np.isclose(t, max_time):
-                print("Max time reached without finding steady state. Exiting.")
+            if t > max_time:
+                print("Max time exceeded without finding steady state. Exiting.")
                 break
 
             if any(np.isnan(sol_)):
@@ -633,8 +642,8 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
 
         # ATP pump
         I_hat = 0.449 # Maximum pump strength [A/m^2]
-        m_K = 2.0 # ECS K+ pump threshold [mM]
-        m_Na = 7.7 # ICS Na+ pump threshold [mM]
+        P_K_e = 1.5 # ECS K+ pump threshold [mM]
+        P_Na_i = 10.0 # ICS Na+ pump threshold [mM]
 
         # Cotransporters
         S_KCC2 = 0.0034
@@ -657,16 +666,17 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
         E = lambda z_k, c_ki, c_ke: R*T/(z_k*F) * np.log(c_ke/c_ki)
 
         # ATP current
-        par_1 = lambda K_e: 1 + m_K / K_e
-        par_2 = lambda Na_i: 1 + m_Na / Na_i
+        par_1 = lambda K_e: 1 + P_K_e / K_e
+        par_2 = lambda Na_i: 1 + P_Na_i / Na_i
         I_ATP = lambda Na_i, K_e: \
                     I_hat / (par_1(K_e)**2 * par_2(Na_i)**3)
 
         # Cotransporter currents
+        f_NKCC1 = lambda K_e: 1 / (1 + (0.03/(K_e - K_e_0))**10) # Function that silences NKCC1 at low K_e and is zero at K_e = K_e_0
         I_KCC2 = lambda K_i, K_e, Cl_i, Cl_e: \
-                    S_KCC2 * np.log((K_e * Cl_e)/(K_i*Cl_i))
+                    S_KCC2 * np.log((K_i * Cl_i)/(K_e*Cl_e))
         I_NKCC1_n = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: \
-                        S_NKCC1 / (1 + np.exp(16 - K_e)) * np.log((Na_e * K_e * Cl_e**2)/(Na_i * K_i * Cl_i**2))
+                        S_NKCC1 * f_NKCC1(K_e) * np.log((Na_e * K_e * Cl_e**2)/(Na_i * K_i * Cl_i**2))
 
 
         # Volumes and surface areas in m^3 and m^2
@@ -676,7 +686,7 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
         area_g_n = p.area_g_n # [m^2]
         
         # Define right-hand side of ODE system
-        def two_compartment_rhs(t: float, x: list[float], args: list[float]) -> list[float]:
+        def two_compartment_rhs(t: float, x: list[float]) -> list[float]:
             """ Right-hand side of ODE system for three-compartment system (neuron + ECS). 
             
                 Parameters
@@ -685,8 +695,6 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
                     Current time [s]
                 x : list[float]
                     Current state vector
-                args : list[float]
-                    Additional arguments (unused, but required by solve_ivp)
             """
             # Extract variables at previous timestep
             phi_m_n_ = x[0]; Na_i_n_ = x[1]; Na_e_ = x[2]; K_i_n_ = x[3]; K_e_ = x[4]; Cl_i_n_ = x[5]; Cl_e_ = x[6]
@@ -716,12 +724,13 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
                     + I_KCC2(K_i_n_, K_e_, Cl_i_n_, Cl_e_)
                 )
             I_Cl_n = (
-                        g_Cl_leak * (phi_m_n_ - E_Cl_n)
-                    - 2*I_NKCC1_n(Na_i_n_, Na_e_, K_i_n_, K_e_, Cl_i_n_, Cl_e_)
-                    + I_KCC2(K_i_n_, K_e_, Cl_i_n_, Cl_e_)
+                    g_Cl_leak * (phi_m_n_ - E_Cl_n)
+                    + 2*I_NKCC1_n(Na_i_n_, Na_e_, K_i_n_, K_e_, Cl_i_n_, Cl_e_)
+                    - I_KCC2(K_i_n_, K_e_, Cl_i_n_, Cl_e_)
                 )
             # Total neuronal ionic current [A/m^2]
-            I_ion_n = I_Na_n + I_K_n - I_Cl_n
+            I_ion_n = I_Na_n + I_K_n + I_Cl_n
+
             # Define right-hand expressions
             rhs_phi_n = -1/C_m * I_ion_n
             rhs_Na_i_n = -I_Na_n/(z_Na*F) * area_g_n / vol_i_n
@@ -758,12 +767,12 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
 
             # Integrate ODE system
             sol = solve_ivp(
-                    lambda t, x: two_compartment_rhs(t, x, args=init[:-3]),
+                    lambda t, x: two_compartment_rhs(t, x),
                     [t, t+dt],
                     init,
-                    method='BDF',
-                    rtol=1e-5,
-                    atol=1e-7
+                    method='Radau',
+                    rtol=1e-6,
+                    atol=1e-8
                 )
             
             # Update previous solution
@@ -771,15 +780,14 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
 
             if self.plot: self.append_arrays(sol_)
             
-            if np.allclose(sol.y[:, 0], sol_, rtol=1e-9, atol=1e-11):
-                # Current solution equals previous solution
-                print("Steady state reached.")
+            if np.allclose(two_compartment_rhs(t, sol_), 0.0, rtol=1e-8, atol=1e-10):
+                print("Steady state reached. Derivatives zero to within tolerance.")
                 [print(f"Variable {j}: {sol_[j]:.18f}") for j in range(len(sol_))]
                 break
 
             # Checks
-            if np.isclose(t, max_time):
-                print("Max time reached without finding steady state. Exiting.")
+            if t > max_time:
+                print("Max time exceeded without finding steady state. Exiting.")
                 break
 
             if any(np.isnan(sol_)):

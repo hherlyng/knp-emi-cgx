@@ -16,7 +16,7 @@ physical_constants:
   F : 96485 # Faraday constant [C/mol]
   R : 8.314 # Gas constant [J/(K*mol)]
 
-C_M : 0.02 # membrane capacitance
+C_M : 0.01 # membrane capacitance
 
 # Mesh and meshtags files 
 mesh_file      : "geometries/GC/5m/100c/mesh_refined.xdmf"
