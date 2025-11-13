@@ -68,9 +68,6 @@ class KirNaKPumpModel(IonicModel):
     P_K_e_val  = 1.5         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
     k_dec_val = 2.9e-8		# Decay factor for [K+]e (m/s)
 
-    # -k_dec * ([K]e − [K]e_0) both for K and Na
-    use_decay_currents = False
-
     def __init__(self, KNPEMIx_problem, tags: tuple=None):
         """ Constructor for the Kir-Na pump model. 
             This model includes an inward-rectifying potassium (passive) current
@@ -127,24 +124,25 @@ class KirNaKPumpModel(IonicModel):
 
         # Aliases		
         p = self.problem # Problem instance
-        phi_m = p.phi_m_prev # Membrane potential at previous timestep [V]
-        ue_p  = p.u_p[1] # ECS concentrations at previous timestep [mol/m^3]
-        F     = p.F # Faraday's constant [C/mol]
-        ion   = p.ion_list[ion_idx] # Ion dictionary
+        ion: dict = p.ion_list[ion_idx] # Ion dictionary
+        ue_p:  list[dfx.fem.Function] = p.u_p[1] # ECS concentrations at previous timestep [mol/m^3]
+        phi_m: dfx.fem.Function = p.phi_m_prev # Membrane potential at previous timestep [V]
+        F: dfx.fem.Constant = p.F # Faraday's constant [C/mol]
+        z: dfx.fem.Constant = ion['z'] # Ion valence
             
         # Evaluate f_kir function depending on ion
         if ion['name'] == 'K':
             # Potassium has Kir-Na function
             # that reflects inward-rectifying behavior
-            delta_phi  = phi_m - ion['E'] # Kir-Na variable
-            f_kir = self.f_Kir(p.K_e_init,
-                            ue_p[ion_idx],
-                            self.E_K_init,
-                            delta_phi,
-                            phi_m
-                            )
+            delta_phi: ufl.Coefficient = phi_m - ion['E'] # Kir-Na variable
+            f_kir: ufl.Coefficient = self.f_Kir(p.K_e_init,
+                                        ue_p[ion_idx],
+                                        self.E_K_init,
+                                        delta_phi,
+                                        phi_m
+                                        )
 
-            I_ATP = -2*F*self.pump_coeff # ATP pump current [A/m^2]
+            I_ATP: ufl.Coefficient = -2*z*F*self.pump_coeff # ATP pump current density [A/m^2]
 
         else:
             # f_kir = 1 for Na and Cl
@@ -152,14 +150,14 @@ class KirNaKPumpModel(IonicModel):
 
             # ATP pump current [A/m^2]
             if ion['name'] == 'Na':
-                I_ATP = 3*F*self.pump_coeff
+                I_ATP: ufl.Coefficient = 3*z*F*self.pump_coeff
             else:
-                I_ATP = 0.0
+                I_ATP = dfx.fem.Constant(p.mesh, 0.0)
 
-        I_kir = f_kir*ion['g_leak_g']*(phi_m - ion['E']) # Kir-Na current [A/m^2]
+        I_kir: ufl.Coefficient = f_kir*ion['g_leak_g']*(phi_m - ion['E']) # Kir-Na current density [A/m^2]
         
         # Total current is ATP pump current + Kir-Na current [A/m^2]
-        I_pump_k_g = I_kir + I_ATP
+        I_pump_k_g: ufl.Coefficient = I_kir + I_ATP
 
         return I_pump_k_g # Ionic current [A/m^2]
 
@@ -169,7 +167,22 @@ class KirNaKPumpModel(IonicModel):
               E_K_init: ufl.Coefficient,
               delta_phi: ufl.Coefficient,
               phi_m: dfx.fem.Function) -> ufl.Coefficient:
-        """ Evaluate and return the Kir-Na function f_kir defined in Halnes et al. 2013. """
+        """ Evaluate and return the Kir-Na function f_kir defined in Halnes et al. 2013. 
+        
+        Parameters
+        ----------
+        K_e_init : dfx.fem.Constant
+            Initial extracellular potassium concentration [mol/m^3].
+        K_e : dfx.fem.Function
+            Extracellular potassium concentration [mol/m^3].
+        E_K_init : ufl.Coefficient
+            Initial potassium Nernst potential [V].
+        delta_phi : ufl.Coefficient
+            Kir-Na variable defined as delta_phi = phi_m - E_K [V].
+        phi_m : dfx.fem.Function
+            Membrane potential at previous timestep [V].
+        
+        """
         A = 1 + ufl.exp(0.433)
         B = 1 + ufl.exp(-(0.1186 + E_K_init) / 0.0441)
         C = 1 + ufl.exp((delta_phi + 0.0185) / 0.0425)
@@ -217,6 +230,7 @@ class GlialCotransporters(IonicModel):
 
         p = self.problem # Problem instance
         ion   = p.ion_list[ion_idx] # Ion dictionary
+        z     = ion['z'] # Ion valence
         c_Na_i = p.u_p[0][0] # ICS Na+ concentration at previous timestep [mol/m^3]
         c_Na_e = p.u_p[1][0] # ECS Na+ concentration at previous timestep [mol/m^3]
         c_K_i  = p.u_p[0][1] # ICS K+ concentration at previous timestep [mol/m^3]
@@ -246,12 +260,11 @@ class GlialCotransporters(IonicModel):
 
         # Return ionic current depending on ion type
         if ion["name"]=="Na":
-            return -I_NKCC1
+            return -z*I_NKCC1
         elif ion["name"]=="K":
-            return (-I_NKCC1 + I_KCC1)
+            return (-z*I_NKCC1 + z*I_KCC1)
         else:
-            return (2*I_NKCC1 - I_KCC1)
-
+            return (-2*z*I_NKCC1 + z*I_KCC1)
 class NeuronalCotransporters(IonicModel):
 
     def __init__(self, KNPEMIx_problem, tags: tuple=None):
@@ -285,6 +298,7 @@ class NeuronalCotransporters(IonicModel):
 
         p = self.problem # Problem instance
         ion    = p.ion_list[ion_idx] # Ion dictionary
+        z      = ion['z'] # Ion valence
         c_Na_i = p.u_p[0][0] # ICS Na+ concentration at previous timestep [mol/m^3]
         c_Na_e = p.u_p[1][0] # ECS Na+ concentration at previous timestep [mol/m^3]
         c_K_i  = p.u_p[0][1] # ICS K+  concentration at previous timestep [mol/m^3]
@@ -314,12 +328,12 @@ class NeuronalCotransporters(IonicModel):
 
         # Return ionic current depending on ion type
         if ion["name"]=="Na":
-            return -I_NKCC1
+            return -z*I_NKCC1
         elif ion["name"]=="K":
-            return (-I_NKCC1 + I_KCC2)
+            return (-z*I_NKCC1 + z*I_KCC2)
         else:
-            return (2*I_NKCC1 - I_KCC2)
-
+            return (-2*z*I_NKCC1 + z*I_KCC2)
+        
 class ATPPump(IonicModel):
 
     def __init__(self, KNPEMIx_problem, tags: tuple=None):
@@ -354,6 +368,7 @@ class ATPPump(IonicModel):
 
         p   = self.problem # Problem instance
         ion = p.ion_list[ion_idx] # Ion dictionary
+        z   = ion['z'] # Ion valence
 
         if ion["name"]=="Cl":
             # Cl- is not affected by the ATP pump
@@ -369,9 +384,9 @@ class ATPPump(IonicModel):
 
         # Return ionic current depending on ion type
         if ion["name"]=="Na":
-            return 3*I_ATP
+            return 3*z*I_ATP
         elif ion["name"]=="K":
-            return -2*I_ATP
+            return -2*z*I_ATP
         else:
             raise ValueError("Unknown ion for ATP pump model.")
 

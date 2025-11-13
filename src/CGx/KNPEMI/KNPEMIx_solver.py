@@ -11,7 +11,8 @@ import matplotlib.pyplot as plt
 from mpi4py         import MPI
 from petsc4py       import PETSc
 from CGx.utils.misc import dump
-from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
+from CGx.utils.calc_fluxes import create_flux_forms, compute_fluxes
+from CGx.KNPEMI.KNPEMIx_problem     import ProblemKNPEMI
 from CGx.KNPEMI.KNPEMIx_ionic_model import HodgkinHuxley
 
 pprint = print # Allows flushing from arbitrary rank
@@ -46,7 +47,7 @@ class SolverKNPEMI:
         if save_xdmfs : self.init_xdmf_savefile()
         if save_pngs  : self.init_png_savefile()
         if save_cpoints : self.init_checkpoint_file()
-        if problem.point_evaluation : self.init_point_data()
+        if problem.point_evaluation : self.init_data()
 
         # Perform only a single timestep when saving system matrix
         if self.save_mat: self.time_steps = 1
@@ -71,6 +72,7 @@ class SolverKNPEMI:
         p = self.problem # For ease of notation
         print("Assembling preconditioner ...")
         if not p.dirichlet_bcs:
+            # P_assembled = multiphenicsx.fem.petsc.assemble_matrix_block(p.P, bcs=p.bcs, restriction=(p.restriction, p.restriction))
             P_assembled = multiphenicsx.fem.petsc.assemble_matrix_block(p.P, bcs=[], restriction=(p.restriction, p.restriction))
         else:
             P_assembled = multiphenicsx.fem.petsc.assemble_matrix_block(p.P, bcs=p.bcs, restriction=(p.restriction, p.restriction))
@@ -110,7 +112,8 @@ class SolverKNPEMI:
         else:
             print("Setting up iterative solver ...")
 
-            # Set initial guess
+            # Set initial conditions as initial guess for the solver
+            # Start by setting the initial conditions in the solution functions
             for idx, ion in enumerate(p.ion_list):
                 if p.glia_tags is None:
                     # Set the array values at the subspace dofs 
@@ -123,64 +126,100 @@ class SolverKNPEMI:
                     p.wh[0][idx].x.array[p.glia_dofs]   = ion['ki_init_g'].value
                     p.wh[1][idx].x.array[:] = ion['ke_init'].value
 
+            # Insert the initial guess values into the solution vector
+            # x used when solving the equation Ax = b 
+            dofmaps: list[multiphenicsx.fem.petsc.DofMap] = [V.dofmap for V in p.V_list] # The function space dofmaps
+            init_guess_vectors: list[PETSc.Vec] = [function.x.petsc_vec for function in [*p.wh[0], *p.wh[1]]] # Vectors of initial guesses
+            with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(
+                self.x, dofmaps, p.restriction) as C_dd_wrapper:
+                for C_dd_component_local, data_vector in zip(C_dd_wrapper, tuple(init_guess_vectors)):
+                    with data_vector.localForm() as data_vector_local:
+                        C_dd_component_local[:] = data_vector_local
+
+            # Set the KSP and PC types
             self.ksp.setType(self.ksp_type)
             pc = self.ksp.getPC()
             pc.setType(self.pc_type)
 
             if self.pc_type=="fieldsplit":
+            
+                # Create global offsets for each block in the linear system
+                offsets = []
+                global_start = 0
+                for V in p.V_list:
+                    offsets.append(global_start) # The starting global index of the current block
+                    global_start += V.dofmap.index_map.size_global # The global size of the current block
 
-                # # Collapse subspaces to get dofmaps
-                # _, Wi0_to_Wi = Wi.sub(0).collapse()
-                # _, Wi1_to_Wi = Wi.sub(1).collapse()
-                # _, Wi2_to_Wi = Wi.sub(2).collapse()
-                # _, Wi3_to_Wi = Wi.sub(3).collapse()
-                # _, We0_to_We = We.sub(0).collapse()
-                # _, We1_to_We = We.sub(1).collapse()
-                # _, We2_to_We = We.sub(2).collapse()
-                # _, We3_to_We = We.sub(3).collapse()
+                # Get the range of owned rows of A on the current rank
+                lo, hi = self.A.getOwnershipRange()
 
-                # is0 = PETSc.IS().createGeneral(Wi0_to_Wi)
-                # is1 = PETSc.IS().createGeneral(Wi1_to_Wi)
-                # is2 = PETSc.IS().createGeneral(Wi2_to_Wi)
-                # is3 = PETSc.IS().createGeneral(Wi3_to_Wi)
-                # is4 = PETSc.IS().createGeneral(We0_to_We)
-                # is5 = PETSc.IS().createGeneral(We1_to_We)
-                # is6 = PETSc.IS().createGeneral(We2_to_We)
-                # is7 = PETSc.IS().createGeneral(We3_to_We)
+                # Owned global indices per block = offsets[i] + [0..size_global-1]; filter to [lo, hi)
+                block_dofs = []
+                for i, V in enumerate(p.V_list):
+                    global_size = V.dofmap.index_map.size_global # The global size of the dofmap of V
+                    global_idx = offsets[i] + np.arange(global_size, dtype=np.int64) # Global indices of block i
+                    local = global_idx[(global_idx >= lo) & (global_idx < hi)] # Filter to locally owned rows
+                    block_dofs.append(local)
 
-                # fields = [('0', is0), ('1', is1), ('2', is2), ('3', is3),('4', is4), ('5', is5),('6', is6), ('7', is7)]
-                # pc.setFieldSplitIS(*fields)
+                # ICS concentration dofs: blocks 0..N_ions-1
+                ics_all = np.concatenate(block_dofs[:p.N_ions])
 
-                ksp_solver = 'preonly'
+                # ECS concentration dofs: blocks (N_ions+1)..(2*N_ions)
+                ecs_all = np.concatenate(block_dofs[p.N_ions+1:2*p.N_ions+1])
+
+                # Electric potential dofs: blocks N_ions (phi_i) and 2*N_ions+1 (phi_e)
+                phi_all = np.concatenate([block_dofs[p.N_ions], block_dofs[2*p.N_ions+1]])
+
+                # Filter the dofs to locally owned rows
+                ics_local = ics_all[(ics_all >= lo) & (ics_all < hi)]
+                ecs_local = ecs_all[(ecs_all >= lo) & (ecs_all < hi)]
+                phi_local = phi_all[(phi_all >= lo) & (phi_all < hi)]
+
+                # Create PETSc Index Set objects using the sorted local dofs 
+                is_ics = PETSc.IS().createGeneral(np.sort(ics_local).astype(np.int32))
+                is_ecs = PETSc.IS().createGeneral(np.sort(ecs_local).astype(np.int32))
+                is_phi = PETSc.IS().createGeneral(np.sort(phi_local).astype(np.int32))
+
+                # Set the field splits on the KSP preconditioner object
+                pc.setFieldSplitIS(("ics", is_ics), ("ecs", is_ecs), ("phi", is_phi))
+
+                # Set the iterative solver and preconditioner type for the field splits
+                ksp_solver = 'preonly' 
                 P_inv      = 'hypre'
 
-                opts.setValue('pc_fieldsplit_type', 'additive')
+                opts.setValue('pc_fieldsplit_type', 'multiplicative')
 
-                opts.setValue('fieldsplit_0_ksp_type', ksp_solver)
-                opts.setValue('fieldsplit_1_ksp_type', ksp_solver)
-                opts.setValue('fieldsplit_2_ksp_type', ksp_solver)
-                opts.setValue('fieldsplit_3_ksp_type', ksp_solver)
-                opts.setValue('fieldsplit_4_ksp_type', ksp_solver)
-                opts.setValue('fieldsplit_5_ksp_type', ksp_solver)
-                opts.setValue('fieldsplit_6_ksp_type', ksp_solver)
-                opts.setValue('fieldsplit_7_ksp_type', ksp_solver)
+                opts.setValue('fieldsplit_ics_ksp_type', ksp_solver)
+                opts.setValue('fieldsplit_ecs_ksp_type', ksp_solver)
+                opts.setValue('fieldsplit_phi_ksp_type', ksp_solver)
 
-                opts.setValue('fieldsplit_0_pc_type',  P_inv)				
-                opts.setValue('fieldsplit_1_pc_type',  P_inv)
-                opts.setValue('fieldsplit_2_pc_type',  P_inv)
-                opts.setValue('fieldsplit_3_pc_type',  P_inv)
-                opts.setValue('fieldsplit_4_pc_type',  P_inv)
-                opts.setValue('fieldsplit_5_pc_type',  P_inv)
-                opts.setValue('fieldsplit_6_pc_type',  P_inv)
-                opts.setValue('fieldsplit_7_pc_type',  P_inv)
+                opts.setValue('fieldsplit_ics_pc_type',  P_inv)				
+                opts.setValue('fieldsplit_ecs_pc_type',  P_inv)
+                opts.setValue('fieldsplit_phi_pc_type',  "lu")
+
+                # Set Hypre BoomerAMG options for the concentration splits
+                opts.setValue('fieldsplit_ics_pc_hypre_boomeramg_max_iter', self.max_amg_iter)
+                opts.setValue('fieldsplit_ics_pc_hypre_boomeramg_strong_threshold', 0.5)
+                opts.setValue('fieldsplit_ics_pc_hypre_boomeramg_coarsen_type', "HMIS")
+                opts.setValue('fieldsplit_ics_pc_hypre_boomeramg_interp_type', "ext+i")
+                opts.setValue('fieldsplit_ecs_pc_hypre_boomeramg_max_iter', self.max_amg_iter)
+                opts.setValue('fieldsplit_ecs_pc_hypre_boomeramg_strong_threshold', 0.5)
+                opts.setValue('fieldsplit_ecs_pc_hypre_boomeramg_coarsen_type', "HMIS")
+                opts.setValue('fieldsplit_ecs_pc_hypre_boomeramg_interp_type', "ext+i")
             
+            else:
+                # Apply preconditioner options for single-field preconditioner
+                if self.ksp_type=='hypre':
+                    opts.setValue('pc_hypre_boomeramg_max_iter', self.max_amg_iter)
+                    if self.problem.mesh.geometry.dim==3:
+                        opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.5)
+            
+            # Set miscellaneous KSP options
             opts.setValue('ksp_converged_reason', None)
             opts.setValue('ksp_rtol',      self.ksp_rtol)
             opts.setValue('ksp_max_it',    self.ksp_max_it)
             opts.setValue('ksp_norm_type', self.norm_type)
-            opts.setValue('ksp_initial_guess_nonzero',   self.nonzero_init_guess)
-            if self.ksp_type=='hypre': opts.setValue('pc_hypre_boomeramg_max_iter', self.max_amg_iter)
-            if self.problem.mesh.geometry.dim==3: opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.5)
+            opts.setValue('ksp_initial_guess_nonzero',   self.nonzero_init_guess)                
 
             # vector to collect number of iterations
             self.iterations = []
@@ -225,16 +264,15 @@ class SolverKNPEMI:
         
         # Create the PETSc null space vector and check that it is a valid nullspace of A
         nullspace = PETSc.NullSpace().create(vectors=[ns_vec], comm=self.comm)
-        assert nullspace.test(self.A) # Check that the nullspace is created correctly
 
         # Set the nullspace
-        if self.direct_solver:
+        if len(p.bcs)==0: 
+            assert nullspace.test(self.A) # Check that the nullspace is created correctly
             self.A.setNullSpace(nullspace)
-            nullspace.remove(self.b)
-        else:
-            self.A.setNullSpace(nullspace)
-            self.A.setNearNullSpace(nullspace)
-            nullspace.remove(self.b)
+        self.A.setNearNullSpace(nullspace)
+
+        if not self.direct_solver and self.use_P_mat:
+            self.P_.setNearNullSpace(nullspace)
 
     def solve(self):
         """ Solve the KNP-EMI problem. """
@@ -274,11 +312,26 @@ class SolverKNPEMI:
             print('t (ms) = ', 1000 * float(t.value))               
     
             # Update ODE-based ionic models
+            I_n = 0.0
+            I_g = 0.0
             if p.gating_variables:
+                I_ch = 0.0
                 for model in p.ionic_models:
+                    print(f"Model tags for {model.__str__()}: ", model.tags)
                     if isinstance(model, HodgkinHuxley):
                         model.update_t_mod()
                         model.update_gating_variables()
+                    for ion in p.ion_list:
+                        I_ch_k = self.comm.allreduce(dfx.fem.assemble_scalar(ion[model.__str__()]), op=MPI.SUM)
+                        print(f"Ion {ion['name']}: current of model {model} = {I_ch_k:.4e} A")
+                        I_ch += I_ch_k
+                        if model.__str__() in ["Hodgkin-Huxley", "Na/K/ATPase pump", "KCC2/NKCC1 Cotransporters"]:
+                            I_n += I_ch_k
+                        else:
+                            I_g += I_ch_k
+            print(f"Total I_n = {I_n:.4e} A")
+            print(f"Total I_g = {I_g:.4e} A")
+            print(f"Total I_ch = {I_ch:.4e} A")
 
             # Assemble system matrix and RHS vector
             tic = time.perf_counter()
@@ -314,10 +367,10 @@ class SolverKNPEMI:
                     # Set operators of iterative solver
                     self.ksp.setOperators(self.A, self.P_) if self.use_P_mat else self.ksp.setOperators(self.A)
 
-                if not p.dirichlet_bcs:
-                    # Handle the nullspace of the electric potentials in the case of 
-                    # pure Neumann boundary conditions
-                    self.create_and_set_nullspace()
+                # if not p.dirichlet_bcs:
+                #     # Handle the nullspace of the electric potentials in the case of 
+                #     # pure Neumann boundary conditions
+                #     self.create_and_set_nullspace()
 
                 # Add contribution to setup time
                 setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
@@ -358,7 +411,7 @@ class SolverKNPEMI:
             if self.save_xdmfs and (i % self.save_interval == 0) : self.save_xdmf()
             if self.save_cpoints and (i % self.save_interval == 0) : self.save_checkpoint(i+1)
             if self.save_pngs: self.save_png()
-            if p.point_evaluation: self.save_point_data(i+1)
+            if p.point_evaluation: self.save_data(i+1)
 
             if i == self.time_steps-1:
 
@@ -374,7 +427,7 @@ class SolverKNPEMI:
                     print("\nCheckpoints saved in ", self.out_file_prefix)
                 
                 if self.save_dat:
-                    self.save_data()
+                    self.export_data()
                     print("\nPoint data saved in ", self.out_file_prefix)
                 
                 print("\nTotal setup time:", setup_timer)
@@ -482,7 +535,7 @@ class SolverKNPEMI:
             print(f"Stimulus current at png point: {stim_current:.2e}")
             self.stim_t.append(stim_current)
 
-    def init_point_data(self):
+    def init_data(self):
         
         p = self.problem
         
@@ -496,7 +549,10 @@ class SolverKNPEMI:
 
         self.gamma_point_values[0] = scifem.evaluate_function(p.phi_m_prev, p.gamma_points).T
 
-    def save_point_data(self, i: int):
+        self.flux_forms  = create_flux_forms(p)
+        self.flux_values = np.zeros((self.time_steps+1, 2*p.N_ions)) # Fluxes for each ion
+
+    def save_data(self, i: int):
         """ Save function values evaluated in two points (one in ICS and one in the ECS)
             at time index i. """
 
@@ -507,6 +563,10 @@ class SolverKNPEMI:
             self.ecs_point_values[i, j] = scifem.evaluate_function(p.u_p[1][j], p.ecs_points).T
 
         self.gamma_point_values[i] = scifem.evaluate_function(p.phi_m_prev, p.gamma_points).T
+
+        fluxes: np.ndarray[float] = compute_fluxes(self.flux_forms, self.comm)
+        for idx, val in enumerate(fluxes):
+            self.flux_values[i, idx] = val
 
     def print_figures(self):
         """ Output .png plot of:
@@ -707,7 +767,7 @@ class SolverKNPEMI:
         # Run XDMF parser to restructure the data for better visualization
         # restructure_xdmf.run(self.output_filename)
 
-    def save_data(self):
+    def export_data(self):
         """ Save numpy data. """
 
         
@@ -723,11 +783,13 @@ class SolverKNPEMI:
         if hasattr(self.problem, 'stim_ufl_expr'):
             np.save(self.problem.output_dir+"stimulus.npy", np.array(self.stim_t))
 
+        np.save(self.problem.output_dir+"flux_values.npy", self.flux_values)
+
     # Default iterative solver parameters
-    ksp_rtol           = 1e-9
-    ksp_max_it         = 5000	
-    ksp_type           = 'gmres' # cg
-    pc_type            = 'hypre' # lu, fieldsplit, hypre
+    ksp_rtol           = 1e-8
+    ksp_max_it         = 50000	
+    ksp_type           = 'gmres' 
+    pc_type            = 'hypre'
     norm_type          = 'preconditioned'
     max_amg_iter       = 1
     use_P_mat          = True # use P as preconditioner?

@@ -318,7 +318,8 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
                     - 2*I_NKCC1_n(Na_i_n_, Na_e_, K_i_n_, K_e_, Cl_i_n_, Cl_e_)
                     + I_KCC2(K_i_n_, K_e_, Cl_i_n_, Cl_e_)
                 )
-            I_ion_n = I_Na_n + I_K_n - I_Cl_n # Total neuronal ionic current [A/m^2]
+            # Total neuronal ionic current [A/m^2]
+            I_ion_n = I_Na_n + I_K_n - I_Cl_n 
 
             # Glial mechanisms
             # Calculate Nernst potentials
@@ -344,7 +345,8 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
                     - 2*I_NKCC1_g(Na_i_g_, Na_e_, K_i_g_, K_e_, Cl_i_g_, Cl_e_)
                     + I_KCC1(K_i_g_, K_e_, Cl_i_g_, Cl_e_)
                 )
-            I_ion_g = I_Na_g + I_K_g - I_Cl_g # Total glial ionic current density [A/m^2]
+            # Total glial ionic current density [A/m^2]
+            I_ion_g = I_Na_g + I_K_g - I_Cl_g
 
             # Define right-hand expressions
             rhs_phi_n = -1/C_m * I_ion_n
@@ -397,16 +399,16 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
                     [t, t+dt],
                     init,
                     method='BDF',
-                    rtol=1e-6,
-                    atol=1e-8
+                    rtol=1e-5,
+                    atol=1e-7
                 )
             
             # Update previous solution
             sol_: list[float] = sol.y[:, -1] 
 
             if self.plot: self.append_arrays(sol_)
-            
-            if np.allclose(sol.y[:, 0], sol_, rtol=1e-7, atol=1e-9):
+
+            if np.allclose(sol.y[:, 0], sol_, rtol=1e-9, atol=1e-11):
                 # Current solution equals previous solution
                 print("Steady state reached.")
                 [print(f"Variable {j}: {sol_[j]:.18f}") for j in range(len(sol_))]
@@ -718,7 +720,8 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
                     - 2*I_NKCC1_n(Na_i_n_, Na_e_, K_i_n_, K_e_, Cl_i_n_, Cl_e_)
                     + I_KCC2(K_i_n_, K_e_, Cl_i_n_, Cl_e_)
                 )
-            I_ion_n = I_Na_n + I_K_n - I_Cl_n # Total neuronal ionic current [A/m^2]
+            # Total neuronal ionic current [A/m^2]
+            I_ion_n = I_Na_n + I_K_n - I_Cl_n
             # Define right-hand expressions
             rhs_phi_n = -1/C_m * I_ion_n
             rhs_Na_i_n = -I_Na_n/(z_Na*F) * area_g_n / vol_i_n
@@ -759,8 +762,8 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
                     [t, t+dt],
                     init,
                     method='BDF',
-                    rtol=1e-6,
-                    atol=1e-8
+                    rtol=1e-5,
+                    atol=1e-7
                 )
             
             # Update previous solution
@@ -768,7 +771,7 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
 
             if self.plot: self.append_arrays(sol_)
             
-            if np.allclose(sol.y[:, 0], sol_, rtol=1e-7, atol=1e-9):
+            if np.allclose(sol.y[:, 0], sol_, rtol=1e-9, atol=1e-11):
                 # Current solution equals previous solution
                 print("Steady state reached.")
                 [print(f"Variable {j}: {sol_[j]:.18f}") for j in range(len(sol_))]

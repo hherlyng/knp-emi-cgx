@@ -3,12 +3,12 @@ problem_type : "KNP-EMI"
 
 # Input and output directories
 input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/'
-output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/5m/100c/T_stim=40ms_long/'
+output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/5m/100c/T_stim=1000ms_neuron/'
 
 # Numerical parameters 
 dt : 0.000025 # Timestep size 
-# time_steps : 50 # Number of timesteps
-T  : 1000e-3 # Simulation end time
+# time_steps : 1 # Number of timesteps
+T  : 20e-3 # Simulation end time
 
 # Problem constants (in consistent units)
 physical_constants:
@@ -28,8 +28,9 @@ ics_tags  : !range [2, 102] # Intracellular space cell tags
 ecs_tags  : [1] # Extracellular space cell tags
 boundary_tags : !range [1001, 1102] # Boundary facet tags
 membrane_tags : !range [2, 102] # Membrane (interface) facet tags
-glia_tags : [71, 90, 95, 100]
+# glia_tags : [71, 90, 95, 100]
 stimulus_tags : [56] # Membrane facet tags of the cells being stimulated
+membrane_data_tag : 56 # Tag for which membrane data is written to file
 
 stimulus_region : 
   range : [1150, 1250]
@@ -41,9 +42,9 @@ point_evaluation :
 
 stimulus :
   conductance :
-    g_syn_bar : 0.50e-10 # Maximum synaptic conductance
+    g_syn_bar : 2.0e-10 #0.5e-10 # Maximum synaptic conductance
   a_syn : 5e-4 # Synaptic time constant
-  T_stim : 40e-3 # Stimulus period, high freq = 20 ms, normal freq = 1 s
+  T_stim : 1000e-3 # Stimulus period, high freq = 20 ms, normal freq = 1 s
   scale : True
 
 solver :
@@ -54,18 +55,31 @@ solver :
     save_pngs : True
     save_dat : True
 
+# initial_conditions:
+#   phi_m_n : -0.071068348303428328
+#   phi_m_g : -0.077317680363390553
+#   Na_i_n : 12.003256244201981673
+#   Na_i_g : 13.057546249662371096
+#   Na_e : 140.638489605710788055
+#   K_i_n : 129.948906118327982995
+#   K_i_g : 100.237036028034481205
+#   K_e : 4.061850272457462552
+#   Cl_i_n : 6.103121520616743290
+#   Cl_i_g : 4.463051355390579289
+#   Cl_e : 122.137795624974003772
+#   n : 0.230095673122674371
+#   m : 0.025310959538911489
+#   h : 0.782069626438892440
+
+# Only neuron
 initial_conditions:
-  phi_m_n : -0.071082075111761220
-  phi_m_g : -0.078069576395480997
-  Na_i_n : 12.029898798545003658
-  Na_i_g : 14.411671878848842709
-  Na_e : 140.113676324729539147
-  K_i_n : 129.905707014906880659
-  K_i_g : 100.746795141379337224
-  K_e : 4.011030345444695833
-  Cl_i_n : 5.062471519805969322
-  Cl_i_g : 4.861940740971256503
-  Cl_e : 124.873791508435672881
-  n : 0.229905361625143939
-  m : 0.025267578253885887
-  h : 0.782433416183704322
+  phi_m_n : -0.070796414009930933
+  Na_i_n : 11.884598969786251743
+  Na_e : 140.356613645692391401
+  K_i_n : 129.954391426816926014
+  K_e : 4.140940157761245466
+  Cl_i_n : 6.151001104671556696
+  Cl_e : 121.443162600410488494
+  n : 0.233740603891398141
+  m : 0.026183857572398335
+  h : 0.775164469828864111

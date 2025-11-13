@@ -3,12 +3,12 @@ problem_type : "KNP-EMI"
 
 # Input and output directories
 input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/'
-output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/'
+output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/square/no_stim/'
 
 # Numerical parameters 
 dt : 0.00005 # Timestep size 
-# time_steps : 50 # Number of timesteps
-T  : 70e-3 # Simulation end time
+time_steps : 50 # Number of timesteps
+# T  : 10e-3 # Simulation end time
 
 # Problem constants (in consistent units)
 physical_constants:
@@ -29,25 +29,48 @@ ics_tags  : [1] # Intracellular space cell tags
 ecs_tags  : [2] # Extracellular space cell tags
 boundary_tags : [3] # Boundary facet tags
 membrane_tags : [4] # Membrane (interface) facet tags
-stimulus_tags : [4]
+stimulus_tags : [] # Membrane facet tags of the cells being stimulated
+membrane_data_tag : 4 # Tag for which membrane data is written to file
 
 point_evaluation :
-  ics_points : [[0.3, 0.5], [0.7, 0.5]]
-  ecs_points : [[0.2, 0.2]]
+  ics_points : [[0.50, 0.50]]
+  ecs_points : [[0.15, 0.15]]
 
-initial_conditions :
- phi_m : -0.07164498093230537
- Na_i  :  11.999258232496413
- Na_e  :  100.00024725590798
- K_i   :  123.99958901171851
- K_e   :  4.000136996084069
- Cl_i  :  4.0004095588042965
- Cl_e  :  119.99986348039974
- n : 0.2265098389885508
- m : 0.023493158969007607
- h : 0.7725145543788019
+# initial_conditions :
+#  phi_m : -0.071226334466457111
+#  Na_i  :  12.059932063447014627
+#  Na_e  :  139.980022646246027307
+#  K_i   :  129.941461095316014962
+#  K_e   :  4.019512968061667912
+#  Cl_i  :  6.179379082753780672
+#  Cl_e  :  124.606873639113842955
+#  n : 0.227992052813905111
+#  m : 0.024816466511834719
+#  h : 0.786011952227108845
+
+initial_conditions:
+  phi_m: -0.080263433665426348
+  Na_i: 17.226813836082463638
+  Na_e: 138.257728721329414157
+  K_i: 134.686259691079186496
+  K_e: 2.437913436309470772
+  Cl_i: 14.930093264798051322
+  Cl_e: 121.689968911730531431
+  n: 0.126730800711975816
+  m: 0.007769518944901601
+  h: 0.933455168028478388
 
 stimulus :
-  g_syn_bar : 10 # Maximum synaptic conductance
+  conductance:
+    g_syn_bar : 40 # Maximum synaptic conductance
   a_syn : 0.001 # Synaptic time constant
   T_stim : 40e-3 # Stimulus period
+  scale : False
+
+solver :
+  direct : False
+  output :
+    save_xdmf : False
+    save_cpoints : False
+    save_pngs : True
+    save_dat : True

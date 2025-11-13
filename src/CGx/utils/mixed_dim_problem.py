@@ -339,6 +339,17 @@ class MixedDimensionalProblem(ABC):
             self.find_initial_conditions = False # No need to find steady-state initial conditions
         else:
             self.find_initial_conditions = True # Need to find steady-state initial conditions
+
+        if 'membrane_data_tag' in config:
+            # Tag for which membrane data is written to file
+            self.membrane_data_tag: int = int(config['membrane_data_tag'])
+        else:
+            if len(self.stimulus_tags)>0:
+                # If stimulus tags are present, record data in the first one
+                self.membrane_data_tag = self.stimulus_tags[0]
+            else:
+                # Otherwise, record data in the first membrane tag
+                self.membrane_data_tag = self.gamma_tags[0]
         
     def parse_tags(self, tags: dict):
 
@@ -420,7 +431,7 @@ class MixedDimensionalProblem(ABC):
         ionic_tags: list[int] | int = sorted(ionic_tags)
         gamma_tags: list[int] | int = sorted(flatten_list([self.gamma_tags]))
 
-        if ionic_tags != gamma_tags and not self.MMS_test:
+        if ionic_tags != gamma_tags and not self.MMS_test and len(ionic_tags)!=0:
             raise RuntimeError('Mismatch between membrane tags and ionic models tags.' \
                 + f'\nIonic models tags: {ionic_tags}\nMembrane tags: {gamma_tags}')
         
@@ -649,6 +660,9 @@ class MixedDimensionalProblem(ABC):
             self.mesh.topology.create_entities(self.mesh.topology.dim-1)
             self.mesh.topology.create_connectivity(self.mesh.topology.dim-1, self.mesh.topology.dim)
             self.mesh.topology.create_connectivity(self.mesh.topology.dim, self.mesh.topology.dim)
+        
+        # Create vertex to cell connectivity
+        self.mesh.topology.create_connectivity(0, self.mesh.topology.dim)
 
         # Generate integration entities for interior facet integrals
         # to ensure consistent direction of facet normal vector
@@ -696,8 +710,8 @@ class MixedDimensionalProblem(ABC):
             gamma_facets = np.concatenate(([self.boundaries.find(tag) for tag in self.gamma_tags]))
             self.find_membrane_point_closest_to_centroid(gamma_facets)
         else:
-            gamma_facets = self.boundaries.find(self.stimulus_tags[0])
-            if not self.stimulus_region:
+            gamma_facets = self.boundaries.find(self.membrane_data_tag)
+            if len(self.stimulus_tags)==0 or not self.stimulus_region:
                 self.find_membrane_point_closest_to_centroid(gamma_facets)
                 self.gamma_points = self.png_point
             else:
