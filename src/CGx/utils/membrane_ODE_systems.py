@@ -89,6 +89,21 @@ class MembraneODESystem(ABC):
         pass
 
 
+    # Cotransporter currents
+    def f_NKCC1(self, K_e: float, K_e_0: float, K_min: float=3.0, eps: float=1e-6, cap: float=1.0) -> float:
+        """ Function that silences the NKCC1 cotransporter at lowK_e and is zero when 
+        K_e is not in the interval [K_min, K_e_0]."""
+        # Zero outside the band [K_min, K_e_0]
+        if K_e <= K_min or K_e >= K_e_0:
+            return 0.0
+        
+        # Inside the band: safe denominator with epsilon and cap
+        denom = max(K_e - K_e_0, eps)
+        val = 1.0 / (1.0 + (0.03 / denom)**10)
+
+        return min(max(val, 0.0), cap)
+
+
 class ThreeCompartmentMembraneODESystem(MembraneODESystem):
     """ Class to solve the ODE system for a three-compartment model (neuron + glia + ECS). """
 
@@ -125,9 +140,6 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
         self.Na_i_g_init = p.Na_i_g_init.value # Initial glial intracellular Na+ concentration [mM]
         self.K_i_g_init = p.K_i_g_init.value # Initial glial intracellular K+ concentration [mM]
         self.Cl_i_g_init = p.Cl_i_g_init.value # Initial glial intracellular Cl- concentration [mM]
-        self.n_init = p.n_init.value # Initial gating variable n
-        self.m_init = p.m_init.value # Initial gating variable m
-        self.h_init = p.h_init.value # Initial gating variable h
 
         if self.stimulus:
             # Stimulus parameters
@@ -215,10 +227,11 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
         alpha_h = lambda V_m: 0.07e3 * np.exp(-V_m/20.)
         beta_h  = lambda V_m: 1.e3 / (np.exp((30. - V_m)/10.) + 1)
 
-        # Gating variables
-        n_0 = self.n_init 
-        m_0 = self.m_init
-        h_0 = self.h_init
+        # Set steady-state gating variables as initial guess
+        V_m_gating = (phi_m_0 - phi_rest)*1e3 # Relative potential with unit correction
+        n_0 = alpha_n(V_m_gating) / (alpha_n(V_m_gating) + beta_n(V_m_gating))
+        m_0 = alpha_m(V_m_gating) / (alpha_m(V_m_gating) + beta_m(V_m_gating))
+        h_0 = alpha_h(V_m_gating) / (alpha_h(V_m_gating) + beta_h(V_m_gating))
 
         # Nernst potential
         E = lambda z_k, c_ki, c_ke: R*T/(z_k*F) * np.log(c_ke/c_ki)
@@ -230,11 +243,10 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
                     I_hat / (par_1(K_e)**2 * par_2(Na_i)**3)
 
         # Cotransporter currents
-        f_NKCC1 = lambda K_e: 1 / (1 + (0.03/(K_e - K_e_0))**10) # Function that silences NKCC1 at low K_e and is zero at K_e = K_e_0
         I_KCC2 = lambda K_i, K_e, Cl_i, Cl_e: \
                     S_KCC2 * np.log((K_i * Cl_i)/(K_e*Cl_e))
         I_NKCC1_n = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: \
-                        S_NKCC1 * f_NKCC1(K_e) * np.log((Na_e * K_e * Cl_e**2)/(Na_i * K_i * Cl_i**2))
+                        S_NKCC1 * self.f_NKCC1(K_e, K_e_0) * np.log((Na_e * K_e * Cl_e**2)/(Na_i * K_i * Cl_i**2))
 
 
         # Volumes and surface areas in m^3 and m^2
@@ -275,7 +287,7 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
 
         g_NKCC1_g = 2e-2 # [S / m^2]
         S_NKCC1_g = g_NKCC1_g * R*T / F
-        I_NKCC1_g = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: S_NKCC1_g * f_NKCC1(K_e) * np.log((Na_e * K_e * Cl_e**2)/(Na_i * K_i * Cl_i**2))
+        I_NKCC1_g = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: S_NKCC1_g * self.f_NKCC1(K_e, K_e_0) * np.log((Na_e * K_e * Cl_e**2)/(Na_i * K_i * Cl_i**2))
         
         # Define right-hand side of ODE system
         def three_compartment_rhs(t: float, x: list[float]) -> list[float]:
@@ -574,9 +586,6 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
         self.K_e_init = p.K_e_init.value # Initial extracellular K+ concentration [mM]
         self.Cl_i_init = p.Cl_i_init.value # Initial neuronal intracellular Cl- concentration [mM]
         self.Cl_e_init = p.Cl_e_init.value # Initial extracellular Cl- concentration [mM]
-        self.n_init = p.n_init.value # Initial gating variable n
-        self.m_init = p.m_init.value # Initial gating variable m
-        self.h_init = p.h_init.value # Initial gating variable h
 
         if self.stimulus:
             # Stimulus parameters
@@ -641,13 +650,13 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
         phi_m_0 = self.phi_m_init # [V]
 
         # ATP pump
-        I_hat = 0.449 # Maximum pump strength [A/m^2]
-        P_K_e = 1.5 # ECS K+ pump threshold [mM]
-        P_Na_i = 10.0 # ICS Na+ pump threshold [mM]
+        I_hat = 0.25 # Maximum pump strength [A/m^2]
+        P_Na_i = 10          # [Na+]i threshold for Na+/K+ pump (mol/m^3)
+        P_K_e  = 1.5         # [K+]e  threshold for Na+/K+ pump (mol/m^3)
 
         # Cotransporters
-        S_KCC2 = 0.0034
-        S_NKCC1 = 0.023
+        S_KCC2 = 0.0068
+        S_NKCC1 = 0.00023
 
         # Hodgkin-Huxley parameters
         alpha_n = lambda V_m: 0.01e3 * (10.-V_m) / (np.exp((10. - V_m)/10.) - 1.)
@@ -657,10 +666,11 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
         alpha_h = lambda V_m: 0.07e3 * np.exp(-V_m/20.)
         beta_h  = lambda V_m: 1.e3 / (np.exp((30. - V_m)/10.) + 1)
 
-        # Gating variables
-        n_0 = self.n_init 
-        m_0 = self.m_init
-        h_0 = self.h_init
+        # Set steady-state gating variables as initial guess
+        V_m_gating = (phi_m_0 - phi_rest)*1e3 # Relative potential with unit correction
+        n_0 = alpha_n(V_m_gating) / (alpha_n(V_m_gating) + beta_n(V_m_gating))
+        m_0 = alpha_m(V_m_gating) / (alpha_m(V_m_gating) + beta_m(V_m_gating))
+        h_0 = alpha_h(V_m_gating) / (alpha_h(V_m_gating) + beta_h(V_m_gating))
 
         # Nernst potential
         E = lambda z_k, c_ki, c_ke: R*T/(z_k*F) * np.log(c_ke/c_ki)
@@ -672,12 +682,10 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
                     I_hat / (par_1(K_e)**2 * par_2(Na_i)**3)
 
         # Cotransporter currents
-        f_NKCC1 = lambda K_e: 1 / (1 + (0.03/(K_e - K_e_0))**10) # Function that silences NKCC1 at low K_e and is zero at K_e = K_e_0
         I_KCC2 = lambda K_i, K_e, Cl_i, Cl_e: \
                     S_KCC2 * np.log((K_i * Cl_i)/(K_e*Cl_e))
         I_NKCC1_n = lambda Na_i, Na_e, K_i, K_e, Cl_i, Cl_e: \
-                        S_NKCC1 * f_NKCC1(K_e) * np.log((Na_e * K_e * Cl_e**2)/(Na_i * K_i * Cl_i**2))
-
+                        S_NKCC1 * self.f_NKCC1(K_e, K_e_0) * np.log((Na_e * K_e * Cl_e**2)/(Na_i * K_i * Cl_i**2))
 
         # Volumes and surface areas in m^3 and m^2
         # Both neuronal and glial intracellular space

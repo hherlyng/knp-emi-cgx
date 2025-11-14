@@ -37,7 +37,7 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 		GlialCT = GlialCotransporters(problem, tags=problem.glia_tags)
 
 		ionic_models = [HH, ATP, NeuronalCT, GlialCT, KirNa]
-		
+	
 	problem.set_initial_conditions()
 	problem.init_ionic_models(ionic_models)
 

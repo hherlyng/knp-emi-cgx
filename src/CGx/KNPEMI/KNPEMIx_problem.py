@@ -228,7 +228,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             print("Solving ODE system to find steady-state initial conditions ...")
             comm: MPI.Comm = self.comm
             self.calculate_compartment_volumes_and_surface_areas()
-            if self.glia_tags is None:
+            if not self.glia_flag:
+                # Only neuronal cells
                 membrane_odes = TwoCompartmentMembraneODESystem(self, plot_flags=[True, False, True], stimulus_flag=False)
                 if comm.rank==0:
                     # Solve the membrane ODE system to find a steady-state
@@ -269,6 +270,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                 self.m_init.value = m_init_val
                 self.h_init.value = h_init_val
             else:
+                # Both glia and neurons present
                 membrane_odes = ThreeCompartmentMembraneODESystem(self, plot_flags=[True, False, True], stimulus_flag=False)
                 if comm.rank==0:
                     # Solve the membrane ODE system to find a steady-state
@@ -325,7 +327,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                 self.h_init.value = h_init_val
         else:
             print("Setting initial conditions from input file ...")
-            if self.glia_tags is None:
+            if not self.glia_flag:
                 self.phi_m_init.value = self.initial_conditions['phi_m'] if 'phi_m' in self.initial_conditions else self.initial_conditions['phi_m_n'] # Membrane potential
                 self.Na_i_init.value = self.initial_conditions['Na_i'] if 'Na_i' in self.initial_conditions else self.initial_conditions['Na_i_n'] # Intracellular Na+ concentration
                 self.Na_e_init.value = self.initial_conditions['Na_e'] # Extracellular Na+ concentration
@@ -384,7 +386,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                                 )
                             )
         else:
-            if self.glia_tags is None:
+            if not self.glia_flag:
                 # Only neuronal cells
                 self.phi_m_prev.x.array[:] = self.phi_m_init.value
                 print(f"Initial membrane potential: {self.phi_m_init.value}")
@@ -418,14 +420,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                             )
                         )
             else:
-                if self.glia_tags is None:
-                    # Set the array values at the subspace dofs 
-                    ui_p[idx].x.array[:] = ion['ki_init'].value
-                    ue_p[idx].x.array[:] = ion['ke_init'].value
-
-                    print(f"Initial condition for {ion['name']}_i set to {ion['ki_init'].value}")
-                    print(f"Initial condition for {ion['name']}_e set to {ion['ke_init'].value}")
-                else:
+                if self.glia_flag:
+                    # Both glia and neurons present
                     # Set the array values at the subspace dofs 
                     ui_p[idx].x.array[self.neuron_dofs] = ion['ki_init_n'].value
                     ui_p[idx].x.array[self.glia_dofs]   = ion['ki_init_g'].value
@@ -434,6 +430,14 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                     print(f"Initial condition for {ion['name']}_i_n: {ion['ki_init_n'].value}")
                     print(f"Initial condition for {ion['name']}_i_g: {ion['ki_init_g'].value}")
                     print(f"Initial condition for {ion['name']}_e: {ion['ke_init'].value}")
+                else:
+                    # Only neuronal cells
+                    # Set the array values at the subspace dofs 
+                    ui_p[idx].x.array[:] = ion['ki_init'].value
+                    ue_p[idx].x.array[:] = ion['ke_init'].value
+
+                    print(f"Initial condition for {ion['name']}_i set to {ion['ki_init'].value}")
+                    print(f"Initial condition for {ion['name']}_e set to {ion['ke_init'].value}")
         
         print("Initial conditions set.")
             
@@ -543,7 +547,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
                     ion[model.__str__()] += I_ch_k_
 
-                ion[model.__str__()] = dfx.fem.form(ion[model.__str__()] * dS(model.tags))
+                if len(model.tags)>0:
+                    ion[model.__str__()] = dfx.fem.form(ion[model.__str__()] * dS(model.tags))
 
         # Initialize variational form
         a = ufl.ZeroBaseForm(None)

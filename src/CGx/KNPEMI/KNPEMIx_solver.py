@@ -115,12 +115,13 @@ class SolverKNPEMI:
             # Set initial conditions as initial guess for the solver
             # Start by setting the initial conditions in the solution functions
             for idx, ion in enumerate(p.ion_list):
-                if p.glia_tags is None:
+                if not p.glia_flag:
+                    # Only neuronal cells
                     # Set the array values at the subspace dofs 
                     p.wh[0][idx].x.array[:] = ion['ki_init'].value
                     p.wh[1][idx].x.array[:] = ion['ke_init'].value
                 else:
-                    
+                    # Both glia and neurons present
                     # Set the array values at the subspace dofs 
                     p.wh[0][idx].x.array[p.neuron_dofs] = ion['ki_init_n'].value
                     p.wh[0][idx].x.array[p.glia_dofs]   = ion['ki_init_g'].value
@@ -312,11 +313,14 @@ class SolverKNPEMI:
             print('t (ms) = ', 1000 * float(t.value))               
     
             # Update ODE-based ionic models
-            I_n = 0.0
-            I_g = 0.0
             if p.gating_variables:
+                I_n = 0.0
+                I_g = 0.0
                 I_ch = 0.0
                 for model in p.ionic_models:
+                    if len(model.tags)==0:
+                        continue
+
                     print(f"Model tags for {model.__str__()}: ", model.tags)
                     if isinstance(model, HodgkinHuxley):
                         model.update_t_mod()
@@ -329,9 +333,9 @@ class SolverKNPEMI:
                             I_n += I_ch_k
                         else:
                             I_g += I_ch_k
-            print(f"Total I_n = {I_n:.4e} A")
-            print(f"Total I_g = {I_g:.4e} A")
-            print(f"Total I_ch = {I_ch:.4e} A")
+                print(f"Total I_n = {I_n:.4e} A")
+                print(f"Total I_g = {I_g:.4e} A")
+                print(f"Total I_ch = {I_ch:.4e} A")
 
             # Assemble system matrix and RHS vector
             tic = time.perf_counter()
@@ -398,14 +402,32 @@ class SolverKNPEMI:
                 for ui_ue_wrapper_local, component in zip(ui_ue_wrapper, (functions)):
                     with component.x.petsc_vec.localForm() as component_local:
                         component_local[:] = ui_ue_wrapper_local
+            
+            # Ghost update each component after writing locally owned entries
+            for component in functions:
+                component.x.petsc_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT,
+                                                  mode=PETSc.ScatterMode.FORWARD)
 
             # Update previous timestep values of functions
             for idx, func_list in enumerate(p.u_p):
                 for func, wh_func in zip(func_list, wh[idx]):
                     func.x.array[:] = wh_func.x.array.copy()
 
-            # Update membrane potential  
-            p.phi_m_prev.x.array[:] = wh[0][p.N_ions].x.array.copy() - wh[1][p.N_ions].x.array.copy()     
+            # Ghost update previous-timestep vectors so they’re consistent across ranks
+            for idx, func_list in enumerate(p.u_p):
+                for func in func_list:
+                    func.x.petsc_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT,
+                                                 mode=PETSc.ScatterMode.FORWARD)
+
+            # Compute phi_m_prev = phi_i - phi_e
+            with wh[0][p.N_ions].x.petsc_vec.localForm() as phi_i_loc, \
+                wh[1][p.N_ions].x.petsc_vec.localForm() as phi_e_loc, \
+                p.phi_m_prev.x.petsc_vec.localForm() as phi_m_loc:
+                phi_m_loc[:] = phi_i_loc - phi_e_loc
+
+            # Ghost update phi_m_prev so any neighbor reads are consistent
+            p.phi_m_prev.x.petsc_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT,
+                                                 mode=PETSc.ScatterMode.FORWARD)
 
             # Write output to file and save png
             if self.save_xdmfs and (i % self.save_interval == 0) : self.save_xdmf()
@@ -490,21 +512,25 @@ class SolverKNPEMI:
         """
 
         p = self.problem # For ease of notation
+        owner = p.owner_rank_membrane_vertex # The rank owning the membrane vertex
         
-        self.out_v_string = self.out_file_prefix + 'v.png'
-        self.v_t = []
-        self.v_t.append(1000 * scifem.evaluate_function(p.phi_m_prev, p.png_point)) # Converted to mV
-        
-        if hasattr(p, 'n'):
-            # Gating variables are a part of the problem
-            self.n_t = []
-            self.m_t = []
-            self.h_t = []
-            self.out_gate_string = self.out_file_prefix + 'gating.png'
-            self.n_t.append(scifem.evaluate_function(p.n, p.png_point))
-            self.m_t.append(scifem.evaluate_function(p.m, p.png_point))
-            self.h_t.append(scifem.evaluate_function(p.h, p.png_point))
-        
+        if self.comm.rank==owner:
+            self.out_v_string = self.out_file_prefix + 'v.png'
+            self.v_t = []
+            self.v_t.append(1000 * p.phi_m_prev.x.array[p.png_dof]) # Converted to mV
+            
+            if hasattr(p, 'n'):
+                # Gating variables are a part of the problem
+                self.n_t = []
+                self.m_t = []
+                self.h_t = []
+                self.out_gate_string = self.out_file_prefix + 'gating.png'
+                self.n_t.append(p.n.x.array[p.png_dof])
+                self.m_t.append(p.m.x.array[p.png_dof])
+                self.h_t.append(p.h.x.array[p.png_dof])
+        else:
+            pass
+            
         if hasattr(p, 'stim_ufl_expr'):
             self.stim_t = []
             self.stim_current_form = dfx.fem.form(p.stim_ufl_expr * p.dS(p.stimulus_tags))
@@ -519,13 +545,17 @@ class SolverKNPEMI:
         these are a part of the problem. """
 
         p = self.problem
+        owner = p.owner_rank_membrane_vertex
 
-        self.v_t.append(1000 * scifem.evaluate_function(p.phi_m_prev, p.png_point)) # Converted to mV
-        
-        if hasattr(p, 'n'):
-            self.n_t.append(scifem.evaluate_function(p.n, p.png_point))
-            self.m_t.append(scifem.evaluate_function(p.m, p.png_point))
-            self.h_t.append(scifem.evaluate_function(p.h, p.png_point))
+        if self.comm.rank==owner:
+            self.v_t.append(1000 * p.phi_m_prev.x.array[p.png_dof]) # Converted to mV
+            
+            if hasattr(p, 'n'):
+                self.n_t.append(p.n.x.array[p.png_dof])
+                self.m_t.append(p.m.x.array[p.png_dof])
+                self.h_t.append(p.h.x.array[p.png_dof])
+        else:
+            pass
 
         if hasattr(p, 'stim_ufl_expr'):
             stim_current: float = self.comm.allreduce(
@@ -584,22 +614,24 @@ class SolverKNPEMI:
         time_steps: int = self.time_steps
         times = np.linspace(0, 1000 * time_steps * dt, time_steps + 1)
 
-        # Save plot of membrane potential
-        fig, ax = plt.subplots()    
-        ax.plot(times, np.array(self.v_t).flatten())
-        ax.set_xlabel('Time [ms]')
-        ax.set_ylabel('Membrane potential [mV]')
-        fig.savefig(self.out_v_string)
-
-        # save plot of gating variables
-        if hasattr(self.problem, 'n'):
-            fig, ax = plt.subplots()
-            ax.plot(times, np.array(self.n_t).flatten(), label='n')
-            ax.plot(times, np.array(self.m_t).flatten(), label='m')
-            ax.plot(times, np.array(self.h_t).flatten(), label='h')
+        png_owner = self.problem.owner_rank_membrane_vertex
+        if self.comm.rank==png_owner:
+            # Save plot of membrane potential
+            fig, ax = plt.subplots()    
+            ax.plot(times, np.array(self.v_t).flatten())
             ax.set_xlabel('Time [ms]')
-            ax.legend()
-            fig.savefig(self.out_gate_string)
+            ax.set_ylabel('Membrane potential [mV]')
+            fig.savefig(self.out_v_string)
+
+            # save plot of gating variables
+            if hasattr(self.problem, 'n'):
+                fig, ax = plt.subplots()
+                ax.plot(times, np.array(self.n_t).flatten(), label='n')
+                ax.plot(times, np.array(self.m_t).flatten(), label='m')
+                ax.plot(times, np.array(self.h_t).flatten(), label='h')
+                ax.set_xlabel('Time [ms]')
+                ax.legend()
+                fig.savefig(self.out_gate_string)
 
         if hasattr(self.problem, 'stim_ufl_expr'):
             fig, ax = plt.subplots()
@@ -689,7 +721,7 @@ class SolverKNPEMI:
 
     def init_xdmf_savefile(self):
         """ Initialize .xdmf files for writing output. The mesh with meshtags is written to file,
-        and an output file for the solution functions (ion concentrations and electric potentials)
+        and an output file for the solution functions for ion concentrations and electric potentials
         is initialized. """
 
         p = self.problem # For ease of notation
@@ -714,7 +746,7 @@ class SolverKNPEMI:
             self.xdmf_file.write_function(p.u_p[1][idx], float(p.t.value))
 
     def save_xdmf(self):
-        """ Write solution functions (ion concentrations and electric potentials) to file. """
+        """ Write solution functions for ion concentrations and electric potentials to file. """
 
         for idx in range(self.problem.num_variables):
             self.xdmf_file.write_function(self.problem.u_p[0][idx], float(self.problem.t.value))
@@ -770,8 +802,8 @@ class SolverKNPEMI:
     def export_data(self):
         """ Save numpy data. """
 
-        
-        np.save(self.problem.output_dir+"phi_m.npy", np.array(self.v_t))
+        if self.comm.rank==self.problem.owner_rank_membrane_vertex:
+            np.save(self.problem.output_dir+"phi_m.npy", np.array(self.v_t))
         
         if hasattr(self.problem, 'gamma_points'):
             np.save(self.problem.output_dir+"gamma_point_values.npy", self.gamma_point_values)
@@ -786,7 +818,7 @@ class SolverKNPEMI:
         np.save(self.problem.output_dir+"flux_values.npy", self.flux_values)
 
     # Default iterative solver parameters
-    ksp_rtol           = 1e-8
+    ksp_rtol           = 1e-9
     ksp_max_it         = 50000	
     ksp_type           = 'gmres' 
     pc_type            = 'hypre'

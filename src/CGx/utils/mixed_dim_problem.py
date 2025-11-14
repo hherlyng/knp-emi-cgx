@@ -172,7 +172,10 @@ class MixedDimensionalProblem(ABC):
             self.stimulus_tags: list[int] = tags['membrane']
         if 'glia_tags' in config:
             tags['glia'] = config['glia_tags']
-            tags['neuron'] = [tag for tag in config['membrane_tags'] if tag not in config['glia_tags']]
+            tags['neuron'] = [tag for tag in tags['intra'] if tag not in tags['glia']]
+        else:
+            print('Setting default: all cell tags = neuron tags')
+            tags['neuron'] = tags['intra']
 
         # Parse the tags
         self.parse_tags(tags=tags)
@@ -385,11 +388,14 @@ class MixedDimensionalProblem(ABC):
 
         if 'glia' in tags_set:
             self.glia_tags: list[int] | int = tags['glia']
-            self.neuron_tags: list[int] | int = [tag for tag in tags['membrane'] if tag not in tags['glia']]
+            if len(self.glia_tags)==0:
+                self.glia_flag = False
         else:
-            print('Setting default: all membrane tags = neuron tags')
+            print('Setting default: all cell tags = neuron tags')
             self.glia_tags = None
-            self.neuron_tags: list[int] | int = self.gamma_tags
+            self.glia_flag = False
+        
+        self.neuron_tags: list[int] | int = tags['neuron']
         
         if 'boundary' in tags_set:
             self.boundary_tags: list[int] | int = tags['boundary']
@@ -403,7 +409,7 @@ class MixedDimensionalProblem(ABC):
         self.gamma_tags = tuple(self.gamma_tags,)
         self.neuron_tags = tuple(self.neuron_tags,)
         self.stimulus_tags = tuple(self.stimulus_tags,)
-        if self.glia_tags is not None: self.glia_tags = tuple(self.glia_tags,)
+        if self.glia_flag: self.glia_tags = tuple(self.glia_tags,)
 
     def init_ionic_models(self, ionic_models: IonicModel | list[IonicModel]):
 
@@ -580,7 +586,7 @@ class MixedDimensionalProblem(ABC):
                 # Set the measurement point
                 png_point_ = self.mesh.geometry.x[min_vertex]
                 pprint("Phi m measurement point: ", png_point_, flush=True)
-
+                
                 # Recast point array in a shape that enables point evaluation with scifem
                 if self.mesh.geometry.dim==2:
                     png_point = np.array([[png_point_[0], png_point_[1]]])
@@ -591,6 +597,7 @@ class MixedDimensionalProblem(ABC):
 
             # Broadcast membrane point to all processes
             self.png_point = self.comm.bcast(png_point, root=self.owner_rank_membrane_vertex)
+            self.png_dof   = self.comm.bcast(min_vertex, root=self.owner_rank_membrane_vertex)
 
     def setup_domain(self):
 
@@ -697,9 +704,9 @@ class MixedDimensionalProblem(ABC):
             self.ds = ufl.Measure("ds", domain=self.mesh, subdomain_data=self.boundaries) # Create boundary integral measure
             self.n_outer = ufl.FacetNormal(self.mesh) # Define outward normal on exterior boundary (\partial\Omega)
 
-        if self.glia_tags is not None:
-            # Store the neuron and glia computational cells
-            self.neuron_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.neuron_tags]))
+        # Store the neuron and glia computational cells
+        self.neuron_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.neuron_tags]))
+        if self.glia_flag:
             self.glia_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.glia_tags]))
 
         #-------------------------------------------------#        
@@ -746,8 +753,6 @@ class MixedDimensionalProblem(ABC):
 
                 # Find more points "downstream" of the stimulus
                 coords = self.mesh.geometry.x[:, stim_dir]
-
-                coord_min = self.comm.allreduce(coords.min(), op=MPI.MIN)
                 coord_max = self.comm.allreduce(coords.max(), op=MPI.MAX)
 
                 step = 5*(stim_range[1] - stim_range[0])
@@ -793,16 +798,13 @@ class MixedDimensionalProblem(ABC):
             self.initialize_injection_site(delta=delta)
 
     def calculate_compartment_volumes_and_surface_areas(self):
-
+        """ Calculate the volumes [m^3] of the intra- and extracellular spaces
+            and the surface areas [m^2] of the cellular membranes. 
+        """
+        
         self.vol_i_n = self.comm.allreduce(
                                 dfx.fem.assemble_scalar(
                                     dfx.fem.form(1*self.dx(self.neuron_tags))
-                                    ),
-                                op=MPI.SUM
-                            ) # [m^3]
-        self.vol_i_g = self.comm.allreduce(
-                                dfx.fem.assemble_scalar(
-                                    dfx.fem.form(1*self.dx(self.glia_tags))
                                     ),
                                 op=MPI.SUM
                             ) # [m^3]
@@ -812,15 +814,23 @@ class MixedDimensionalProblem(ABC):
                                     ),
                                 op=MPI.SUM
                             ) # [m^2]
-        self.area_g_g = self.comm.allreduce(
-                                dfx.fem.assemble_scalar(
-                                    dfx.fem.form(1*self.dS(self.glia_tags))
-                                    ),
-                                op=MPI.SUM
-                            ) # [m^2]
         self.vol_e = self.comm.allreduce(
                                 dfx.fem.assemble_scalar(
                                     dfx.fem.form(1*self.dx(self.extra_tag))
                                     ),
                                 op=MPI.SUM
                             ) # [m^3]
+        
+        if self.glia_flag:
+            self.vol_i_g = self.comm.allreduce(
+                                    dfx.fem.assemble_scalar(
+                                        dfx.fem.form(1*self.dx(self.glia_tags))
+                                        ),
+                                    op=MPI.SUM
+                                ) # [m^3]
+            self.area_g_g = self.comm.allreduce(
+                                    dfx.fem.assemble_scalar(
+                                        dfx.fem.form(1*self.dS(self.glia_tags))
+                                        ),
+                                    op=MPI.SUM
+                                ) # [m^2]

@@ -33,6 +33,9 @@ class IonicModel(ABC):
         # Transform int to tuple if needed
         if isinstance(self.tags, int): self.tags = (self.tags,)
 
+        # Initialize a zero constant
+        self.zero = dfx.fem.Constant(self.problem.mesh, 0.0)
+
     @abstractmethod
     def _init(self):
         # Abstract method that must be implemented by concrete subclasses.
@@ -43,6 +46,33 @@ class IonicModel(ABC):
     def _eval(self, ion_idx):
         # Abstract method that must be implemented by concrete subclasses.
         pass
+
+    def f_NKCC1(self,
+                K_e: ufl.Coefficient,
+                K_e_0: dfx.fem.Constant,
+                K_min_val: float=3.0,
+                eps: float=1e-6,
+                cap: float=1.0) -> ufl.Coefficient:
+        """ Function that silences the NKCC1 cotransporter at lowK_e and is zero when 
+        K_e is not in the interval [K_min, K_e_0]."""
+        # Define K_min as a dolfinx.fem.Constant
+        K_min = dfx.fem.Constant(self.problem.mesh, K_min_val)
+
+        # Zero outside the band [K_min, K_e_0]
+        if ufl.conditional(ufl.Or(
+                ufl.lt(K_e, K_min),
+                ufl.gt(K_e, K_e_0)
+                        ),
+                True,
+                False  
+            ):
+            return self.zero
+        
+        # Inside the band: safe denominator with epsilon and cap
+        denom = ufl.max(K_e - K_e_0, eps)
+        val = 1.0 / (1.0 + (0.03 / denom)**10)
+
+        return ufl.min(ufl.max(val, self.zero), cap)
 
 class PassiveModel(IonicModel):
     
@@ -229,26 +259,26 @@ class GlialCotransporters(IonicModel):
 
         p = self.problem # Problem instance
         ion   = p.ion_list[ion_idx] # Ion dictionary
-        z     = ion['z'] # Ion valence
         c_Na_i = p.u_p[0][0] # ICS Na+ concentration at previous timestep [mol/m^3]
         c_Na_e = p.u_p[1][0] # ECS Na+ concentration at previous timestep [mol/m^3]
         c_K_i  = p.u_p[0][1] # ICS K+ concentration at previous timestep [mol/m^3]
         c_K_e  = p.u_p[1][1] # ECS K+ concentration at previous timestep [mol/m^3]
         c_Cl_i = p.u_p[0][2] # ICS Cl- concentration at previous timestep [mol/m^3]
         c_Cl_e = p.u_p[1][2] # ECS Cl- concentration at previous timestep [mol/m^3]
-        c_K_e_0 = p.K_e_init.value # Initial ECS K+ concentration [mol/m^3]
+        c_K_e_0 = p.K_e_init # Initial ECS K+ concentration [mol/m^3]
 
         # Define the KCC1 cotransporter current density [A/m^2]
         I_KCC1 = (self.S_KCC1
                     * ufl.ln(
-                        (c_K_e * c_Cl_e)
+                        (c_K_i * c_Cl_i)
                             /
-                        (c_K_i*c_Cl_i)
+                        (c_K_e*c_Cl_e)
                     )
                 )
         
         # Define the NKCC1 cotransporter current density [A/m^2]
-        silence_factor = 1 / (1 + (0.03/(c_K_e - c_K_e_0))**10) # Function that silences NKCC1 at low K_e and is zero at K_e = K_e_0
+        silence_factor = self.f_NKCC1(c_K_e, c_K_e_0) # Function that silences NKCC1 at low K_e
+                                                      # and is zero when K_e outside of [K_min, K_e_0]
         I_NKCC1 = (
                     self.S_NKCC1 * silence_factor
                     * 
@@ -300,26 +330,26 @@ class NeuronalCotransporters(IonicModel):
 
         p = self.problem # Problem instance
         ion    = p.ion_list[ion_idx] # Ion dictionary
-        z      = ion['z'] # Ion valence
         c_Na_i = p.u_p[0][0] # ICS Na+ concentration at previous timestep [mol/m^3]
         c_Na_e = p.u_p[1][0] # ECS Na+ concentration at previous timestep [mol/m^3]
         c_K_i  = p.u_p[0][1] # ICS K+  concentration at previous timestep [mol/m^3]
         c_K_e  = p.u_p[1][1] # ECS K+  concentration at previous timestep [mol/m^3]
         c_Cl_i = p.u_p[0][2] # ICS Cl- concentration at previous timestep [mol/m^3]
         c_Cl_e = p.u_p[1][2] # ECS Cl- concentration at previous timestep [mol/m^3]
-        c_K_e_0 = p.K_e_init.value # Initial ECS K+ concentration [mol/m^3]
+        c_K_e_0 = p.K_e_init # Initial ECS K+ concentration [mol/m^3]
 
         # Define the KCC2 cotransporter current density [A/m^2]
         I_KCC2 = (self.S_KCC2
                     * ufl.ln(
-                        (c_K_e * c_Cl_e)
+                        (c_K_i * c_Cl_i)
                             /
-                        (c_K_i*c_Cl_i)
+                        (c_K_e*c_Cl_e)
                     )
                 )
         
         # Define the NKCC1 cotransporter current density [A/m^2]
-        silence_factor = 1 / (1 + (0.03/(c_K_e - c_K_e_0))**10) # Function that silences NKCC1 at low K_e and is zero at K_e = K_e_0
+        silence_factor = self.f_NKCC1(c_K_e, c_K_e_0) # Function that silences NKCC1 at low K_e
+                                                      # and is zero when K_e outside of [K_min, K_e_0]
         I_NKCC1 = (
                     self.S_NKCC1 * silence_factor
                     * 
@@ -332,11 +362,11 @@ class NeuronalCotransporters(IonicModel):
 
         # Return ionic current depending on ion type
         if ion["name"]=="Na":
-            return -z*I_NKCC1
+            return -I_NKCC1
         elif ion["name"]=="K":
-            return (-z*I_NKCC1 + z*I_KCC2)
+            return (-I_NKCC1 + I_KCC2)
         else:
-            return (-2*z*I_NKCC1 + z*I_KCC2)
+            return (I_NKCC1 - I_KCC2)
         
 class ATPPump(IonicModel):
 
@@ -353,8 +383,8 @@ class ATPPump(IonicModel):
 
         # Define ATP pump parameters
         self.I_hat = dfx.fem.Constant(self.problem.mesh, 0.25) # Maximum pump strength [A/m^2]
-        self.m_K   = dfx.fem.Constant(self.problem.mesh, 1.5)  # ECS K+  pump threshold [mM]
-        self.m_Na  = dfx.fem.Constant(self.problem.mesh, 10.0) # ICS Na+ pump threshold [mM]
+        self.P_K_e  = dfx.fem.Constant(self.problem.mesh, 1.5)  # ECS K+  pump threshold [mM]
+        self.P_Na_i = dfx.fem.Constant(self.problem.mesh, 10.0) # ICS Na+ pump threshold [mM]
 
     def _eval(self, ion_idx: int) -> ufl.Coefficient:
         """ Evaluate and return the ionic channel current for ion number 'ion_idx'.
@@ -372,7 +402,6 @@ class ATPPump(IonicModel):
 
         p   = self.problem # Problem instance
         ion = p.ion_list[ion_idx] # Ion dictionary
-        z   = ion['z'] # Ion valence
 
         if ion["name"]=="Cl":
             # Cl- is not affected by the ATP pump
@@ -382,8 +411,8 @@ class ATPPump(IonicModel):
         c_K_e  = p.u_p[1][1] # ECS K+ concentration at previous timestep [mol/m^3]
 
         # Define the ATP pump current density [A/m^2]
-        par_1 = 1 + self.m_K  / c_K_e
-        par_2 = 1 + self.m_Na / c_Na_i
+        par_1 = 1 + self.P_K_e  / c_K_e
+        par_2 = 1 + self.P_Na_i / c_Na_i
         I_ATP = self.I_hat / (par_1**2 * par_2**3) # ATP pump current [A/m^2]
 
         # Return ionic current depending on ion type
