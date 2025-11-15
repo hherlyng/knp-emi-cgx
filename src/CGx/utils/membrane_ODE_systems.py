@@ -10,7 +10,8 @@ class MembraneODESystem(ABC):
     """ Class to solve the ODE system for initial conditions of membrane potential and ionic concentrations. """
     def __init__(self,
                 problem,
-                plot_flags: list[bool]=[False]*3,
+                plot_show: bool=False,
+                plot_save: bool=False,
                 stimulus_flag: bool=False,
                 timestep: float=1e-3,
                 max_time: float=500.0):
@@ -31,12 +32,16 @@ class MembraneODESystem(ABC):
         """
         # Store parameters
         self.problem = problem
-        self.plot = plot_flags[0]
-        self.show = plot_flags[1]
-        self.save = plot_flags[2]
+        self.plot = plot_show or plot_save
+        self.plot_show = plot_show
+        self.plot_save = plot_save
         self.stimulus = stimulus_flag
         self.timestep = timestep
         self.max_time = max_time
+
+        # Define timespan for ODE solver
+        num_timesteps = int(max_time / timestep)
+        self.times = np.linspace(0, max_time, num_timesteps+1)
 
         self.initialize_constants()
     
@@ -91,7 +96,7 @@ class MembraneODESystem(ABC):
 
     # Cotransporter currents
     def f_NKCC1(self, K_e: float, K_e_0: float, K_min: float=3.0, eps: float=1e-6, cap: float=1.0) -> float:
-        """ Function that silences the NKCC1 cotransporter at lowK_e and is zero when 
+        """ Function that silences the NKCC1 cotransporter at low K_e and is zero when 
         K_e is not in the interval [K_min, K_e_0]."""
         # Zero outside the band [K_min, K_e_0]
         if K_e <= K_min or K_e >= K_e_0:
@@ -194,12 +199,6 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
         g_Cl_leak = self.g_Cl_leak                  # Cl leak conductivity (S/m**2) (Constant)
         g_Cl_leak_g = self.g_Cl_leak_g # Cl leak conductivity (S/m**2) (Constant)
         phi_rest = self.phi_rest  # Resting potential [V]
-
-        # Define timespan for ODE solver
-        timestep = self.timestep
-        max_time = self.max_time
-        num_timesteps = int(max_time / timestep)
-        times = np.linspace(0, max_time, num_timesteps+1)
 
         # Define initial condition guesses
         Na_i_0 = self.Na_i_init # [Mm]
@@ -408,7 +407,7 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
         if self.plot: self.append_arrays(sol_)
 
         # Loop over timesteps and solve the ODE system
-        for t, dt in zip(times, np.diff(times)):
+        for t, dt in zip(self.times, np.diff(self.times)):
         
             if t > 0:
                 # Initial condition for ODE solver is
@@ -430,13 +429,33 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
 
             if self.plot: self.append_arrays(sol_)
 
+            print(f"Time: {t:.6f} s")
+            print(f"Solution = {sol_}")
+            print(f"RHS = {three_compartment_rhs(t, sol_)}")
+
+            print("-------- Currents --------")
+            print(f"I_ATP_n = {I_ATP(sol_[1], sol_[4]):.6e} A/m^2")
+            print(f"I_NKCC1_n = {I_NKCC1_n(sol_[1], sol_[2], sol_[3], sol_[4], sol_[5], sol_[6]):.6e} A/m^2")
+            print(f"I_KCC2 = {I_KCC2(sol_[3], sol_[4], sol_[5], sol_[6]):.6e} A/m^2")
+            print(f"I_ATP_g = {I_glia_pump(sol_[8], sol_[4]):.6e} A/m^2")
+            print(f"I_NKCC1_g = {I_NKCC1_g(sol_[8], sol_[2], sol_[9], sol_[4], sol_[10], sol_[6]):.6e} A/m^2")
+            print(f"I_KCC1 = {I_KCC1(sol_[9], sol_[4], sol_[10], sol_[6]):.6e} A/m^2")
+            print(f"g_Kir = {g_K_leak_g * f_Kir(sol_[4], sol_[7] - E(z_K, sol_[9], sol_[4]), sol_[7]):.6e} A/m^2")
+            print(f"I_Cl_leak_g = {g_Cl_leak_g*(sol_[7] - E(z_Cl, sol_[10], sol_[6])):.6e} A/m^2")
+            print(f"I_Cl_leak_n = {g_Cl_leak*(sol_[0] - E(z_Cl, sol_[5], sol_[6])):.6e} A/m^2")
+            print(f"I_Na_leak_n = {(g_Na_leak + g_Na_bar * sol_[12]**3 * sol_[13])*(sol_[0] - E(z_Na, sol_[1], sol_[2])):.6e} A/m^2")
+            print(f"I_K_leak_n = {(g_K_leak + g_K_bar * sol_[11]**4)*(sol_[0] - E(z_K, sol_[3], sol_[4])):.6e} A/m^2")
+            print(f"I_Na_leak_g = {g_Na_leak_g*(sol_[7] - E(z_Na, sol_[8], sol_[2])):.6e} A/m^2")
+            print(f"I_K_leak_g = {g_K_leak_g * f_Kir(sol_[4], sol_[7] - E(z_K, sol_[9], sol_[4]), sol_[7])*(sol_[7] - E(z_K, sol_[9], sol_[4])):.6e} A/m^2")
+            print("--------------------------------------------------")
+
             if np.allclose(three_compartment_rhs(t, sol_), 0.0, rtol=1e-8, atol=1e-10):
                 print("Steady state reached. Derivatives zero to within tolerance.")
                 [print(f"Variable {j}: {sol_[j]:.18f}") for j in range(len(sol_))]
                 break
 
             # Checks
-            if t > max_time:
+            if np.isclose(t+dt, self.max_time):
                 print("Max time exceeded without finding steady state. Exiting.")
                 break
 
@@ -500,7 +519,7 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
             save : bool, optional
                 Whether to save the plots as PNG files, by default False
         """
-        times = np.arange(len(self.phi_m_n_arr)) * 1e-7
+        times = np.arange(len(self.phi_m_n_arr)) * 1e-3 * self.timestep # Milliseconds
         figsize = (10, 6)
 
         fig1, ax1 = plt.subplots(figsize=figsize)
@@ -547,13 +566,13 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
         ax5.legend()
         fig5.tight_layout()
 
-        if self.save:
+        if self.plot_save:
             fig1.savefig('membrane_potential.png')
             fig2.savefig('na_concentration.png')
             fig3.savefig('k_concentration.png')
             fig4.savefig('cl_concentration.png')
             fig5.savefig('gating_variables.png')
-        if self.show:
+        if self.plot_show:
             plt.show()
 
 
@@ -633,12 +652,6 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
         g_K_leak  = self.g_K_leak              # K leak conductivity (S/m**2)
         g_Cl_leak = self.g_Cl_leak                  # Cl leak conductivity (S/m**2) (Constant)
         phi_rest = self.phi_rest  # Resting potential [V]
-
-        # Define timespan for ODE solver
-        timestep = self.timestep
-        max_time = self.max_time
-        num_timesteps = int(max_time / timestep)
-        times = np.linspace(0, max_time, num_timesteps+1)
 
         # Define initial condition guesses
         Na_i_0 = self.Na_i_init # [Mm]
@@ -766,7 +779,7 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
         if self.plot: self.append_arrays(sol_)
 
         # Loop over timesteps and solve the ODE system
-        for t, dt in zip(times, np.diff(times)):
+        for t, dt in zip(self.times, np.diff(self.times)):
         
             if t > 0:
                 # Initial condition for ODE solver is
@@ -794,7 +807,7 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
                 break
 
             # Checks
-            if t > max_time:
+            if np.isclose(t+dt, self.max_time):
                 print("Max time exceeded without finding steady state. Exiting.")
                 break
 
@@ -850,7 +863,7 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
             save : bool, optional
                 Whether to save the plots as PNG files, by default False
         """
-        times = np.arange(len(self.phi_m_n_arr)) * 1e-7
+        times = np.arange(len(self.phi_m_n_arr)) * 1e-3 * self.timestep # Milliseconds
         figsize = (10, 6)
 
         fig1, ax1 = plt.subplots(figsize=figsize)
@@ -893,11 +906,25 @@ class TwoCompartmentMembraneODESystem(MembraneODESystem):
         ax5.legend()
         fig5.tight_layout()
 
-        if self.save:
+        if self.plot_save:
             fig1.savefig('membrane_potential.png')
             fig2.savefig('na_concentration.png')
             fig3.savefig('k_concentration.png')
             fig4.savefig('cl_concentration.png')
             fig5.savefig('gating_variables.png')
-        if self.show:
+        if self.plot_show:
             plt.show()
+
+if __name__ == "__main__":
+    from sys import argv
+    from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
+
+    # Create a problem instance
+    problem = ProblemKNPEMI(config_file=str(argv[1]) if len(argv) > 1 else "../KNPEMI/configs/5m/100c.yaml")
+    problem.calculate_compartment_volumes_and_surface_areas()
+
+    # Create a three-compartment ODE system solver
+    ode_system = ThreeCompartmentMembraneODESystem(problem, timestep=1e-3, max_time=100.0, plot_show=True, plot_save=False)
+
+    # Solve the ODE system
+    solution = ode_system.solve_ode_system()
