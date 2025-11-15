@@ -390,6 +390,8 @@ class MixedDimensionalProblem(ABC):
             self.glia_tags: list[int] | int = tags['glia']
             if len(self.glia_tags)==0:
                 self.glia_flag = False
+            else:
+                self.glia_flag = True
         else:
             print('Setting default: all cell tags = neuron tags')
             self.glia_tags = None
@@ -717,78 +719,78 @@ class MixedDimensionalProblem(ABC):
             self.find_membrane_point_closest_to_centroid(gamma_facets)
         else:
             gamma_facets = self.boundaries.find(self.membrane_data_tag)
-            if len(self.stimulus_tags)==0 or not self.stimulus_region:
-                self.find_membrane_point_closest_to_centroid(gamma_facets)
-                self.gamma_points = self.png_point
-            else:
-                gamma_vertices = dfx.mesh.compute_incident_entities(
-                                                                self.mesh.topology,
-                                                                gamma_facets,
-                                                                self.mesh.topology.dim-1,
-                                                                0
-                )
-                num_local_gamma_vertices = self.mesh.topology.index_map(0).size_local
-                gamma_vertices = np.unique(gamma_vertices)[gamma_vertices < num_local_gamma_vertices]
-                gamma_coords = self.mesh.geometry.x[gamma_vertices]
-                stim_dir = self.stimulus_region_direction
-                stim_range = self.stimulus_region_range
-                stimulus_region_mask = np.logical_and(
-                                        gamma_coords[:, stim_dir] > stim_range[0],
-                                        gamma_coords[:, stim_dir] < stim_range[1]
-                                    )
-                # Pick one point within the stimulus region
-                filtered_gamma_coords = gamma_coords[stimulus_region_mask]
+            # if len(self.stimulus_tags)==0 or not self.stimulus_region:
+            self.find_membrane_point_closest_to_centroid(gamma_facets)
+            self.gamma_points = self.png_point
+            # else:
+            #     gamma_vertices = dfx.mesh.compute_incident_entities(
+            #                                                     self.mesh.topology,
+            #                                                     gamma_facets,
+            #                                                     self.mesh.topology.dim-1,
+            #                                                     0
+            #     )
+            #     num_local_gamma_vertices = self.mesh.topology.index_map(0).size_local
+            #     gamma_vertices = np.unique(gamma_vertices)[gamma_vertices < num_local_gamma_vertices]
+            #     gamma_coords = self.mesh.geometry.x[gamma_vertices]
+            #     stim_dir = self.stimulus_region_direction
+            #     stim_range = self.stimulus_region_range
+            #     stimulus_region_mask = np.logical_and(
+            #                             gamma_coords[:, stim_dir] > stim_range[0],
+            #                             gamma_coords[:, stim_dir] < stim_range[1]
+            #                         )
+            #     # Pick one point within the stimulus region
+            #     filtered_gamma_coords = gamma_coords[stimulus_region_mask]
                 
-                # Find point local to each process, set None if process
-                # does not own any vertices 
-                local_gamma_point = None
-                if len(filtered_gamma_coords)>0:
-                    local_gamma_point = filtered_gamma_coords[0]
+            #     # Find point local to each process, set None if process
+            #     # does not own any vertices 
+            #     local_gamma_point = None
+            #     if len(filtered_gamma_coords)>0:
+            #         local_gamma_point = filtered_gamma_coords[0]
 
-                # Gather all points and filter out Nones
-                global_gamma_points = self.comm.allgather(local_gamma_point)
-                global_gamma_points = [point for point in global_gamma_points if point is not None]
+            #     # Gather all points and filter out Nones
+            #     global_gamma_points = self.comm.allgather(local_gamma_point)
+            #     global_gamma_points = [point for point in global_gamma_points if point is not None]
 
-                gamma_points = [global_gamma_points[0]]
+            #     gamma_points = [global_gamma_points[0]]
 
-                # Find more points "downstream" of the stimulus
-                coords = self.mesh.geometry.x[:, stim_dir]
-                coord_max = self.comm.allreduce(coords.max(), op=MPI.MAX)
+            #     # Find more points "downstream" of the stimulus
+            #     coords = self.mesh.geometry.x[:, stim_dir]
+            #     coord_max = self.comm.allreduce(coords.max(), op=MPI.MAX)
 
-                step = 5*(stim_range[1] - stim_range[0])
-                i = 1
-                lower_threshold = stim_range[0] + i*step
-                upper_threshold = stim_range[1] + i*step
-                while lower_threshold < coord_max:
-                    lower_threshold = stim_range[0] + i*step
-                    upper_threshold = stim_range[1] + i*step
-                    mask = np.logical_and(
-                                        gamma_coords[:, stim_dir] > lower_threshold,
-                                        gamma_coords[:, stim_dir] < upper_threshold
-                                    )
-                    # Filter membrane coordinates with the mask
-                    filtered_gamma_coords = gamma_coords[mask]
+            #     step = 5*(stim_range[1] - stim_range[0])
+            #     i = 1
+            #     lower_threshold = stim_range[0] + i*step
+            #     upper_threshold = stim_range[1] + i*step
+            #     while lower_threshold < coord_max:
+            #         lower_threshold = stim_range[0] + i*step
+            #         upper_threshold = stim_range[1] + i*step
+            #         mask = np.logical_and(
+            #                             gamma_coords[:, stim_dir] > lower_threshold,
+            #                             gamma_coords[:, stim_dir] < upper_threshold
+            #                         )
+            #         # Filter membrane coordinates with the mask
+            #         filtered_gamma_coords = gamma_coords[mask]
                     
-                    # Find point local to each process, set None if process
-                    # does not own any vertices 
-                    local_gamma_point = None
-                    if len(filtered_gamma_coords)>0:
-                        local_gamma_point = filtered_gamma_coords[0]
+            #         # Find point local to each process, set None if process
+            #         # does not own any vertices 
+            #         local_gamma_point = None
+            #         if len(filtered_gamma_coords)>0:
+            #             local_gamma_point = filtered_gamma_coords[0]
 
-                    # Gather all points and filter out Nones
-                    global_gamma_points = self.comm.allgather(local_gamma_point)
-                    global_gamma_points = [point for point in global_gamma_points if point is not None]
-                    if len(global_gamma_points)>0:
-                        gamma_points.append(global_gamma_points[0])
-                    else:
-                        break # No more points found
+            #         # Gather all points and filter out Nones
+            #         global_gamma_points = self.comm.allgather(local_gamma_point)
+            #         global_gamma_points = [point for point in global_gamma_points if point is not None]
+            #         if len(global_gamma_points)>0:
+            #             gamma_points.append(global_gamma_points[0])
+            #         else:
+            #             break # No more points found
                     
-                    # Increment index
-                    i += 1
+            #         # Increment index
+            #         i += 1
                 
-                # Convert to numpy array
-                self.gamma_points = np.array(gamma_points)
-                self.png_point = np.array([self.gamma_points[0]])
+            #     # Convert to numpy array
+            #     self.gamma_points = np.array(gamma_points)
+            #     self.png_point = np.array([self.gamma_points[0]])
                     
         # Initialize injection site properties
         if self.source_terms=="ion_injection":
