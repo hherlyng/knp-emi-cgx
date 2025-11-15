@@ -1,0 +1,54 @@
+## CI Test Config File, KNP-EMI
+problem_type : "KNP-EMI"
+
+# Numerical parameters 
+dt : 0.000025 # Timestep size [s]
+time_steps : 10 # Number of timesteps [int]
+T  : 50 # Simulation end time [s]
+
+# Problem constants (in consistent units)
+physical_constants:
+  T : 300   # Temperature [K]
+  F : 96485 # Faraday constant [C/mol]
+  R : 8.314 # Gas constant [J/(K*mol)]
+
+C_M : 0.02 # Membrane capacitance [F/m^2]
+
+# Mesh and meshtags files 
+mesh_file      : "./input/geometries/square32.xdmf"
+cell_tag_file  : "./input/geometries/square32.xdmf"
+facet_tag_file : "./input/geometries/square32_facets.xdmf"
+
+ics_tags  : [1] # Intracellular space cell tags
+ecs_tags  : [2] # Extracellular space cell tags
+boundary_tags : [3] # Boundary facet tags
+membrane_tags : [4] # Membrane (interface) facet tags
+
+mesh_conversion_factor: 1e-6 # Scale mesh to micrometers size
+
+initial_conditions:
+  phi_m : -0.070 # Membrane potential [V] 
+  Na_i : 12 # Intracellular Na+ concentration [mol/m^3]
+  Na_e : 140 # Extracellular Na+ concentration [mol/m^3]
+  K_i  : 130 # Intracellular K+ concentration [mol/m^3]
+  K_e  : 4 # Extracellular K+ concentration [mol/m^3]
+  Cl_i : 5 # Intracellular Cl- concentration [mol/m^3]
+  Cl_e : 125 # Extracellular Cl- concentration [mol/m^3]
+  n : 0.276  # K+ activation gate variable
+  m : 0.0379 # Na+ activation gate variable
+  h : 0.688  # Na+ inactivation gate variable
+
+stimulus :
+  conductance:
+    g_syn_bar : 1e-9 # Maximum synaptic conductance [S/m^2]
+  a_syn : 5e-4 # Synaptic time constant [s]
+  T_stim : 1.0 # Stimulus period [s]
+  scale: True
+
+solver :
+  direct : True
+  output :
+    save_xdmf : False
+    save_cpoints : False
+    save_pngs : False
+    save_dat : False

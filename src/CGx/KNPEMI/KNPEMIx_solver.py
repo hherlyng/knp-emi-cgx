@@ -10,11 +10,10 @@ import matplotlib.pyplot as plt
 
 from mpi4py         import MPI
 from petsc4py       import PETSc
-from CGx.utils      import restructure_xdmf
 from CGx.utils.misc import dump
-from CGx.KNPEMI.KNPEMIx_problem import ProblemKNPEMI
+from CGx.utils.calc_fluxes import create_flux_forms, compute_fluxes
+from CGx.KNPEMI.KNPEMIx_problem     import ProblemKNPEMI
 from CGx.KNPEMI.KNPEMIx_ionic_model import HodgkinHuxley
-import ufl
 
 pprint = print # Allows flushing from arbitrary rank
 print = PETSc.Sys.Print # Automatically flushes output to stream in parallel
@@ -48,7 +47,7 @@ class SolverKNPEMI:
         if save_xdmfs : self.init_xdmf_savefile()
         if save_pngs  : self.init_png_savefile()
         if save_cpoints : self.init_checkpoint_file()
-        if problem.point_evaluation : self.init_point_data()
+        if problem.point_evaluation : self.init_data()
 
         # Perform only a single timestep when saving system matrix
         if self.save_mat: self.time_steps = 1
@@ -73,6 +72,7 @@ class SolverKNPEMI:
         p = self.problem # For ease of notation
         print("Assembling preconditioner ...")
         if not p.dirichlet_bcs:
+            # P_assembled = multiphenicsx.fem.petsc.assemble_matrix_block(p.P, bcs=p.bcs, restriction=(p.restriction, p.restriction))
             P_assembled = multiphenicsx.fem.petsc.assemble_matrix_block(p.P, bcs=[], restriction=(p.restriction, p.restriction))
         else:
             P_assembled = multiphenicsx.fem.petsc.assemble_matrix_block(p.P, bcs=p.bcs, restriction=(p.restriction, p.restriction))
@@ -92,11 +92,11 @@ class SolverKNPEMI:
         p = self.problem # For ease of notation
         
         # Create system matrix and right-hand side vector
-        self.A  = multiphenicsx.fem.petsc.create_matrix_block(p.a, restriction=(p.restriction, p.restriction))
-        self.b  = multiphenicsx.fem.petsc.create_vector_block(p.L, restriction=p.restriction)
-        
+        self.A: PETSc.Mat = multiphenicsx.fem.petsc.create_matrix_block(p.a, restriction=(p.restriction, p.restriction))
+        self.b: PETSc.Vec = multiphenicsx.fem.petsc.create_vector_block(p.L, restriction=p.restriction)
+
         # Create solution vector
-        self.x = multiphenicsx.fem.petsc.create_vector_block(p.L, restriction=p.restriction)
+        self.x: PETSc.Vec = multiphenicsx.fem.petsc.create_vector_block(p.L, restriction=p.restriction)
 
         # Configure Krylov solver
         self.ksp = PETSc.KSP().create(self.comm)
@@ -112,80 +112,118 @@ class SolverKNPEMI:
         else:
             print("Setting up iterative solver ...")
 
-            # Set initial guess
+            # Set initial conditions as initial guess for the solver
+            # Start by setting the initial conditions in the solution functions
             for idx, ion in enumerate(p.ion_list):
-                if p.glia_tags is None:
+                if not p.glia_flag:
+                    # Only neuronal cells
                     # Set the array values at the subspace dofs 
                     p.wh[0][idx].x.array[:] = ion['ki_init'].value
                     p.wh[1][idx].x.array[:] = ion['ke_init'].value
                 else:
-                    
+                    # Both glia and neurons present
                     # Set the array values at the subspace dofs 
                     p.wh[0][idx].x.array[p.neuron_dofs] = ion['ki_init_n'].value
                     p.wh[0][idx].x.array[p.glia_dofs]   = ion['ki_init_g'].value
                     p.wh[1][idx].x.array[:] = ion['ke_init'].value
 
+            # Insert the initial guess values into the solution vector
+            # x used when solving the equation Ax = b 
+            dofmaps: list[multiphenicsx.fem.petsc.DofMap] = [V.dofmap for V in p.V_list] # The function space dofmaps
+            init_guess_vectors: list[PETSc.Vec] = [function.x.petsc_vec for function in [*p.wh[0], *p.wh[1]]] # Vectors of initial guesses
+            with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(
+                self.x, dofmaps, p.restriction) as C_dd_wrapper:
+                for C_dd_component_local, data_vector in zip(C_dd_wrapper, tuple(init_guess_vectors)):
+                    with data_vector.localForm() as data_vector_local:
+                        C_dd_component_local[:] = data_vector_local
+
+            # Set the KSP and PC types
             self.ksp.setType(self.ksp_type)
             pc = self.ksp.getPC()
             pc.setType(self.pc_type)
 
             if self.pc_type=="fieldsplit":
+            
+                # Create global offsets for each block in the linear system
+                offsets = []
+                global_start = 0
+                for V in p.V_list:
+                    offsets.append(global_start) # The starting global index of the current block
+                    global_start += V.dofmap.index_map.size_global # The global size of the current block
 
-                # # Collapse subspaces to get dofmaps
-                # _, Wi0_to_Wi = Wi.sub(0).collapse()
-                # _, Wi1_to_Wi = Wi.sub(1).collapse()
-                # _, Wi2_to_Wi = Wi.sub(2).collapse()
-                # _, Wi3_to_Wi = Wi.sub(3).collapse()
-                # _, We0_to_We = We.sub(0).collapse()
-                # _, We1_to_We = We.sub(1).collapse()
-                # _, We2_to_We = We.sub(2).collapse()
-                # _, We3_to_We = We.sub(3).collapse()
+                # Get the range of owned rows of A on the current rank
+                lo, hi = self.A.getOwnershipRange()
 
-                # is0 = PETSc.IS().createGeneral(Wi0_to_Wi)
-                # is1 = PETSc.IS().createGeneral(Wi1_to_Wi)
-                # is2 = PETSc.IS().createGeneral(Wi2_to_Wi)
-                # is3 = PETSc.IS().createGeneral(Wi3_to_Wi)
-                # is4 = PETSc.IS().createGeneral(We0_to_We)
-                # is5 = PETSc.IS().createGeneral(We1_to_We)
-                # is6 = PETSc.IS().createGeneral(We2_to_We)
-                # is7 = PETSc.IS().createGeneral(We3_to_We)
+                # Owned global indices per block = offsets[i] + [0..size_global-1]; filter to [lo, hi)
+                block_dofs = []
+                for i, V in enumerate(p.V_list):
+                    global_size = V.dofmap.index_map.size_global # The global size of the dofmap of V
+                    global_idx = offsets[i] + np.arange(global_size, dtype=np.int64) # Global indices of block i
+                    local = global_idx[(global_idx >= lo) & (global_idx < hi)] # Filter to locally owned rows
+                    block_dofs.append(local)
 
-                # fields = [('0', is0), ('1', is1), ('2', is2), ('3', is3),('4', is4), ('5', is5),('6', is6), ('7', is7)]
-                # pc.setFieldSplitIS(*fields)
+                # ICS concentration dofs: blocks 0..N_ions-1
+                ics_all = np.concatenate(block_dofs[:p.N_ions])
 
-                ksp_solver = 'preonly'
+                # ECS concentration dofs: blocks (N_ions+1)..(2*N_ions)
+                ecs_all = np.concatenate(block_dofs[p.N_ions+1:2*p.N_ions+1])
+
+                # Electric potential dofs: blocks N_ions (phi_i) and 2*N_ions+1 (phi_e)
+                phi_all = np.concatenate([block_dofs[p.N_ions], block_dofs[2*p.N_ions+1]])
+
+                # Filter the dofs to locally owned rows
+                ics_local = ics_all[(ics_all >= lo) & (ics_all < hi)]
+                ecs_local = ecs_all[(ecs_all >= lo) & (ecs_all < hi)]
+                phi_local = phi_all[(phi_all >= lo) & (phi_all < hi)]
+
+                # Create PETSc Index Set objects using the sorted local dofs 
+                is_ics = PETSc.IS().createGeneral(np.sort(ics_local).astype(np.int32))
+                is_ecs = PETSc.IS().createGeneral(np.sort(ecs_local).astype(np.int32))
+                is_phi = PETSc.IS().createGeneral(np.sort(phi_local).astype(np.int32))
+
+                # Set the field splits on the KSP preconditioner object
+                pc.setFieldSplitIS(("ics", is_ics), ("ecs", is_ecs), ("phi", is_phi))
+
+                # Set the iterative solver and preconditioner type for the field splits
+                ksp_solver = 'preonly' 
                 P_inv      = 'hypre'
 
-                opts.setValue('pc_fieldsplit_type', 'additive')
+                opts.setValue('pc_fieldsplit_type', 'multiplicative')
 
-                opts.setValue('fieldsplit_0_ksp_type', ksp_solver)
-                opts.setValue('fieldsplit_1_ksp_type', ksp_solver)
-                opts.setValue('fieldsplit_2_ksp_type', ksp_solver)
-                opts.setValue('fieldsplit_3_ksp_type', ksp_solver)
-                opts.setValue('fieldsplit_4_ksp_type', ksp_solver)
-                opts.setValue('fieldsplit_5_ksp_type', ksp_solver)
-                opts.setValue('fieldsplit_6_ksp_type', ksp_solver)
-                opts.setValue('fieldsplit_7_ksp_type', ksp_solver)
+                opts.setValue('fieldsplit_ics_ksp_type', ksp_solver)
+                opts.setValue('fieldsplit_ecs_ksp_type', ksp_solver)
+                opts.setValue('fieldsplit_phi_ksp_type', ksp_solver)
 
-                opts.setValue('fieldsplit_0_pc_type',  P_inv)				
-                opts.setValue('fieldsplit_1_pc_type',  P_inv)
-                opts.setValue('fieldsplit_2_pc_type',  P_inv)
-                opts.setValue('fieldsplit_3_pc_type',  P_inv)
-                opts.setValue('fieldsplit_4_pc_type',  P_inv)
-                opts.setValue('fieldsplit_5_pc_type',  P_inv)
-                opts.setValue('fieldsplit_6_pc_type',  P_inv)
-                opts.setValue('fieldsplit_7_pc_type',  P_inv)
+                opts.setValue('fieldsplit_ics_pc_type',  P_inv)				
+                opts.setValue('fieldsplit_ecs_pc_type',  P_inv)
+                opts.setValue('fieldsplit_phi_pc_type',  "lu")
+
+                # Set Hypre BoomerAMG options for the concentration splits
+                opts.setValue('fieldsplit_ics_pc_hypre_boomeramg_max_iter', self.max_amg_iter)
+                opts.setValue('fieldsplit_ics_pc_hypre_boomeramg_strong_threshold', 0.5)
+                opts.setValue('fieldsplit_ics_pc_hypre_boomeramg_coarsen_type', "HMIS")
+                opts.setValue('fieldsplit_ics_pc_hypre_boomeramg_interp_type', "ext+i")
+                opts.setValue('fieldsplit_ecs_pc_hypre_boomeramg_max_iter', self.max_amg_iter)
+                opts.setValue('fieldsplit_ecs_pc_hypre_boomeramg_strong_threshold', 0.5)
+                opts.setValue('fieldsplit_ecs_pc_hypre_boomeramg_coarsen_type', "HMIS")
+                opts.setValue('fieldsplit_ecs_pc_hypre_boomeramg_interp_type', "ext+i")
             
+            else:
+                # Apply preconditioner options for single-field preconditioner
+                if self.ksp_type=='hypre':
+                    opts.setValue('pc_hypre_boomeramg_max_iter', self.max_amg_iter)
+                    if self.problem.mesh.geometry.dim==3:
+                        opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.5)
+            
+            # Set miscellaneous KSP options
             opts.setValue('ksp_converged_reason', None)
             opts.setValue('ksp_rtol',      self.ksp_rtol)
             opts.setValue('ksp_max_it',    self.ksp_max_it)
             opts.setValue('ksp_norm_type', self.norm_type)
-            opts.setValue('ksp_initial_guess_nonzero',   self.nonzero_init_guess)
-            if self.ksp_type=='hypre': opts.setValue('pc_hypre_boomeramg_max_iter', self.max_amg_iter)
-            if self.problem.mesh.geometry.dim == 3: opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.5)
+            opts.setValue('ksp_initial_guess_nonzero',   self.nonzero_init_guess)                
 
             # vector to collect number of iterations
-            self.iterations    = []
+            self.iterations = []
 
             if self.view_input:
                 opts.setValue('ksp_view', None)
@@ -209,11 +247,11 @@ class SolverKNPEMI:
 
         ns_vec = multiphenicsx.fem.petsc.create_vector_block(p.L, restriction=p.restriction)
 
-        dofmaps = [V.dofmap for V in p.V_list] # The function space dofmaps
+        dofmaps: list[multiphenicsx.fem.petsc.DofMap] = [V.dofmap for V in p.V_list] # The function space dofmaps
         functions = [dfx.fem.Function(V) for V in p.V_list] # Finite element functions in each space
         functions[p.N_ions].x.array[:] = 1.0 # Intracellular potential
         functions[2*p.N_ions+1].x.array[:] = 1.0 # Extracellular potential
-        Cs = [function.x.petsc_vec for function in functions] # Vector of constants
+        Cs: list[PETSc.Vec] = [function.x.petsc_vec for function in functions] # Vector of constants
 
         idx = 0
         with multiphenicsx.fem.petsc.BlockVecSubVectorWrapper(
@@ -227,27 +265,27 @@ class SolverKNPEMI:
         
         # Create the PETSc null space vector and check that it is a valid nullspace of A
         nullspace = PETSc.NullSpace().create(vectors=[ns_vec], comm=self.comm)
-        assert nullspace.test(self.A) # Check that the nullspace is created correctly
 
         # Set the nullspace
-        if self.direct_solver:
+        if len(p.bcs)==0: 
+            assert nullspace.test(self.A) # Check that the nullspace is created correctly
             self.A.setNullSpace(nullspace)
-            nullspace.remove(self.b)
-        else:
-            self.A.setNullSpace(nullspace)
-            self.A.setNearNullSpace(nullspace)
-            nullspace.remove(self.b)
+        self.A.setNearNullSpace(nullspace)
+
+        if not self.direct_solver and self.use_P_mat:
+            self.P_.setNearNullSpace(nullspace)
 
     def solve(self):
+        """ Solve the KNP-EMI problem. """
         
         # Aliases
         p      = self.problem
         t      = p.t
         dt     = p.dt
         wh     = p.wh
-        
-        dofmaps = [V.dofmap for V in p.V_list] # The function space dofmaps
-        functions = [*wh[0], *wh[1]] # Finite element functions in each space
+
+        dofmaps: list[multiphenicsx.fem.petsc.DofMap] = [V.dofmap for V in p.V_list] # The function space dofmaps
+        functions: list[dfx.fem.Function] = [*wh[0], *wh[1]] # Finite element functions in each space
 
         setup_timer = 0.0
 
@@ -276,10 +314,28 @@ class SolverKNPEMI:
     
             # Update ODE-based ionic models
             if p.gating_variables:
+                I_n = 0.0
+                I_g = 0.0
+                I_ch = 0.0
                 for model in p.ionic_models:
+                    if len(model.tags)==0:
+                        continue
+
+                    print(f"Model tags for {model.__str__()}: ", model.tags)
                     if isinstance(model, HodgkinHuxley):
                         model.update_t_mod()
                         model.update_gating_variables()
+                    for ion in p.ion_list:
+                        I_ch_k = self.comm.allreduce(dfx.fem.assemble_scalar(ion[model.__str__()]), op=MPI.SUM)
+                        print(f"Ion {ion['name']}: current of model {model} = {I_ch_k:.4e} A")
+                        I_ch += I_ch_k
+                        if model.__str__() in ["Hodgkin-Huxley", "Na/K/ATPase pump", "KCC2/NKCC1 Cotransporters"]:
+                            I_n += I_ch_k
+                        else:
+                            I_g += I_ch_k
+                print(f"Total I_n = {I_n:.4e} A")
+                print(f"Total I_g = {I_g:.4e} A")
+                print(f"Total I_ch = {I_ch:.4e} A")
 
             # Assemble system matrix and RHS vector
             tic = time.perf_counter()
@@ -315,10 +371,10 @@ class SolverKNPEMI:
                     # Set operators of iterative solver
                     self.ksp.setOperators(self.A, self.P_) if self.use_P_mat else self.ksp.setOperators(self.A)
 
-                if not p.dirichlet_bcs:
-                    # Handle the nullspace of the electric potentials in the case of 
-                    # pure Neumann boundary conditions
-                    self.create_and_set_nullspace()
+                # if not p.dirichlet_bcs:
+                #     # Handle the nullspace of the electric potentials in the case of 
+                #     # pure Neumann boundary conditions
+                #     self.create_and_set_nullspace()
 
                 # Add contribution to setup time
                 setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
@@ -346,23 +402,41 @@ class SolverKNPEMI:
                 for ui_ue_wrapper_local, component in zip(ui_ue_wrapper, (functions)):
                     with component.x.petsc_vec.localForm() as component_local:
                         component_local[:] = ui_ue_wrapper_local
+            
+            # Ghost update each component after writing locally owned entries
+            for component in functions:
+                component.x.petsc_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT,
+                                                  mode=PETSc.ScatterMode.FORWARD)
 
             # Update previous timestep values of functions
             for idx, func_list in enumerate(p.u_p):
                 for func, wh_func in zip(func_list, wh[idx]):
                     func.x.array[:] = wh_func.x.array.copy()
 
-            # Update membrane potential  
-            p.phi_m_prev.x.array[:] = wh[0][p.N_ions].x.array.copy() - wh[1][p.N_ions].x.array.copy()     
+            # Ghost update previous-timestep vectors so they’re consistent across ranks
+            for idx, func_list in enumerate(p.u_p):
+                for func in func_list:
+                    func.x.petsc_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT,
+                                                 mode=PETSc.ScatterMode.FORWARD)
+
+            # Compute phi_m_prev = phi_i - phi_e
+            with wh[0][p.N_ions].x.petsc_vec.localForm() as phi_i_loc, \
+                wh[1][p.N_ions].x.petsc_vec.localForm() as phi_e_loc, \
+                p.phi_m_prev.x.petsc_vec.localForm() as phi_m_loc:
+                phi_m_loc[:] = phi_i_loc - phi_e_loc
+
+            # Ghost update phi_m_prev so any neighbor reads are consistent
+            p.phi_m_prev.x.petsc_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT,
+                                                 mode=PETSc.ScatterMode.FORWARD)
 
             # Write output to file and save png
             if self.save_xdmfs and (i % self.save_interval == 0) : self.save_xdmf()
             if self.save_cpoints and (i % self.save_interval == 0) : self.save_checkpoint(i+1)
             if self.save_pngs: self.save_png()
-            if p.point_evaluation: self.save_point_data(i+1)
+            if p.point_evaluation: self.save_data(i+1)
 
             if i == self.time_steps-1:
-                # Last timestep, consolidate output files
+
                 if self.save_pngs:
                     self.print_figures()
                     print("\nPNG output saved in ", self.out_file_prefix)
@@ -375,8 +449,8 @@ class SolverKNPEMI:
                     print("\nCheckpoints saved in ", self.out_file_prefix)
                 
                 if self.save_dat:
-                    self.save_data()
-                    print("\nCheckpoints saved in ", self.out_file_prefix)
+                    self.export_data()
+                    print("\nPoint data saved in ", self.out_file_prefix)
                 
                 print("\nTotal setup time:", setup_timer)
                 print("Total assembly time:", sum(self.assembly_time))
@@ -395,12 +469,12 @@ class SolverKNPEMI:
         p = self.problem # For ease of notation
 
         # Get number of dofs local to each processor and sum to rank 0
-        num_dofs = p.interior.index_map.size_local*p.num_variables + p.exterior.index_map.size_local*p.num_variables
+        num_dofs: int = p.interior.index_map.size_local*p.num_variables + p.exterior.index_map.size_local*p.num_variables
         num_dofs = self.comm.allreduce(num_dofs, op=MPI.SUM)
 
         # Get number of mesh cells local to each processor and sum to rank 0
         # Important to subtract shared dofs on the interfaces (cellular membrane, gamma)
-        num_cells = p.mesh.geometry.dofmap.__len__() - p.mesh.topology.interprocess_facets().__len__()
+        num_cells: int = p.mesh.geometry.dofmap.__len__() - p.mesh.topology.interprocess_facets().__len__()
         num_cells = self.comm.allreduce(num_cells, op=MPI.SUM)
 
         # Print problem and solver information
@@ -425,7 +499,7 @@ class SolverKNPEMI:
             print("Solver type: [" + self.ksp_type + "+" + self.pc_type + "]")
             print(f"Tolerance: {self.ksp_rtol:.2e}")
             
-            if self.use_P_mat: print("Preconditioning enabled.")
+            if self.use_P_mat: print("Preconditioner matrix P enabled.")
             
             print('Average iterations: ' + str(sum(self.iterations)/len(self.iterations)))
 
@@ -438,38 +512,60 @@ class SolverKNPEMI:
         """
 
         p = self.problem # For ease of notation
+        owner = p.owner_rank_membrane_vertex # The rank owning the membrane vertex
         
-        self.out_v_string = self.out_file_prefix + 'v.png'
-        self.v_t = []
-        if hasattr(p, 'n'):
-            # Gating variables are a part of the problem
-            self.n_t = []
-            self.m_t = []
-            self.h_t = []
-            self.out_gate_string = self.out_file_prefix + 'gating.png'
-
-        self.v_t.append(1000 * scifem.evaluate_function(p.phi_m_prev, p.png_point)) # Converted to mV
-
-        if hasattr(p, 'n'):
-            self.n_t.append(scifem.evaluate_function(p.n, p.png_point))
-            self.m_t.append(scifem.evaluate_function(p.m, p.png_point))
-            self.h_t.append(scifem.evaluate_function(p.h, p.png_point))
-
+        if self.comm.rank==owner:
+            self.out_v_string = self.out_file_prefix + 'v.png'
+            self.v_t = []
+            self.v_t.append(1000 * p.phi_m_prev.x.array[p.png_dof]) # Converted to mV
+            
+            if hasattr(p, 'n'):
+                # Gating variables are a part of the problem
+                self.n_t = []
+                self.m_t = []
+                self.h_t = []
+                self.out_gate_string = self.out_file_prefix + 'gating.png'
+                self.n_t.append(p.n.x.array[p.png_dof])
+                self.m_t.append(p.m.x.array[p.png_dof])
+                self.h_t.append(p.h.x.array[p.png_dof])
+        else:
+            pass
+            
+        if hasattr(p, 'stim_ufl_expr'):
+            self.stim_t = []
+            self.stim_current_form = dfx.fem.form(p.stim_ufl_expr * p.dS(p.stimulus_tags))
+            stim_current: float = self.comm.allreduce(
+                                        dfx.fem.assemble_scalar(self.stim_current_form),
+                                        op=MPI.SUM
+                                    )
+            self.stim_t.append(stim_current)
             
     def save_png(self):
         """ Save data for the .png output of the membrane electric potential, and the gating variables if 
         these are a part of the problem. """
 
         p = self.problem
+        owner = p.owner_rank_membrane_vertex
 
-        self.v_t.append(1000 * scifem.evaluate_function(p.phi_m_prev, p.png_point)) # Converted to mV
-        
-        if hasattr(p, 'n'):
-            self.n_t.append(scifem.evaluate_function(p.n, p.png_point))
-            self.m_t.append(scifem.evaluate_function(p.m, p.png_point))
-            self.h_t.append(scifem.evaluate_function(p.h, p.png_point))
+        if self.comm.rank==owner:
+            self.v_t.append(1000 * p.phi_m_prev.x.array[p.png_dof]) # Converted to mV
+            
+            if hasattr(p, 'n'):
+                self.n_t.append(p.n.x.array[p.png_dof])
+                self.m_t.append(p.m.x.array[p.png_dof])
+                self.h_t.append(p.h.x.array[p.png_dof])
+        else:
+            pass
 
-    def init_point_data(self):
+        if hasattr(p, 'stim_ufl_expr'):
+            stim_current: float = self.comm.allreduce(
+                                        dfx.fem.assemble_scalar(self.stim_current_form),
+                                        op=MPI.SUM
+                                    )
+            print(f"Stimulus current at png point: {stim_current:.2e}")
+            self.stim_t.append(stim_current)
+
+    def init_data(self):
         
         p = self.problem
         
@@ -483,7 +579,10 @@ class SolverKNPEMI:
 
         self.gamma_point_values[0] = scifem.evaluate_function(p.phi_m_prev, p.gamma_points).T
 
-    def save_point_data(self, i: int):
+        self.flux_forms  = create_flux_forms(p)
+        self.flux_values = np.zeros((self.time_steps+1, 2*p.N_ions)) # Fluxes for each ion
+
+    def save_data(self, i: int):
         """ Save function values evaluated in two points (one in ICS and one in the ECS)
             at time index i. """
 
@@ -494,6 +593,10 @@ class SolverKNPEMI:
             self.ecs_point_values[i, j] = scifem.evaluate_function(p.u_p[1][j], p.ecs_points).T
 
         self.gamma_point_values[i] = scifem.evaluate_function(p.phi_m_prev, p.gamma_points).T
+
+        fluxes: np.ndarray[float] = compute_fluxes(self.flux_forms, self.comm)
+        for idx, val in enumerate(fluxes):
+            self.flux_values[i, idx] = val
 
     def print_figures(self):
         """ Output .png plot of:
@@ -508,25 +611,34 @@ class SolverKNPEMI:
 
         # Aliases
         dt = float(self.problem.dt.value)
-        time_steps = self.time_steps
+        time_steps: int = self.time_steps
         times = np.linspace(0, 1000 * time_steps * dt, time_steps + 1)
 
-        # Save plot of membrane potential
-        fig, ax = plt.subplots()    
-        ax.plot(times, np.array(self.v_t).flatten())
-        ax.set_xlabel('Time [ms]')
-        ax.set_ylabel('Membrane potential [mV]')
-        fig.savefig(self.out_v_string)
-
-        # save plot of gating variables
-        if hasattr(self.problem, 'n'):
-            fig, ax = plt.subplots()
-            ax.plot(times, np.array(self.n_t).flatten(), label='n')
-            ax.plot(times, np.array(self.m_t).flatten(), label='m')
-            ax.plot(times, np.array(self.h_t).flatten(), label='h')
+        png_owner = self.problem.owner_rank_membrane_vertex
+        if self.comm.rank==png_owner:
+            # Save plot of membrane potential
+            fig, ax = plt.subplots()    
+            ax.plot(times, np.array(self.v_t).flatten())
             ax.set_xlabel('Time [ms]')
-            ax.legend()
-            fig.savefig(self.out_gate_string)
+            ax.set_ylabel('Membrane potential [mV]')
+            fig.savefig(self.out_v_string)
+
+            # save plot of gating variables
+            if hasattr(self.problem, 'n'):
+                fig, ax = plt.subplots()
+                ax.plot(times, np.array(self.n_t).flatten(), label='n')
+                ax.plot(times, np.array(self.m_t).flatten(), label='m')
+                ax.plot(times, np.array(self.h_t).flatten(), label='h')
+                ax.set_xlabel('Time [ms]')
+                ax.legend()
+                fig.savefig(self.out_gate_string)
+
+        if hasattr(self.problem, 'stim_ufl_expr'):
+            fig, ax = plt.subplots()
+            ax.plot(times, np.array(self.stim_t).flatten(), label='Stimulus')
+            ax.set_xlabel('Time [ms]')
+            ax.set_ylabel('Stimulus [A/m^2]')
+            fig.savefig(self.out_file_prefix + 'stimulus.png')
 
         if hasattr(self.problem, 'gamma_points'):
             # Plot membrane potential in points on gamma
@@ -609,59 +721,55 @@ class SolverKNPEMI:
 
     def init_xdmf_savefile(self):
         """ Initialize .xdmf files for writing output. The mesh with meshtags is written to file,
-        and an output file for the solution functions (ion concentrations and electric potentials)
+        and an output file for the solution functions for ion concentrations and electric potentials
         is initialized. """
 
         p = self.problem # For ease of notation
 
         # Write tag data
-        filename = self.out_file_prefix + 'subdomains.xdmf'
+        filename: str = self.out_file_prefix + 'subdomains.xdmf'
         xdmf_file = dfx.io.XDMFFile(self.comm, filename, "w")
         xdmf_file.write_mesh(p.mesh)
         xdmf_file.write_meshtags(p.subdomains, p.mesh.geometry)
         xdmf_file.close()
 
         # Create solution file and write mesh to file
-        filename = self.out_file_prefix + 'solution.xdmf'
+        filename: str = self.out_file_prefix + 'solution.xdmf'
         self.xdmf_file = dfx.io.XDMFFile(self.comm, filename, "w")
         self.xdmf_file.write_mesh(p.mesh)
         self.xdmf_file.write_meshtags(p.subdomains, p.mesh.geometry)
-        self.output_filename = filename # Store the output filename for post-processing
+        self.output_filename: str = filename # Store the output filename for post-processing
 
         # Write solution functions to file
         for idx in range(p.num_variables):
             self.xdmf_file.write_function(p.u_p[0][idx], float(p.t.value))
             self.xdmf_file.write_function(p.u_p[1][idx], float(p.t.value))
-        
-        return
 
     def save_xdmf(self):
-        """ Write solution functions (ion concentrations and electric potentials) to file. """
+        """ Write solution functions for ion concentrations and electric potentials to file. """
 
         for idx in range(self.problem.num_variables):
             self.xdmf_file.write_function(self.problem.u_p[0][idx], float(self.problem.t.value))
             self.xdmf_file.write_function(self.problem.u_p[1][idx], float(self.problem.t.value))
-
-        return
     
     def init_checkpoint_file(self):
         """ Initialize checkpointing of solution functions. """
         p = self.problem
-        self.cpoint_filename = filename = self.out_file_prefix + "checkpoints"
-        a4d.write_mesh(filename, p.mesh)
-        a4d.write_meshtags(filename, p.mesh, meshtags=p.subdomains)
-        a4d.write_meshtags(filename, p.mesh, meshtags=p.boundaries)
+        self.cpoint_filename: str = self.out_file_prefix + "checkpoints"
+        a4d.write_mesh(self.cpoint_filename, p.mesh)
+        a4d.write_meshtags(self.cpoint_filename, p.mesh, meshtags=p.subdomains)
+        a4d.write_meshtags(self.cpoint_filename, p.mesh, meshtags=p.boundaries)
 
         # Write concentrations to file
         for idx in range(p.N_ions):
-            a4d.write_function(filename=filename, u=p.u_out_i[idx], time=0)
-            a4d.write_function(filename=filename, u=p.u_out_e[idx], time=0)
+            a4d.write_function(filename=self.cpoint_filename, u=p.u_out_i[idx], time=0)
+            a4d.write_function(filename=self.cpoint_filename, u=p.u_out_e[idx], time=0)
         
         # Write membrane potential and gating variables to file
-        a4d.write_function(filename=filename, u=p.phi_m_prev, time=0)
-        a4d.write_function(filename=filename, u=p.n, time=0)
-        a4d.write_function(filename=filename, u=p.m, time=0)
-        a4d.write_function(filename=filename, u=p.h, time=0)
+        a4d.write_function(filename=self.cpoint_filename, u=p.phi_m_prev, time=0)
+        a4d.write_function(filename=self.cpoint_filename, u=p.n, time=0)
+        a4d.write_function(filename=self.cpoint_filename, u=p.m, time=0)
+        a4d.write_function(filename=self.cpoint_filename, u=p.h, time=0)
 
         return
     
@@ -690,13 +798,12 @@ class SolverKNPEMI:
         
         # Run XDMF parser to restructure the data for better visualization
         # restructure_xdmf.run(self.output_filename)
-        return
 
-    def save_data(self):
+    def export_data(self):
         """ Save numpy data. """
 
-        
-        np.save(self.problem.output_dir+"phi_m.npy", np.array(self.v_t))
+        if self.comm.rank==self.problem.owner_rank_membrane_vertex:
+            np.save(self.problem.output_dir+"phi_m.npy", np.array(self.v_t))
         
         if hasattr(self.problem, 'gamma_points'):
             np.save(self.problem.output_dir+"gamma_point_values.npy", self.gamma_point_values)
@@ -705,13 +812,16 @@ class SolverKNPEMI:
             np.save(self.problem.output_dir+"ics_point_values.npy", self.ics_point_values)
             np.save(self.problem.output_dir+"ecs_point_values.npy", self.ecs_point_values)
 
-        return
+        if hasattr(self.problem, 'stim_ufl_expr'):
+            np.save(self.problem.output_dir+"stimulus.npy", np.array(self.stim_t))
+
+        np.save(self.problem.output_dir+"flux_values.npy", self.flux_values)
 
     # Default iterative solver parameters
-    ksp_rtol           = 1e-7
-    ksp_max_it         = 1000	
-    ksp_type           = 'gmres' # cg
-    pc_type            = 'hypre' # lu, fieldsplit, hypre
+    ksp_rtol           = 1e-9
+    ksp_max_it         = 50000	
+    ksp_type           = 'gmres' 
+    pc_type            = 'hypre'
     norm_type          = 'preconditioned'
     max_amg_iter       = 1
     use_P_mat          = True # use P as preconditioner?
@@ -720,7 +830,7 @@ class SolverKNPEMI:
     nonzero_init_guess = True
 
     # Default output save interval
-    save_interval     = 1 # save every nth timestep
+    save_interval     = 5 # save every nth timestep
 
     # Iteration counter and time variables
     tot_its           = 0

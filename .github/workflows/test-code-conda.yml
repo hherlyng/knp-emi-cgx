@@ -38,4 +38,6 @@ jobs:
       - name: run tests
         run: |
           python3 ./src/CGx/utils/generate_square_mesh.py -N 32 -o './'
-          python3 ./tests/test_L2_norm_potentials.py
+          python3 ./src/CGx/KNPEMI/main.py --config ./src/CGx/KNPEMI/configs/test_config.yaml
+          python3 ./src/CGx/KNPEMI/tests/solution_consistency.py
+          python3 ./src/CGx/KNPEMI/tests/ion_conservation.py
