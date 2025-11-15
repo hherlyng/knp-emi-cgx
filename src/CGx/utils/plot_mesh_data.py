@@ -4,14 +4,17 @@ import matplotlib.pyplot as plt
 
 # Update matplotlib parameters for figure aesthetics
 plt.rcParams.update({
-    'xtick.labelsize': 26,   # x-axis tick labels
-    'ytick.labelsize': 26,   # y-axis tick labels
-    'axes.labelsize': 26,     # Axis labels (x and y)
+    'xtick.labelsize': 46,   # x-axis tick labels
+    'ytick.labelsize': 46,   # y-axis tick labels
+    'axes.labelsize': 50,     # Axis labels (x and y)
     'lines.linewidth': 3,      # Default line width for plot lines
     'figure.titlesize': 36,       # Font size for figure suptitles
-    'axes.titlesize': 32,        # Font size for axes titles
-    'legend.fontsize' : 26,    # Legend font size
-    'lines.markersize' : 10    # Default marker size
+    'axes.titlesize': 60,        # Font size for axes titles
+    'legend.fontsize' : 40,    # Legend font size
+    'lines.markersize' : 16,    # Default marker size
+    'text.usetex': True,
+    'font.family': 'sans-serif',
+    'font.sans-serif': ['DejaVu Sans'],
 })
 
 sns.set_palette("colorblind")
@@ -75,47 +78,61 @@ for mu, table in subtables.items():
 colors = {5: 'blue', 10: 'orange', 20: 'green', 30: 'red'}
 data: dict[pd.DataFrame] = {mu: table for mu, table in subtables.items()}
 
-# Set figure size
+# Prepare plots
 figsize = (14, 10)
+markers = ['o', 's', 'D', '^']
 # Plot (a): Total # vertices
 fig1, ax1 = plt.subplots(figsize=figsize)
-for mu in mu_values:
-    ax1.plot(data[mu].columns, data[mu].loc['npoints'], label=f'μ = {mu}', color=colors[mu])
+for mu, marker in zip(mu_values, markers):
+    ax1.plot(data[mu].columns, data[mu].loc['npoints'], marker=marker, markerfacecolor='none')
 ax1.set_yscale('log')
-ax1.set_title('Total # vertices')
+ax1.set_title('Total \# vertices')
 ax1.set_xlabel('N biological cells')
-ax1.set_ylabel('Vertices (log scale)')
-ax1.legend()
+ax1.set_xticks(N_subset)
+ax1.set_xticklabels([str(n) for n in N_subset])
+ax1.set_ylabel('Vertices')
+fig1.tight_layout()
+fig1.savefig('total_vertices.png', dpi=150)
 
 # Plot (b): Membrane # v / total # v
 fig2, ax2 = plt.subplots(figsize=figsize)
-for mu in mu_values:
+for mu, marker in zip(mu_values, markers):
     ratio = [m / t for m, t in zip(data[mu].loc['npoints_membrane'], data[mu].loc['npoints'])]
-    ax2.plot(data[mu].columns, ratio, label=f'μ = {mu}', color=colors[mu])
-ax2.set_title('Membrane # v / total # v')
+    ax2.plot(data[mu].columns, ratio, marker=marker, markerfacecolor='none')
+ax2.set_title('Membrane \# v / total \# v')
 ax2.set_xlabel('N biological cells')
+ax2.set_xticks(N_subset)
+ax2.set_xticklabels([str(n) for n in N_subset])
 ax2.set_ylabel('Ratio')
-ax2.legend()
+fig2.tight_layout()
+fig2.savefig('membrane_vertex_ratio.png', dpi=150)
 
 # Plot (c): Percentage ECS volume fraction
 fig3, ax3 = plt.subplots(figsize=figsize)
-for mu in mu_values:
+for mu, marker in zip(mu_values, markers):
     percentage = [100 * val for val in data[mu].loc['ecs_share']]
-    ax3.plot(data[mu].columns, percentage, label=f'μ = {mu}', color=colors[mu])
+    ax3.plot(data[mu].columns, percentage, label=rf'$L$ = {mu} \textmu m', marker=marker, markerfacecolor='none')
 ax3.set_title('Percentage ECS volume fraction')
 ax3.set_xlabel('N biological cells')
+ax3.set_xticks(N_subset)
+ax3.set_xticklabels([str(n) for n in N_subset])
 ax3.set_ylabel('% ECS volume')
 ax3.legend()
+fig3.tight_layout()
+fig3.savefig('ecs_volume_fraction.png', dpi=150)
 
 # Plot (d): Computational cells
 fig4, ax4 = plt.subplots(figsize=figsize)
-for mu in mu_values:
-    ax4.plot(data[mu].columns, data[mu].loc['ncompcells'], label=f'μ = {mu}', color=colors[mu])
+for mu, marker in zip(mu_values, markers):
+    ax4.plot(data[mu].columns, data[mu].loc['ncompcells'], marker=marker, markerfacecolor='none')
 ax4.set_yscale('log')
 ax4.set_title('Computational cells')
 ax4.set_xlabel('N biological cells')
-ax4.set_ylabel('# Cells')
-ax4.legend()
+ax4.set_xticks(N_subset)
+ax4.set_xticklabels([str(n) for n in N_subset])
+ax4.set_ylabel('\# Computational cells')
+fig4.tight_layout()
+fig4.savefig('computational_cells.png', dpi=150)
 
 # Show all figures
 plt.show()
