@@ -3,12 +3,12 @@ problem_type : "KNP-EMI"
 
 # Input and output directories
 input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/'
-output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/20m/100c/T_stim=1000ms_iterative_study/'
+output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/30m/100c/T_stim=1000ms_iterative_study/'
 
 # Numerical parameters 
 dt : 0.000025 # Timestep size 
-time_steps : 1 # Number of timesteps
-# T  : 5e-3 # Simulation end time
+# time_steps : 1 # Number of timesteps
+T  : 5e-3 # Simulation end time
 
 # Problem constants (in consistent units)
 physical_constants:
@@ -19,9 +19,9 @@ physical_constants:
 C_M : 0.01 # membrane capacitance [F/m^2]
 
 # Mesh and meshtags files 
-mesh_file      : "geometries/GC/20m/100c/mesh.xdmf"
-cell_tag_file  : "geometries/GC/20m/100c/mesh.xdmf"
-facet_tag_file : "geometries/GC/20m/100c/facets.xdmf"
+mesh_file      : "geometries/GC/30m/100c/mesh.xdmf"
+cell_tag_file  : "geometries/GC/30m/100c/mesh.xdmf"
+facet_tag_file : "geometries/GC/30m/100c/facets.xdmf"
 mesh_conversion_factor: 1e-9
 
 ics_tags  : !range [2, 102] # Intracellular space cell tags 
@@ -29,8 +29,8 @@ ecs_tags  : [1] # Extracellular space cell tags
 boundary_tags : !range [1001, 1102] # Boundary facet tags
 membrane_tags : !range [2, 102] # Membrane (interface) facet tags
 # glia_tags : [71, 90, 95, 100]
-stimulus_tags : [] # Membrane facet tags of the cells being stimulated
-membrane_data_tag : 34 # Tag for which membrane data is written to file
+stimulus_tags : [9] # Membrane facet tags of the cells being stimulated
+membrane_data_tag : 9 # Tag for which membrane data is written to file
 
 stimulus_region : 
   range : [1150, 1250]

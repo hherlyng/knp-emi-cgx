@@ -14,21 +14,26 @@ class MembraneODESystem(ABC):
                 plot_save: bool=False,
                 stimulus_flag: bool=False,
                 timestep: float=1e-3,
-                max_time: float=500.0):
+                max_time: float=500.0,
+                verbose: bool=False):
         """ Initialize the ODE system.
 
             Parameters
             ----------
             problem : KNPEMIxProblem
                 The KNPEMIxProblem instance containing problem parameters
-            plot_flag : bool, optional
+            plot_show : bool, optional
                 Whether to enable plotting of results, by default False
+            plot_save : bool, optional
+                Whether to save plots of results, by default False
             stimulus_flag : bool, optional
                 Whether to include synaptic stimulus in the model, by default False
             timestep : float, optional
                 The time step for the ODE solver, by default 1e-6
             max_time : float, optional
                 The maximum simulation time, by default 3.0
+            verbose : bool, optional
+                Whether to enable verbose output, by default False
         """
         # Store parameters
         self.problem = problem
@@ -38,6 +43,7 @@ class MembraneODESystem(ABC):
         self.stimulus = stimulus_flag
         self.timestep = timestep
         self.max_time = max_time
+        self.verbose = verbose
 
         # Define timespan for ODE solver
         num_timesteps = int(max_time / timestep)
@@ -428,26 +434,26 @@ class ThreeCompartmentMembraneODESystem(MembraneODESystem):
             sol_: list[float] = sol.y[:, -1] 
 
             if self.plot: self.append_arrays(sol_)
+            if self.verbose:
+                print(f"Time: {t:.6f} s")
+                print(f"Solution = {sol_}")
+                print(f"RHS = {three_compartment_rhs(t, sol_)}")
 
-            print(f"Time: {t:.6f} s")
-            print(f"Solution = {sol_}")
-            print(f"RHS = {three_compartment_rhs(t, sol_)}")
-
-            print("-------- Currents --------")
-            print(f"I_ATP_n = {I_ATP(sol_[1], sol_[4]):.6e} A/m^2")
-            print(f"I_NKCC1_n = {I_NKCC1_n(sol_[1], sol_[2], sol_[3], sol_[4], sol_[5], sol_[6]):.6e} A/m^2")
-            print(f"I_KCC2 = {I_KCC2(sol_[3], sol_[4], sol_[5], sol_[6]):.6e} A/m^2")
-            print(f"I_ATP_g = {I_glia_pump(sol_[8], sol_[4]):.6e} A/m^2")
-            print(f"I_NKCC1_g = {I_NKCC1_g(sol_[8], sol_[2], sol_[9], sol_[4], sol_[10], sol_[6]):.6e} A/m^2")
-            print(f"I_KCC1 = {I_KCC1(sol_[9], sol_[4], sol_[10], sol_[6]):.6e} A/m^2")
-            print(f"g_Kir = {g_K_leak_g * f_Kir(sol_[4], sol_[7] - E(z_K, sol_[9], sol_[4]), sol_[7]):.6e} A/m^2")
-            print(f"I_Cl_leak_g = {g_Cl_leak_g*(sol_[7] - E(z_Cl, sol_[10], sol_[6])):.6e} A/m^2")
-            print(f"I_Cl_leak_n = {g_Cl_leak*(sol_[0] - E(z_Cl, sol_[5], sol_[6])):.6e} A/m^2")
-            print(f"I_Na_leak_n = {(g_Na_leak + g_Na_bar * sol_[12]**3 * sol_[13])*(sol_[0] - E(z_Na, sol_[1], sol_[2])):.6e} A/m^2")
-            print(f"I_K_leak_n = {(g_K_leak + g_K_bar * sol_[11]**4)*(sol_[0] - E(z_K, sol_[3], sol_[4])):.6e} A/m^2")
-            print(f"I_Na_leak_g = {g_Na_leak_g*(sol_[7] - E(z_Na, sol_[8], sol_[2])):.6e} A/m^2")
-            print(f"I_K_leak_g = {g_K_leak_g * f_Kir(sol_[4], sol_[7] - E(z_K, sol_[9], sol_[4]), sol_[7])*(sol_[7] - E(z_K, sol_[9], sol_[4])):.6e} A/m^2")
-            print("--------------------------------------------------")
+                print("-------- Currents --------")
+                print(f"I_ATP_n = {I_ATP(sol_[1], sol_[4]):.6e} A/m^2")
+                print(f"I_NKCC1_n = {I_NKCC1_n(sol_[1], sol_[2], sol_[3], sol_[4], sol_[5], sol_[6]):.6e} A/m^2")
+                print(f"I_KCC2 = {I_KCC2(sol_[3], sol_[4], sol_[5], sol_[6]):.6e} A/m^2")
+                print(f"I_ATP_g = {I_glia_pump(sol_[8], sol_[4]):.6e} A/m^2")
+                print(f"I_NKCC1_g = {I_NKCC1_g(sol_[8], sol_[2], sol_[9], sol_[4], sol_[10], sol_[6]):.6e} A/m^2")
+                print(f"I_KCC1 = {I_KCC1(sol_[9], sol_[4], sol_[10], sol_[6]):.6e} A/m^2")
+                print(f"g_Kir = {g_K_leak_g * f_Kir(sol_[4], sol_[7] - E(z_K, sol_[9], sol_[4]), sol_[7]):.6e} A/m^2")
+                print(f"I_Cl_leak_g = {g_Cl_leak_g*(sol_[7] - E(z_Cl, sol_[10], sol_[6])):.6e} A/m^2")
+                print(f"I_Cl_leak_n = {g_Cl_leak*(sol_[0] - E(z_Cl, sol_[5], sol_[6])):.6e} A/m^2")
+                print(f"I_Na_leak_n = {(g_Na_leak + g_Na_bar * sol_[12]**3 * sol_[13])*(sol_[0] - E(z_Na, sol_[1], sol_[2])):.6e} A/m^2")
+                print(f"I_K_leak_n = {(g_K_leak + g_K_bar * sol_[11]**4)*(sol_[0] - E(z_K, sol_[3], sol_[4])):.6e} A/m^2")
+                print(f"I_Na_leak_g = {g_Na_leak_g*(sol_[7] - E(z_Na, sol_[8], sol_[2])):.6e} A/m^2")
+                print(f"I_K_leak_g = {g_K_leak_g * f_Kir(sol_[4], sol_[7] - E(z_K, sol_[9], sol_[4]), sol_[7])*(sol_[7] - E(z_K, sol_[9], sol_[4])):.6e} A/m^2")
+                print("--------------------------------------------------")
 
             if np.allclose(three_compartment_rhs(t, sol_), 0.0, rtol=1e-8, atol=1e-10):
                 print("Steady state reached. Derivatives zero to within tolerance.")

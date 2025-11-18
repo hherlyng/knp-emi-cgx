@@ -230,7 +230,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             self.calculate_compartment_volumes_and_surface_areas()
             if not self.glia_flag:
                 # Only neuronal cells
-                membrane_odes = TwoCompartmentMembraneODESystem(self, plot_flags=[True, False, True], stimulus_flag=False)
+                membrane_odes = TwoCompartmentMembraneODESystem(self, plot_show=False, plot_save=False, stimulus_flag=False)
                 if comm.rank==0:
                     # Solve the membrane ODE system to find a steady-state
                     (phi_m_init_val, Na_i_init_val, Na_e_init_val, K_i_init_val, K_e_init_val,
@@ -271,7 +271,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                 self.h_init.value = h_init_val
             else:
                 # Both glia and neurons present
-                membrane_odes = ThreeCompartmentMembraneODESystem(self, plot_flags=[True, False, True], stimulus_flag=False)
+                membrane_odes = ThreeCompartmentMembraneODESystem(self, plot_show=False, plot_save=False, stimulus_flag=False)
                 if comm.rank==0:
                     # Solve the membrane ODE system to find a steady-state
                     (phi_m_n_init_val, Na_i_n_init_val, Na_e_init_val, K_i_n_init_val, K_e_init_val,
@@ -460,8 +460,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         e_res = "-"  # Extracellular facet restriction
 
         # Signs for terms derived from dot products with the facet normal
-        i_sign =  1.0  # Intracellular facet normal sign
-        e_sign = -1.0 # Extracellular facet normal sign
+        i_sign =  1.0  # Intracellular facet terms sign
+        e_sign = -1.0  # Extracellular facet terms sign
 
         # Define integral measures
         dxi = self.dx(self.intra_tags)
@@ -667,6 +667,9 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         ui_p = self.u_p[0]
         ue_p = self.u_p[1]
 
+        i_res = "+"  # Intracellular facet restriction
+        e_res = "-"  # Extracellular facet restriction
+
         # Integral measures
         dxi = self.dx(self.intra_tags)
         dxe = self.dx(self.extra_tag)
@@ -730,8 +733,10 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             P += ke*vke*dxe + dt * inner(De*grad(ke), grad(vke)) * dxe
 
         # Add flux contributions to weak form equations
-        P -= dt * inner(J_phi_i, grad(vphi_i)) * dxi + (C_M/F) * inner(phi_i('+'), vphi_i('+')) * dS
-        P -= dt * inner(J_phi_e, grad(vphi_e)) * dxe + (C_M/F) * inner(phi_e('-'), vphi_e('-')) * dS        
+        P -= dt * inner(J_phi_i, grad(vphi_i)) * dxi
+        P -= dt * inner(J_phi_e, grad(vphi_e)) * dxe
+        P -= (C_M/F) * inner(phi_i(i_res), vphi_i(i_res)) * dS
+        P -= (C_M/F) * inner(phi_e(e_res), vphi_e(e_res)) * dS        
 
         # Add Lagrange multiplier terms to enforce zero mean
         P += mu * phi_e * dxe + lam * vphi_e * dxe

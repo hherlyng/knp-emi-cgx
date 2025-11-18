@@ -3,12 +3,12 @@ problem_type : "KNP-EMI"
 
 # Input and output directories
 input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/'
-output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/5m/100c/IC_test_neuron/'
+output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/5m/100c/P_test/'
 
 # Numerical parameters 
 dt : 0.000025 # Timestep size 
 time_steps : 1 # Number of timesteps
-# T  : 100e-3 # Simulation end time
+# T  : 20e-3 # Simulation end time
 
 # Problem constants (in consistent units)
 physical_constants:
@@ -28,8 +28,8 @@ ics_tags  : !range [2, 102] # Intracellular space cell tags
 ecs_tags  : [1] # Extracellular space cell tags
 boundary_tags : !range [1001, 1102] # Boundary facet tags
 membrane_tags : !range [2, 102] # Membrane (interface) facet tags
-glia_tags : [] #[71, 90, 95, 100]
-stimulus_tags : [] # Membrane facet tags of the cells being stimulated
+glia_tags : [71, 90, 95, 100]
+stimulus_tags : [56] # Membrane facet tags of the cells being stimulated
 membrane_data_tag : 56 # Tag for which membrane data is written to file
 
 stimulus_region : 
@@ -42,7 +42,7 @@ point_evaluation :
 
 stimulus :
   conductance :
-    g_syn_bar : 1.0e-10 #0.5e-10 # Maximum synaptic conductance
+    g_syn_bar : 1.0e-10 # 0.5e-10 # Maximum synaptic conductance
   a_syn : 5e-4 # Synaptic time constant
   T_stim : 1000e-3 # Stimulus period, high freq = 20 ms, normal freq = 1 s
   scale : True
@@ -50,7 +50,7 @@ stimulus :
 solver :
   direct : False
   output :
-    save_xdmf : True
+    save_xdmf : False
     save_cpoints : False
     save_pngs : True
     save_dat : True
@@ -71,15 +71,15 @@ solver :
 #   m: 0.024050937456326579
 #   h: 0.792158514749933484
 
-# Only neuron
-initial_conditions:
-  phi_m_n: -0.071368761342158277
-  Na_i_n: 10.178464430079944947
-  Na_e: 144.448507080641377343
-  K_i_n: 129.961064246205182826
-  K_e: 3.120319732664014190
-  Cl_i_n: 5.140830916344554247
-  Cl_e: 133.564802615534119923
-  n: 0.226104505841358244
-  m: 0.024378475598798723
-  h: 0.789522215768581948
+# # Only neuron
+# initial_conditions:
+#   phi_m_n: -0.071368761342158277
+#   Na_i_n: 10.178464430079944947
+#   Na_e: 144.448507080641377343
+#   K_i_n: 129.961064246205182826
+#   K_e: 3.120319732664014190
+#   Cl_i_n: 5.140830916344554247
+#   Cl_e: 133.564802615534119923
+#   n: 0.226104505841358244
+#   m: 0.024378475598798723
+#   h: 0.789522215768581948

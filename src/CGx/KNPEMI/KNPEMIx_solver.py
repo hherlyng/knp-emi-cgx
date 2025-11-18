@@ -314,29 +314,11 @@ class SolverKNPEMI:
     
             # Update ODE-based ionic models
             if p.gating_variables:
-                I_n = 0.0
-                I_g = 0.0
-                I_ch = 0.0
                 for model in p.ionic_models:
-                    if len(model.tags)==0:
-                        continue
-
-                    print(f"Model tags for {model.__str__()}: ", model.tags)
                     if isinstance(model, HodgkinHuxley):
                         model.update_t_mod()
                         model.update_gating_variables()
-                    for ion in p.ion_list:
-                        I_ch_k = self.comm.allreduce(dfx.fem.assemble_scalar(ion[model.__str__()]), op=MPI.SUM)
-                        print(f"Ion {ion['name']}: current of model {model} = {I_ch_k:.4e} A")
-                        I_ch += I_ch_k
-                        if model.__str__() in ["Hodgkin-Huxley", "Na/K/ATPase pump", "KCC2/NKCC1 Cotransporters"]:
-                            I_n += I_ch_k
-                        else:
-                            I_g += I_ch_k
-                print(f"Total I_n = {I_n:.4e} A")
-                print(f"Total I_g = {I_g:.4e} A")
-                print(f"Total I_ch = {I_ch:.4e} A")
-
+                    
             # Assemble system matrix and RHS vector
             tic = time.perf_counter()
             self.assemble()
@@ -800,22 +782,34 @@ class SolverKNPEMI:
         # restructure_xdmf.run(self.output_filename)
 
     def export_data(self):
-        """ Save numpy data. """
+        """ Write numpy data to file. """
 
+        # Save membrane potential values
         if self.comm.rank==self.problem.owner_rank_membrane_vertex:
             np.save(self.problem.output_dir+"phi_m.npy", np.array(self.v_t))
         
+        # Save gamma point evaluation values
         if hasattr(self.problem, 'gamma_points'):
             np.save(self.problem.output_dir+"gamma_point_values.npy", self.gamma_point_values)
 
+        # Save point evaluation values
         if self.problem.point_evaluation:
             np.save(self.problem.output_dir+"ics_point_values.npy", self.ics_point_values)
             np.save(self.problem.output_dir+"ecs_point_values.npy", self.ecs_point_values)
 
+        # Save stimulus current values
         if hasattr(self.problem, 'stim_ufl_expr'):
             np.save(self.problem.output_dir+"stimulus.npy", np.array(self.stim_t))
 
+        # Save flux values
         np.save(self.problem.output_dir+"flux_values.npy", self.flux_values)
+
+        # Save timings
+        np.save(self.problem.output_dir+"assembly_time.npy", np.array(self.assembly_time))
+        np.save(self.problem.output_dir+"solve_time.npy",    np.array(self.solve_time))
+        if not self.direct_solver:
+            # Save iterations
+            np.save(self.problem.output_dir+"iterations.npy",    np.array(self.iterations))
 
     # Default iterative solver parameters
     ksp_rtol           = 1e-9
@@ -830,7 +824,7 @@ class SolverKNPEMI:
     nonzero_init_guess = True
 
     # Default output save interval
-    save_interval     = 5 # save every nth timestep
+    save_interval     = 20 # save every nth timestep
 
     # Iteration counter and time variables
     tot_its           = 0
