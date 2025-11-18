@@ -16,7 +16,7 @@ physical_constants:
   F : 96485 # Faraday constant [C/mol]
   R : 8.314 # Gas constant [J/(K*mol)]
 
-C_M : 0.01 # membrane capacitance
+C_M : 0.01 # membrane capacitance [F/m^2]
 
 # Mesh and meshtags files 
 mesh_file      : "geometries/GC/10m/200c/mesh.xdmf"
@@ -31,9 +31,9 @@ membrane_tags : !range [2, 202] # Membrane (interface) facet tags
 stimulus_tags : [147] # Membrane facet tags of the cells being stimulated
 membrane_data_tag : 147 # Tag for which membrane data is written to file
 
-stimulus_region : 
-  range : [1150, 1250]
-  direction : "x"
+# stimulus_region : 
+#   range : [1150, 1250]
+#   direction : "x"
 
 point_evaluation :
   ics_points : [[1200, 3102, 3497], [1200, 3302, 3476]]

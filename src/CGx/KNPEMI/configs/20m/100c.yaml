@@ -7,8 +7,8 @@ output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/20m/100c/T_stim=10
 
 # Numerical parameters 
 dt : 0.000025 # Timestep size 
-time_steps : 1 # Number of timesteps
-# T  : 5e-3 # Simulation end time
+# time_steps : 1 # Number of timesteps
+T  : 5e-3 # Simulation end time
 
 # Problem constants (in consistent units)
 physical_constants:
@@ -29,7 +29,7 @@ ecs_tags  : [1] # Extracellular space cell tags
 boundary_tags : !range [1001, 1102] # Boundary facet tags
 membrane_tags : !range [2, 102] # Membrane (interface) facet tags
 # glia_tags : [71, 90, 95, 100]
-stimulus_tags : [] # Membrane facet tags of the cells being stimulated
+stimulus_tags : [34] # Membrane facet tags of the cells being stimulated
 membrane_data_tag : 34 # Tag for which membrane data is written to file
 
 stimulus_region : 

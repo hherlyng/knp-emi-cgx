@@ -515,7 +515,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
             # Loop over ionic models
             for model in self.ionic_models:
-                ion[model.__str__()] = dfx.fem.Constant(self.mesh, 0.0)
 
                 # Loop over ionic model tags
                 for gamma_tag in model.tags:
@@ -545,10 +544,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                     # Add contribution to total channel current
                     I_ch[gamma_tag] += I_ch_k_
 
-                    ion[model.__str__()] += I_ch_k_
-
-                if len(model.tags)>0:
-                    ion[model.__str__()] = dfx.fem.form(ion[model.__str__()] * dS(model.tags))
 
         # Initialize variational form
         a = ufl.ZeroBaseForm(None)

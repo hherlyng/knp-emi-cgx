@@ -806,13 +806,13 @@ class SolverKNPEMI:
 
         # Save timings
         np.save(self.problem.output_dir+"assembly_time.npy", np.array(self.assembly_time))
-        np.save(self.problem.output_dir+"solve_time.npy",    np.array(self.solve_time))
+        np.save(self.problem.output_dir+"solve_time.npy", np.array(self.solve_time))
         if not self.direct_solver:
             # Save iterations
-            np.save(self.problem.output_dir+"iterations.npy",    np.array(self.iterations))
+            np.save(self.problem.output_dir+"iterations.npy", np.array(self.iterations))
 
     # Default iterative solver parameters
-    ksp_rtol           = 1e-9
+    ksp_rtol           = 1e-7
     ksp_max_it         = 50000	
     ksp_type           = 'gmres' 
     pc_type            = 'hypre'
