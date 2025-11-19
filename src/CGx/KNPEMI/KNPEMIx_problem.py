@@ -52,23 +52,20 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         # Functions for storing the solutions
         self.wh = [[dfx.fem.Function(V) for V in self.V_list_ie[0]], [dfx.fem.Function(V) for V in self.V_list_ie[1]]]
 
-        # Functions for solution at previous timestep
-        self.u_p = [[dfx.fem.Function(V) for V in self.V_list_ie[0]], [dfx.fem.Function(V) for V in self.V_list_ie[1]]]
-
         # Setup checkpoint output files
         self.u_out_i = []
         self.u_out_e = []
         for idx, ion in enumerate(self.ion_list):
-            intra_func = self.u_p[0][idx]
+            intra_func = self.wh[0][idx]
             intra_func.name = f"{ion['name']}_i"
             self.u_out_i.append(intra_func)
-            extra_func = self.u_p[1][idx]
+            extra_func = self.wh[1][idx]
             extra_func.name = f"{ion['name']}_e"
             self.u_out_e.append(extra_func)
-        phi_i = self.u_p[0][self.N_ions]
+        phi_i = self.wh[0][self.N_ions]
         phi_i.name = "phi_i"
         self.u_out_i.append(phi_i)
-        phi_e = self.u_p[1][self.N_ions]
+        phi_e = self.wh[1][self.N_ions]
         phi_e.name = "phi_e"
         self.u_out_e.append(phi_e)
 
@@ -105,7 +102,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         print('Setting up boundary conditions ...')
         
         Wi = self.V_list[:self.num_variables]
-        We = self.V_list[self.num_variables:]
+        We = self.V_list[self.num_variables:-1]
 
         # Add Dirichlet boundary conditions on exterior boundary
         bcs = []
@@ -167,36 +164,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                     # Next round in for-loop is for extracellular variables
                     ion_suffix = 'e'
                     init_phi = 0.0
-        # else:
-            
-        #     # Get all gamma points on this rank
-        #     gamma_facets = np.concatenate(([self.boundaries.find(tag) for tag in self.gamma_tags]))
-        #     gamma_dofs = dfx.fem.locate_dofs_topological(self.V, self.boundaries.dim, gamma_facets) 
-        #     gamma_points = self.mesh.geometry.x[gamma_dofs]
-            
-        #     if self.comm.rank==0:
-        #         # Pick a point
-        #         point = self.mesh.geometry.x[0]
-        #         # Check that point is not on the cellular membrane
-        #         while any(np.isclose(gamma_points, point).all(axis=1)):
-        #             point = self.mesh.geometry.x[np.random.randint(0, self.mesh.geometry.x.shape[0])]
-        #     else:
-        #         point = None
-            
-        #     # Broadcast point to all processes
-        #     point = self.comm.bcast(point, root=0)
-
-        #     # Find closest mesh vertex to the point
-        #     vertex_dofs = dfx.fem.locate_dofs_geometrical(self.V, lambda x: np.isclose(x.T, point).all(axis=1))
-        #     if len(vertex_dofs)>1:
-        #         vertex_dofs = np.array([vertex_dofs[0]])
-
-        #     # Pin extracellular potential at that point to zero
-        #     W_phi_e = We[self.N_ions]
-        #     func = dfx.fem.Function(W_phi_e)
-        #     func.x.array[vertex_dofs] = 0.0
-        #     bcs.append(dfx.fem.dirichletbc(func, vertex_dofs))
-        #     print("Phi_e pinned at (dof, point):", vertex_dofs, point)
 
         self.bcs = bcs
 
@@ -360,8 +327,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         self.phi_m_prev.name = "phi_m"
 
         # Solutions at previous timestep
-        ui_p = self.u_p[0]
-        ue_p = self.u_p[1]
+        ui_p = self.wh[0]
+        ue_p = self.wh[1]
 
         if self.MMS_test:
             self.phi_m_prev.interpolate(
@@ -389,18 +356,30 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         else:
             if not self.glia_flag:
                 # Only neuronal cells
+                # Set membrane potential
                 self.phi_m_prev.x.array[:] = self.phi_m_init.value
                 print(f"Initial membrane potential: {self.phi_m_init.value}")
+
+                # Set intra- and extracellular potentials
+                ui_p[self.N_ions].x.array[:] = self.phi_m_init.value
+                ue_p[self.N_ions].x.array[:] = 0.0
             else:
                 # Both neuronal and glial cells
+                # Locate neuronal and glial cell dofs
                 self.neuron_dofs = dfx.fem.locate_dofs_topological(self.V, self.subdomains.dim, self.neuron_cells)
                 self.glia_dofs = dfx.fem.locate_dofs_topological(self.V, self.subdomains.dim, self.glia_cells)
 
+                # Set membrane potentials
                 self.phi_m_prev.x.array[self.neuron_dofs] = self.phi_m_n_init.value
                 self.phi_m_prev.x.array[self.glia_dofs] = self.phi_m_g_init.value
 
                 print(f"Initial neuronal membrane potential: {self.phi_m_n_init.value}")
                 print(f"Initial glial membrane potential: {self.phi_m_g_init.value}")
+
+                # Set intra- and extracellular potentials
+                ui_p[self.N_ions].x.array[self.neuron_dofs] = self.phi_m_n_init.value
+                ui_p[self.N_ions].x.array[self.glia_dofs] = self.phi_m_g_init.value
+                ue_p[self.N_ions].x.array[:] = 0.0
 
         # Set initial concentrations
         for idx, ion in enumerate(self.ion_list):
@@ -428,9 +407,9 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                     ui_p[idx].x.array[self.glia_dofs]   = ion['ki_init_g'].value
                     ue_p[idx].x.array[:] = ion['ke_init'].value
 
-                    print(f"Initial condition for {ion['name']}_i_n: {ion['ki_init_n'].value}")
-                    print(f"Initial condition for {ion['name']}_i_g: {ion['ki_init_g'].value}")
-                    print(f"Initial condition for {ion['name']}_e: {ion['ke_init'].value}")
+                    print(f"Initial condition for {ion['name']}_i_n set to {ion['ki_init_n'].value}")
+                    print(f"Initial condition for {ion['name']}_i_g set to {ion['ki_init_g'].value}")
+                    print(f"Initial condition for {ion['name']}_e set to {ion['ke_init'].value}")
                 else:
                     # Only neuronal cells
                     # Set the array values at the subspace dofs 
@@ -439,7 +418,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
                     print(f"Initial condition for {ion['name']}_i set to {ion['ki_init'].value}")
                     print(f"Initial condition for {ion['name']}_e set to {ion['ke_init'].value}")
-        
+        from IPython import embed; embed()
         print("Initial conditions set.")
             
     def setup_variational_form(self):
@@ -476,8 +455,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         lam, mu = u[-1], v[-1] # Lagrange multiplier (last entry in mixed space)
 
         # Solutions at previous timestep
-        ui_p = self.u_p[0]
-        ue_p = self.u_p[1]
+        ui_p = self.wh[0]
+        ue_p = self.wh[1]
 
         # Intracellular potential
         phi_i  = ui[self.N_ions] # trial function
@@ -660,8 +639,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         psi = self.psi
         C_M = self.C_M
 
-        ui_p = self.u_p[0]
-        ue_p = self.u_p[1]
+        ui_p = self.wh[0]
+        ue_p = self.wh[1]
 
         i_res = "+"  # Intracellular facet restriction
         e_res = "-"  # Extracellular facet restriction

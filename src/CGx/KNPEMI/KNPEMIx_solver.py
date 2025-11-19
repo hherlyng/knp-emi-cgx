@@ -22,31 +22,42 @@ class SolverKNPEMI:
 
     def __init__(self,
                 problem: ProblemKNPEMI,
-                view_input: bool,
-                use_direct_solver: bool=True,
-                save_xdmfs: bool=False,
-                save_pngs: bool=False,
-                save_cpoints: bool=False,
-                save_dat: bool=False,
-                save_mat: bool=False):
-        """ Constructor. """
+                solver_config: dict):
+        """ Constructor for the KNP-EMI solver class. 
+            Initializes solver parameters and output options.
+        """
 
-        self.problem    = problem                 # The KNP-EMI problem
-        self.comm       = problem.comm            # MPI communicator
-        self.time_steps = problem.time_steps      # Number of timesteps
-        self.direct_solver = use_direct_solver    # Set direct solver/iterative solver option
-        self.save_xdmfs = save_xdmfs              # Option to save .xdmf output 
-        self.save_pngs  = save_pngs               # Option to save .png  output
-        self.save_cpoints = save_cpoints
-        self.save_dat = save_dat                  # Option to save .npy output
-        self.save_mat   = save_mat                # Option to save the system matrix
+        # Problem instance, MPI communicator and time steps
+        self.problem         = problem                 # The KNP-EMI problem
+        self.comm: MPI.Comm  = problem.comm            # MPI communicator
+        self.time_steps: int = problem.time_steps      # Number of timesteps
+
+        # Output options
+        self.save_xdmfs = solver_config['output']['save_xdmf'] if 'save_xdmf' in solver_config['output'] else False              # Option to save .xdmf output 
+        self.save_pngs  = solver_config['output']['save_pngs'] if 'save_pngs' in solver_config['output'] else False              # Option to save .png  output
+        self.save_cpoints = solver_config['output']['save_cpoints'] if 'save_cpoints' in solver_config['output'] else False  # Option to save checkpoint points
+        self.save_dat = solver_config['output']['save_dat'] if 'save_dat' in solver_config['output'] else False                 # Option to save .npy output
+        self.save_mat   = solver_config['output']['save_mat'] if 'save_mat' in solver_config['output'] else False  # Option to save the system matrix
+        if 'save_interval' in solver_config['output']:
+            self.save_interval = solver_config['output']['save_interval']  # Interval for saving output
         self.out_file_prefix = problem.output_dir # The output file directory
-        self.view_input = view_input
+        
+        # PETSc solver options
+        self.direct_solver = solver_config['direct']    # Set direct solver/iterative solver option
+        self.view_input = solver_config['view_ksp'] # Option to view KSP object
+        if 'ksp_settings' in solver_config:
+            ksp_settings = solver_config['ksp_settings']
+            if 'ksp_type' in ksp_settings:
+                self.ksp_type = ksp_settings['ksp_type'] # KSP type
+            if 'pc_type' in ksp_settings:
+                self.pc_type  = ksp_settings['pc_type']  # Preconditioner type
+            if 'ksp_rtol' in ksp_settings:
+                self.ksp_rtol = float(ksp_settings['ksp_rtol']) # KSP relative tolerance
 
         # Initialize output files
-        if save_xdmfs : self.init_xdmf_savefile()
-        if save_pngs  : self.init_png_savefile()
-        if save_cpoints : self.init_checkpoint_file()
+        if self.save_xdmfs : self.init_xdmf_savefile()
+        if self.save_pngs  : self.init_png_savefile()
+        if self.save_cpoints : self.init_checkpoint_file()
         if problem.point_evaluation : self.init_data()
 
         # Perform only a single timestep when saving system matrix
@@ -222,7 +233,7 @@ class SolverKNPEMI:
                 if self.ksp_type=='hypre':
                     opts.setValue('pc_hypre_boomeramg_max_iter', self.max_amg_iter)
                     if self.problem.mesh.geometry.dim==3:
-                        opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.5)
+                        opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.75)
             
             # Set miscellaneous KSP options
             opts.setValue('ksp_converged_reason', None)
@@ -312,13 +323,13 @@ class SolverKNPEMI:
             self.assemble_preconditioner()
 
         # Time-stepping
-        for i in range(self.time_steps):
+        for i in range(1, self.time_steps+1):
 
             # Update current time
             p.t.value += float(dt.value)
 
             # Print timestep and time
-            print('\nTime step ', i + 1)
+            print('\nTime step ', i)
             print('t (ms) = ', 1000 * float(t.value))               
     
             # Update ODE-based ionic models
@@ -399,17 +410,6 @@ class SolverKNPEMI:
                 component.x.petsc_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT,
                                                   mode=PETSc.ScatterMode.FORWARD)
 
-            # Update previous timestep values of functions
-            for idx, func_list in enumerate(p.u_p):
-                for func, wh_func in zip(func_list, wh[idx]):
-                    func.x.array[:] = wh_func.x.array.copy()
-
-            # Ghost update previous-timestep vectors so they’re consistent across ranks
-            for idx, func_list in enumerate(p.u_p):
-                for func in func_list:
-                    func.x.petsc_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT,
-                                                 mode=PETSc.ScatterMode.FORWARD)
-
             # Compute phi_m_prev = phi_i - phi_e
             with wh[0][p.N_ions].x.petsc_vec.localForm() as phi_i_loc, \
                 wh[1][p.N_ions].x.petsc_vec.localForm() as phi_e_loc, \
@@ -422,11 +422,11 @@ class SolverKNPEMI:
 
             # Write output to file and save png
             if self.save_xdmfs and (i % self.save_interval == 0) : self.save_xdmf()
-            if self.save_cpoints and (i % self.save_interval == 0) : self.save_checkpoint(i+1)
+            if self.save_cpoints and (i % self.save_interval == 0) : self.save_checkpoint(i)
             if self.save_pngs: self.save_png()
-            if p.point_evaluation: self.save_data(i+1)
+            if p.point_evaluation: self.save_data(i)
 
-            if i == self.time_steps-1:
+            if i == self.time_steps:
 
                 if self.save_pngs:
                     self.print_figures()
@@ -565,8 +565,8 @@ class SolverKNPEMI:
         self.gamma_point_values = np.zeros((self.time_steps+1, len(p.gamma_points)))
 
         for j in range(p.num_variables):
-            self.ics_point_values[0, j] = scifem.evaluate_function(p.u_p[0][j], p.ics_points).T
-            self.ecs_point_values[0, j] = scifem.evaluate_function(p.u_p[1][j], p.ecs_points).T
+            self.ics_point_values[0, j] = scifem.evaluate_function(p.wh[0][j], p.ics_points).T
+            self.ecs_point_values[0, j] = scifem.evaluate_function(p.wh[1][j], p.ecs_points).T
 
         self.gamma_point_values[0] = scifem.evaluate_function(p.phi_m_prev, p.gamma_points).T
 
@@ -580,8 +580,8 @@ class SolverKNPEMI:
         p = self.problem
 
         for j in range(p.num_variables):
-            self.ics_point_values[i, j] = scifem.evaluate_function(p.u_p[0][j], p.ics_points).T
-            self.ecs_point_values[i, j] = scifem.evaluate_function(p.u_p[1][j], p.ecs_points).T
+            self.ics_point_values[i, j] = scifem.evaluate_function(p.wh[0][j], p.ics_points).T
+            self.ecs_point_values[i, j] = scifem.evaluate_function(p.wh[1][j], p.ecs_points).T
 
         self.gamma_point_values[i] = scifem.evaluate_function(p.phi_m_prev, p.gamma_points).T
 
@@ -733,15 +733,15 @@ class SolverKNPEMI:
 
         # Write solution functions to file
         for idx in range(p.num_variables):
-            self.xdmf_file.write_function(p.u_p[0][idx], float(p.t.value))
-            self.xdmf_file.write_function(p.u_p[1][idx], float(p.t.value))
+            self.xdmf_file.write_function(p.wh[0][idx], float(p.t.value))
+            self.xdmf_file.write_function(p.wh[1][idx], float(p.t.value))
 
     def save_xdmf(self):
         """ Write solution functions for ion concentrations and electric potentials to file. """
 
         for idx in range(self.problem.num_variables):
-            self.xdmf_file.write_function(self.problem.u_p[0][idx], float(self.problem.t.value))
-            self.xdmf_file.write_function(self.problem.u_p[1][idx], float(self.problem.t.value))
+            self.xdmf_file.write_function(self.problem.wh[0][idx], float(self.problem.t.value))
+            self.xdmf_file.write_function(self.problem.wh[1][idx], float(self.problem.t.value))
     
     def init_checkpoint_file(self):
         """ Initialize checkpointing of solution functions. """
@@ -822,7 +822,7 @@ class SolverKNPEMI:
 
     # Default iterative solver parameters
     ksp_rtol           = 1e-7
-    ksp_max_it         = 50000	
+    ksp_max_it         = 100000	
     ksp_type           = 'gmres' 
     pc_type            = 'hypre'
     norm_type          = 'preconditioned'
