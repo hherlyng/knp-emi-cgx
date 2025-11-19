@@ -126,6 +126,15 @@ class SolverKNPEMI:
                     p.wh[0][idx].x.array[p.neuron_dofs] = ion['ki_init_n'].value
                     p.wh[0][idx].x.array[p.glia_dofs]   = ion['ki_init_g'].value
                     p.wh[1][idx].x.array[:] = ion['ke_init'].value
+            
+            # Add potential initial conditions
+            if not p.glia_flag:
+                p.wh[0][p.N_ions].x.array[:] = p.phi_m_init.value
+                p.wh[1][p.N_ions].x.array[:] = 0.0
+            else:
+                p.wh[0][p.N_ions].x.array[p.neuron_dofs] = p.phi_m_n_init.value
+                p.wh[0][p.N_ions].x.array[p.glia_dofs]   = p.phi_m_g_init.value
+                p.wh[1][p.N_ions].x.array[:] = 0.0
 
             # Insert the initial guess values into the solution vector
             # x used when solving the equation Ax = b 

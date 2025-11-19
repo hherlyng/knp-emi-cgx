@@ -258,6 +258,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                 n_init_val = comm.bcast(n_init_val, root=0)
                 m_init_val = comm.bcast(m_init_val, root=0)
                 h_init_val = comm.bcast(h_init_val, root=0)
+                
                 # Update values of constants
                 self.phi_m_init.value = phi_m_init_val
                 self.Na_i_init.value = Na_i_init_val
