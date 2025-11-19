@@ -29,7 +29,7 @@ class MixedDimensionalProblem(ABC):
         print("Reading input data from " + config_file)
 
         # Options for the ffcx optimization
-        cache_dir       = '.cache'
+        cache_dir       = '.cache_' + str(config_file)
         compile_options = ["-Ofast", "-march=native"]
         self.jit_parameters  = {"cffi_extra_compile_args" : compile_options,
                                 "cache_dir"               : cache_dir,

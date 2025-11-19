@@ -41,7 +41,7 @@ point_evaluation :
 
 stimulus :
   conductance :
-    g_syn_bar : 1.0e-10 # 0.5e-10 # Maximum synaptic conductance
+    g_syn_bar : 2.0e-10 # 0.5e-10 # Maximum synaptic conductance
   a_syn : 5e-4 # Synaptic time constant
   T_stim : 1000e-3 # Stimulus period, high freq = 20 ms, normal freq = 1 s
   scale : True
@@ -49,7 +49,7 @@ stimulus :
 solver :
   direct : False
   output :
-    save_xdmf : False
-    save_cpoints : True
+    save_xdmf : True
+    save_cpoints : False
     save_pngs : True
     save_dat : True

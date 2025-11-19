@@ -287,10 +287,10 @@ class SolverKNPEMI:
         nullspace = PETSc.NullSpace().create(vectors=[ns_vec], comm=self.comm)
 
         # Set the nullspace
-        if len(p.bcs)==0: 
-            assert nullspace.test(self.A) # Check that the nullspace is created correctly
-            self.A.setNullSpace(nullspace)
+        assert nullspace.test(self.A) # Check that the nullspace is created correctly
+        self.A.setNullSpace(nullspace)
         self.A.setNearNullSpace(nullspace)
+        nullspace.remove(self.b)
 
         if not self.direct_solver and self.use_P_mat:
             self.P_.setNearNullSpace(nullspace)
@@ -360,7 +360,7 @@ class SolverKNPEMI:
                 exit()
 
             # Perform initial timestep setup
-            if i==0:
+            if i==1:
                 tic = time.perf_counter()
                 # Finalize configuration of PETSc structures
                 if self.direct_solver: 
@@ -373,10 +373,10 @@ class SolverKNPEMI:
                     # Set operators of iterative solver
                     self.ksp.setOperators(self.A, self.P_) if self.use_P_mat else self.ksp.setOperators(self.A)
 
-                # if not p.dirichlet_bcs:
-                #     # Handle the nullspace of the electric potentials in the case of 
-                #     # pure Neumann boundary conditions
-                #     self.create_and_set_nullspace()
+                if not p.dirichlet_bcs:
+                    # Handle the nullspace of the electric potentials in the case of 
+                    # pure Neumann boundary conditions
+                    self.create_and_set_nullspace()
 
                 # Add contribution to setup time
                 setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)

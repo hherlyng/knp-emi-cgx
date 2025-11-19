@@ -127,8 +127,8 @@ class KirNaKPumpModel(IonicModel):
 
         p = self.problem # Problem instance
 
-        c_Na_i = p.u_p[0][0] # ICS Na+ concentration at previous timestep [mol/m^3]
-        c_K_e  = p.u_p[1][1] # ECS K+ concentration at previous timestep [mol/m^3]
+        c_Na_i = p.wh[0][0] # ICS Na+ concentration at previous timestep [mol/m^3]
+        c_K_e  = p.wh[1][1] # ECS K+ concentration at previous timestep [mol/m^3]
 
         # Define the pump coefficient [mol/m^2 s]
         self.pump_coeff = (
@@ -154,7 +154,7 @@ class KirNaKPumpModel(IonicModel):
         # Aliases		
         p = self.problem # Problem instance
         ion: dict = p.ion_list[ion_idx] # Ion dictionary
-        ue_p:  list[dfx.fem.Function] = p.u_p[1] # ECS concentrations at previous timestep [mol/m^3]
+        ue_p:  list[dfx.fem.Function] = p.wh[1] # ECS concentrations at previous timestep [mol/m^3]
         phi_m: dfx.fem.Function = p.phi_m_prev # Membrane potential at previous timestep [V]
         F: dfx.fem.Constant = p.F # Faraday's constant [C/mol]
         z: dfx.fem.Constant = ion['z'] # Ion valence
@@ -259,12 +259,12 @@ class GlialCotransporters(IonicModel):
 
         p = self.problem # Problem instance
         ion   = p.ion_list[ion_idx] # Ion dictionary
-        c_Na_i = p.u_p[0][0] # ICS Na+ concentration at previous timestep [mol/m^3]
-        c_Na_e = p.u_p[1][0] # ECS Na+ concentration at previous timestep [mol/m^3]
-        c_K_i  = p.u_p[0][1] # ICS K+ concentration at previous timestep [mol/m^3]
-        c_K_e  = p.u_p[1][1] # ECS K+ concentration at previous timestep [mol/m^3]
-        c_Cl_i = p.u_p[0][2] # ICS Cl- concentration at previous timestep [mol/m^3]
-        c_Cl_e = p.u_p[1][2] # ECS Cl- concentration at previous timestep [mol/m^3]
+        c_Na_i = p.wh[0][0] # ICS Na+ concentration at previous timestep [mol/m^3]
+        c_Na_e = p.wh[1][0] # ECS Na+ concentration at previous timestep [mol/m^3]
+        c_K_i  = p.wh[0][1] # ICS K+ concentration at previous timestep [mol/m^3]
+        c_K_e  = p.wh[1][1] # ECS K+ concentration at previous timestep [mol/m^3]
+        c_Cl_i = p.wh[0][2] # ICS Cl- concentration at previous timestep [mol/m^3]
+        c_Cl_e = p.wh[1][2] # ECS Cl- concentration at previous timestep [mol/m^3]
         c_K_e_0 = p.K_e_init # Initial ECS K+ concentration [mol/m^3]
 
         # Define the KCC1 cotransporter current density [A/m^2]
@@ -330,12 +330,12 @@ class NeuronalCotransporters(IonicModel):
 
         p = self.problem # Problem instance
         ion    = p.ion_list[ion_idx] # Ion dictionary
-        c_Na_i = p.u_p[0][0] # ICS Na+ concentration at previous timestep [mol/m^3]
-        c_Na_e = p.u_p[1][0] # ECS Na+ concentration at previous timestep [mol/m^3]
-        c_K_i  = p.u_p[0][1] # ICS K+  concentration at previous timestep [mol/m^3]
-        c_K_e  = p.u_p[1][1] # ECS K+  concentration at previous timestep [mol/m^3]
-        c_Cl_i = p.u_p[0][2] # ICS Cl- concentration at previous timestep [mol/m^3]
-        c_Cl_e = p.u_p[1][2] # ECS Cl- concentration at previous timestep [mol/m^3]
+        c_Na_i = p.wh[0][0] # ICS Na+ concentration at previous timestep [mol/m^3]
+        c_Na_e = p.wh[1][0] # ECS Na+ concentration at previous timestep [mol/m^3]
+        c_K_i  = p.wh[0][1] # ICS K+  concentration at previous timestep [mol/m^3]
+        c_K_e  = p.wh[1][1] # ECS K+  concentration at previous timestep [mol/m^3]
+        c_Cl_i = p.wh[0][2] # ICS Cl- concentration at previous timestep [mol/m^3]
+        c_Cl_e = p.wh[1][2] # ECS Cl- concentration at previous timestep [mol/m^3]
         c_K_e_0 = p.K_e_init # Initial ECS K+ concentration [mol/m^3]
 
         # Define the KCC2 cotransporter current density [A/m^2]
@@ -407,8 +407,8 @@ class ATPPump(IonicModel):
             # Cl- is not affected by the ATP pump
             return dfx.fem.Constant(p.mesh, 0.0)
 
-        c_Na_i = p.u_p[0][0] # ICS Na+ concentration at previous timestep [mol/m^3]
-        c_K_e  = p.u_p[1][1] # ECS K+ concentration at previous timestep [mol/m^3]
+        c_Na_i = p.wh[0][0] # ICS Na+ concentration at previous timestep [mol/m^3]
+        c_K_e  = p.wh[1][1] # ECS K+ concentration at previous timestep [mol/m^3]
 
         # Define the ATP pump current density [A/m^2]
         par_1 = 1 + self.P_K_e  / c_K_e

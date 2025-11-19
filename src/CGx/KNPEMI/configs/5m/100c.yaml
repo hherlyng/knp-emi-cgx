@@ -3,12 +3,12 @@ problem_type : "KNP-EMI"
 
 # Input and output directories
 input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/'
-output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/5m/100c/P_test/'
+output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/5m/100c/test_init_guess/'
 
 # Numerical parameters 
 dt : 0.000025 # Timestep size 
-time_steps : 1 # Number of timesteps
-# T  : 20e-3 # Simulation end time
+# time_steps : 100 # Number of timesteps
+T  : 20e-3 # Simulation end time
 
 # Problem constants (in consistent units)
 physical_constants:
@@ -52,26 +52,26 @@ solver :
   output :
     save_xdmf : False
     save_cpoints : False
-    save_pngs : True
-    save_dat : True
+    save_pngs : False
+    save_dat : False
 
-# initial_conditions:
-#   phi_m_n: -0.071476853681466126
-#   Na_i_n: 10.268632994077078635
-#   Na_e: 144.744708952519403056
-#   K_i_n: 129.811380734287240557
-#   K_e: 3.048850721707830669
-#   Cl_i_n: 5.081325789845248408
-#   Cl_e: 133.789943445312900394
-#   phi_m_g: -0.084998008359292457
-#   Na_i_g: 13.544059832038975344
-#   K_i_g: 101.413493347111909770
-#   Cl_i_g: 4.957550246797823412
-#   n: 0.224677657561255351
-#   m: 0.024050937456326579
-#   h: 0.792158514749933484
+initial_conditions:
+  phi_m_n: -0.071476853681466126
+  Na_i_n: 10.268632994077078635
+  Na_e: 144.744708952519403056
+  K_i_n: 129.811380734287240557
+  K_e: 3.048850721707830669
+  Cl_i_n: 5.081325789845248408
+  Cl_e: 133.789943445312900394
+  phi_m_g: -0.084998008359292457
+  Na_i_g: 13.544059832038975344
+  K_i_g: 101.413493347111909770
+  Cl_i_g: 4.957550246797823412
+  n: 0.224677657561255351
+  m: 0.024050937456326579
+  h: 0.792158514749933484
 
-# # Only neuron
+# Only neurons
 # initial_conditions:
 #   phi_m_n: -0.071368761342158277
 #   Na_i_n: 10.178464430079944947

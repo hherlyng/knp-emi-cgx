@@ -55,15 +55,10 @@ def main_yaml(yaml_file: str="config.yaml", view_ksp: bool=False):
 	print(f"Variational form setup in {var_form_setup_time_max:0.4f} seconds")
 	
 	# Create solver and solve
-	# Get solver config
-	solver_config = problem.solver_config
+	solver_config = problem.solver_config # Get solver config
+	solver_config['view_ksp'] = view_ksp # Set view_ksp option
 	solver = SolverKNPEMI(problem,
-						  view_input=view_ksp,
-						  save_xdmfs=solver_config['output']['save_xdmf'],
-						  use_direct_solver=solver_config['direct'],
-						  save_pngs=solver_config['output']['save_pngs'],
-						  save_cpoints=solver_config['output']['save_cpoints'],
-						  save_dat=solver_config['output']['save_dat']
+						  solver_config=solver_config
 						)
 	solver.solve()
 

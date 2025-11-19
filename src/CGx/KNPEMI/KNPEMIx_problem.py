@@ -45,8 +45,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         self.V = dfx.fem.functionspace(self.mesh, P) # Continuous Lagrange space 
         self.V_list = [self.V.clone() for _ in range(self.num_variables_total)] # List of each variable's function space
         self.V_list_ie = [self.V_list[:self.num_variables], self.V_list[self.num_variables:]] # Separated list with intra- and extracellular variables split
-        self.R_space = create_real_functionspace(self.mesh) # Real function space
-        self.V_list.append(self.R_space) # Append real function space for Lagrange multiplier
         self.W = ufl.MixedFunctionSpace(*self.V_list) # Mixed function space
 
         # Functions for storing the solutions
@@ -89,20 +87,18 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
         self.interior = multiphenicsx.fem.DofMapRestriction(self.V.dofmap, self.dofs_intra)
         self.exterior = multiphenicsx.fem.DofMapRestriction(self.V.dofmap, self.dofs_extra)
-        self.real_restriction = multiphenicsx.fem.DofMapRestriction(self.R_space.dofmap, np.array([], dtype=np.int32))
 
         # Get interior and exterior dofs
-        self.restriction = [None] * (self.num_variables_total + 1)
+        self.restriction = [None] * self.num_variables_total
         self.restriction[:self.num_variables] = [self.interior] * self.num_variables
-        self.restriction[self.num_variables:-1] = [self.exterior] * self.num_variables
-        self.restriction[-1] = self.real_restriction
+        self.restriction[self.num_variables:] = [self.exterior] * self.num_variables
         
     def setup_boundary_conditions(self):
 
         print('Setting up boundary conditions ...')
         
         Wi = self.V_list[:self.num_variables]
-        We = self.V_list[self.num_variables:-1]
+        We = self.V_list[self.num_variables:]
 
         # Add Dirichlet boundary conditions on exterior boundary
         bcs = []
@@ -418,16 +414,12 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
                     print(f"Initial condition for {ion['name']}_i set to {ion['ki_init'].value}")
                     print(f"Initial condition for {ion['name']}_e set to {ion['ke_init'].value}")
-        from IPython import embed; embed()
+
         print("Initial conditions set.")
             
     def setup_variational_form(self):
 
         print("Setting up variational form ...")
-        
-        # Check that ionic models have been initialized
-        # if len(self.ionic_models)==0 and self.comm.rank==0:
-        #     raise RuntimeError('\nNo ionic model(s) specified.\nCall init_ionic_model() to provide ionic models.\n')
 
         # Aliases
         dt  = self.dt # Timestep
@@ -451,8 +443,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         # Trial and test functions
         u, v = ufl.TrialFunctions(self.W), ufl.TestFunctions(self.W) # Trial and test functions of the mixed space
         ui, vi = u[:self.num_variables], v[:self.num_variables] # Intracellular trial and test functions
-        ue, ve = u[self.num_variables:-1], v[self.num_variables:-1] # Extracellular trial and test functions
-        lam, mu = u[-1], v[-1] # Lagrange multiplier (last entry in mixed space)
+        ue, ve = u[self.num_variables:], v[self.num_variables:] # Extracellular trial and test functions
 
         # Solutions at previous timestep
         ui_p = self.wh[0]
@@ -620,11 +611,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
             L += dt * inner(self.src_terms['f_phi_m'], vphi_i(i_res) - vphi_e(e_res)) * dS(self.gamma_tags)
             L += e_sign * dt * inner(self.src_terms['f_gamma'], vphi_e(e_res)) * dS(self.gamma_tags)
 
-        # Add Lagrange multiplier terms to enforce zero mean
-        # for the extracellular potential
-        a += mu * phi_e * dxe + lam * vphi_e * dxe
-        L += mu * dfx.fem.Constant(self.mesh, 0.0) * dxe
-
         # Extract form block and compile C++ forms
         self.a = dfx.fem.form(ufl.extract_blocks(a), jit_options=self.jit_parameters)
         self.L = dfx.fem.form(ufl.extract_blocks(L), jit_options=self.jit_parameters)
@@ -653,8 +639,7 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         # Trial and test functions
         u, v = ufl.TrialFunctions(self.W), ufl.TestFunctions(self.W) # Trial and test functions of the mixed space
         ui, vi = u[:self.num_variables], v[:self.num_variables] # Intracellular trial and test functions
-        ue, ve = u[self.num_variables:-1], v[self.num_variables:-1] # Extracellular trial and test functions
-        lam, mu = u[-1], v[-1] # Lagrange multiplier (last entry in mixed space)
+        ue, ve = u[self.num_variables:], v[self.num_variables:] # Extracellular trial and test functions
 
         # Intracellular electric potential
         phi_i  = ui[self.N_ions]
@@ -712,9 +697,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
         P -= dt * inner(J_phi_e, grad(vphi_e)) * dxe
         P -= (C_M/F) * inner(phi_i(i_res), vphi_i(i_res)) * dS
         P -= (C_M/F) * inner(phi_e(e_res), vphi_e(e_res)) * dS        
-
-        # Add Lagrange multiplier terms to enforce zero mean
-        P += mu * phi_e * dxe + lam * vphi_e * dxe
 
         # Create block preconditioner matrix
         P = ufl.extract_blocks(P)
