@@ -452,11 +452,8 @@ class HodgkinHuxley(IonicModel):
 
         self.use_Rush_Larsen = use_Rush_Larsen # Whether to use Rush-Larsen method for gating variables
         self.time_steps_ODE = time_steps_ODE # Number of ODE timesteps per PDE timestep
+        self.dt_ode = KNPEMIx_problem.dt.value / self.time_steps_ODE # ODE timestep size [s]
         self.T_stim = KNPEMIx_problem.T_stim.value # Stimulus period [s]
-
-        # ODE timestep size [s]
-        self.dt_ode = 5e-7 #KNPEMIx_problem.dt.value / self.time_steps_ODE
-        self.time_steps_ODE = int(KNPEMIx_problem.dt.value / self.dt_ode)
 
         if hasattr(KNPEMIx_problem, 'tau_syn_rise'):
             # Synaptic rise and decay time constants [s] 

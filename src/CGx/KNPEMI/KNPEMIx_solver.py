@@ -209,19 +209,24 @@ class SolverKNPEMI:
                 opts.setValue("fieldsplit_ecs_ksp_rtol", fsplit_ksp_rtol)
 
                 # Hypre tuning options for each split
-                opts.setValue("fieldsplit_ics_pc_hypre_boomeramg_strong_threshold", 0.8)
+                opts.setValue("fieldsplit_ics_pc_hypre_boomeramg_strong_threshold", 0.75)
                 opts.setValue("fieldsplit_ics_pc_hypre_boomeramg_coarsen_type", "HMIS")
                 opts.setValue("fieldsplit_ics_pc_hypre_boomeramg_interp_type", "ext+i")
-                opts.setValue("fieldsplit_ecs_pc_hypre_boomeramg_strong_threshold", 0.8)
+                opts.setValue("fieldsplit_ecs_pc_hypre_boomeramg_strong_threshold", 0.75)
                 opts.setValue("fieldsplit_ecs_pc_hypre_boomeramg_coarsen_type", "HMIS")
                 opts.setValue("fieldsplit_ecs_pc_hypre_boomeramg_interp_type", "ext+i")
 
             else:
                 # Apply preconditioner options for single-field preconditioner
-                if self.ksp_type=='hypre':
+                if self.pc_type=='hypre':
+                    opts.setValue('pc_hypre_type', 'boomeramg')
                     opts.setValue('pc_hypre_boomeramg_max_iter', self.max_amg_iter)
+                    opts.setValue("pc_hypre_boomeramg_coarsen_type", "HMIS")
+                    opts.setValue("pc_hypre_boomeramg_interp_type", "ext+i")
                     if self.problem.mesh.geometry.dim==3:
                         opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.75)
+                    opts.setValue("pc_hypre_boomeramg_nodal_coarsen", 1)
+                    opts.setValue("pc_hypre_boomeramg_vec_interp_variant", 2)
             
             # Set miscellaneous KSP options
             opts.setValue('ksp_converged_reason', None)
@@ -274,15 +279,14 @@ class SolverKNPEMI:
         # Create the PETSc null space vector and check that it is a valid nullspace of A
         nullspace = PETSc.NullSpace().create(vectors=[ns_vec], comm=self.comm)
 
-        # Set the nullspace
-        assert nullspace.test(self.A) # Check that the nullspace is created correctly
+        # Check that the nullspace is created correctly
+        assert nullspace.test(self.A) 
+        
+        # Set the nullspace and
+        # orthogonalize the RHS vector with respect to the nullspace
         self.A.setNullSpace(nullspace)
         self.A.setNearNullSpace(nullspace)
         nullspace.remove(self.b)
-
-        if not self.direct_solver and self.use_P_mat:
-            self.P_.setNullSpace(nullspace)
-            self.P_.setNearNullSpace(nullspace)
 
     def solve(self):
         """ Solve the KNP-EMI problem. """
@@ -361,6 +365,9 @@ class SolverKNPEMI:
                 else: 
                     # Set operators of iterative solver
                     self.ksp.setOperators(self.A, self.P_) if self.use_P_mat else self.ksp.setOperators(self.A)
+                
+                # Finalize PETSc setup
+                self.ksp.setUp()
 
                 if not p.dirichlet_bcs and not p.pin_ecs_potential:
                     # Handle the nullspace of the electric potentials in the case of 
