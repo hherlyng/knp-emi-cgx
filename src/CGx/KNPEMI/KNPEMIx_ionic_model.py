@@ -454,6 +454,10 @@ class HodgkinHuxley(IonicModel):
         self.time_steps_ODE = time_steps_ODE # Number of ODE timesteps per PDE timestep
         self.T_stim = KNPEMIx_problem.T_stim.value # Stimulus period [s]
 
+        # ODE timestep size [s]
+        self.dt_ode = 5e-7 #KNPEMIx_problem.dt.value / self.time_steps_ODE
+        self.time_steps_ODE = int(KNPEMIx_problem.dt.value / self.dt_ode)
+
         if hasattr(KNPEMIx_problem, 'tau_syn_rise'):
             # Synaptic rise and decay time constants [s] 
             self.tau_syn_rise  = dfx.fem.Constant(KNPEMIx_problem.mesh, dfx.default_scalar_type(KNPEMIx_problem.tau_syn_rise))     
@@ -574,7 +578,7 @@ class HodgkinHuxley(IonicModel):
         stim_current = mask * p.g_syn_bar * exp_factor * (p.phi_m_prev - ion["E"]) 
 
         if p.scale_stimulus:
-            # Scale the stimulus current by the surface area of the stimulus tag
+            # Scale the stimulus current by the surface area of the stimulus membranes
             p.stimulus_area = dfx.fem.assemble_scalar(
                                 dfx.fem.form(
                                     mask * p.dS(p.stimulus_tags)
@@ -594,7 +598,7 @@ class HodgkinHuxley(IonicModel):
         tic = time.perf_counter()
         
         p = self.problem # Problem instance
-        dt_ode = p.dt.value / self.time_steps_ODE # ODE timestep [s]
+        dt_ode = self.dt_ode # ODE timestep size [s]
 
         # Compute V_M variable for the Hodgkin-Huxley equations
         # V_M = phi_m - phi_rest, measured in mV
@@ -656,5 +660,5 @@ class HodgkinHuxley(IonicModel):
         PETSc.Sys.Print(f"ODE step in {ODE_step_time:0.4f} seconds")   	
     
     def update_t_mod(self, tol: float=1e-12):
-        """ Update the modulo time variable used for synaptic stimuli. """
+        """ Update the modulo time variable used for stimulus currents. """
         self.t_mod.value = np.mod(self.problem.t.value + tol, self.T_stim)

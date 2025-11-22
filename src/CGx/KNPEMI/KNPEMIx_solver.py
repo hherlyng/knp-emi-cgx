@@ -82,8 +82,7 @@ class SolverKNPEMI:
         
         p = self.problem # For ease of notation
         print("Assembling preconditioner ...")
-        if not p.dirichlet_bcs:
-            # P_assembled = multiphenicsx.fem.petsc.assemble_matrix_block(p.P, bcs=p.bcs, restriction=(p.restriction, p.restriction))
+        if not p.dirichlet_bcs and not p.pin_ecs_potential:
             P_assembled = multiphenicsx.fem.petsc.assemble_matrix_block(p.P, bcs=[], restriction=(p.restriction, p.restriction))
         else:
             P_assembled = multiphenicsx.fem.petsc.assemble_matrix_block(p.P, bcs=p.bcs, restriction=(p.restriction, p.restriction))
@@ -164,70 +163,59 @@ class SolverKNPEMI:
 
             if self.pc_type=="fieldsplit":
             
-                # Create global offsets for each block in the linear system
+                # Global offsets for each block in the linear system
                 offsets = []
                 global_start = 0
                 for V in p.V_list:
-                    offsets.append(global_start) # The starting global index of the current block
-                    global_start += V.dofmap.index_map.size_global # The global size of the current block
+                    offsets.append(global_start)
+                    global_start += V.dofmap.index_map.size_global
 
-                # Get the range of owned rows of A on the current rank
+                # Get range of locally owned rows
                 lo, hi = self.A.getOwnershipRange()
 
-                # Owned global indices per block = offsets[i] + [0..size_global-1]; filter to [lo, hi)
+                # Collect locally owned DOFs per block
                 block_dofs = []
                 for i, V in enumerate(p.V_list):
-                    global_size = V.dofmap.index_map.size_global # The global size of the dofmap of V
-                    global_idx = offsets[i] + np.arange(global_size, dtype=np.int64) # Global indices of block i
-                    local = global_idx[(global_idx >= lo) & (global_idx < hi)] # Filter to locally owned rows
+                    global_size = V.dofmap.index_map.size_global
+                    global_idx = offsets[i] + np.arange(global_size, dtype=np.int64)
+                    local = global_idx[(global_idx >= lo) & (global_idx < hi)]
                     block_dofs.append(local)
 
-                # ICS concentration dofs: blocks 0..N_ions-1
-                ics_all = np.concatenate(block_dofs[:p.N_ions])
-
-                # ECS concentration dofs: blocks (N_ions+1)..(2*N_ions)
-                ecs_all = np.concatenate(block_dofs[p.N_ions+1:2*p.N_ions+1])
-
-                # Electric potential dofs: blocks N_ions (phi_i) and 2*N_ions+1 (phi_e)
-                phi_all = np.concatenate([block_dofs[p.N_ions], block_dofs[2*p.N_ions+1]])
-
-                # Filter the dofs to locally owned rows
-                ics_local = ics_all[(ics_all >= lo) & (ics_all < hi)]
-                ecs_local = ecs_all[(ecs_all >= lo) & (ecs_all < hi)]
-                phi_local = phi_all[(phi_all >= lo) & (phi_all < hi)]
-
-                # Create PETSc Index Set objects using the sorted local dofs 
+                # ICS block: 0..num_variables-1
+                ics_all = np.concatenate(block_dofs[:p.num_variables])
+                ics_local = ics_all[(ics_all >= lo) & (ics_all < hi)] # Filter to locally owned DOFs
                 is_ics = PETSc.IS().createGeneral(np.sort(ics_local).astype(np.int32))
+
+                # ECS block: num_variables..2*num_variables-1
+                ecs_all = np.concatenate(block_dofs[p.num_variables:2*p.num_variables])
+                ecs_local = ecs_all[(ecs_all >= lo) & (ecs_all < hi)] # Filter to locally owned DOFs
                 is_ecs = PETSc.IS().createGeneral(np.sort(ecs_local).astype(np.int32))
-                is_phi = PETSc.IS().createGeneral(np.sort(phi_local).astype(np.int32))
 
-                # Set the field splits on the KSP preconditioner object
-                pc.setFieldSplitIS(("ics", is_ics), ("ecs", is_ecs), ("phi", is_phi))
+                # Register the two splits
+                pc.setFieldSplitIS(("ics", is_ics), ("ecs", is_ecs))
 
-                # Set the iterative solver and preconditioner type for the field splits
-                ksp_solver = 'preonly' 
-                P_inv      = 'hypre'
+                # Solver/preconditioner choices per split
+                opts.setValue("pc_fieldsplit_type", "additive")
 
-                opts.setValue('pc_fieldsplit_type', 'multiplicative')
+                fsplit_ksp_type = "gmres"
+                fsplit_pc_type  = "hypre"
+                fsplit_ksp_rtol = 1e-5
+                opts.setValue("fieldsplit_ics_ksp_type", fsplit_ksp_type)
+                opts.setValue("fieldsplit_ics_pc_type", fsplit_pc_type)
+                opts.setValue("fieldsplit_ics_ksp_rtol", fsplit_ksp_rtol)
+                
+                opts.setValue("fieldsplit_ecs_ksp_type", fsplit_ksp_type)
+                opts.setValue("fieldsplit_ecs_pc_type", fsplit_pc_type)
+                opts.setValue("fieldsplit_ecs_ksp_rtol", fsplit_ksp_rtol)
 
-                opts.setValue('fieldsplit_ics_ksp_type', ksp_solver)
-                opts.setValue('fieldsplit_ecs_ksp_type', ksp_solver)
-                opts.setValue('fieldsplit_phi_ksp_type', ksp_solver)
+                # Hypre tuning options for each split
+                opts.setValue("fieldsplit_ics_pc_hypre_boomeramg_strong_threshold", 0.8)
+                opts.setValue("fieldsplit_ics_pc_hypre_boomeramg_coarsen_type", "HMIS")
+                opts.setValue("fieldsplit_ics_pc_hypre_boomeramg_interp_type", "ext+i")
+                opts.setValue("fieldsplit_ecs_pc_hypre_boomeramg_strong_threshold", 0.8)
+                opts.setValue("fieldsplit_ecs_pc_hypre_boomeramg_coarsen_type", "HMIS")
+                opts.setValue("fieldsplit_ecs_pc_hypre_boomeramg_interp_type", "ext+i")
 
-                opts.setValue('fieldsplit_ics_pc_type',  P_inv)				
-                opts.setValue('fieldsplit_ecs_pc_type',  P_inv)
-                opts.setValue('fieldsplit_phi_pc_type',  "lu")
-
-                # Set Hypre BoomerAMG options for the concentration splits
-                opts.setValue('fieldsplit_ics_pc_hypre_boomeramg_max_iter', self.max_amg_iter)
-                opts.setValue('fieldsplit_ics_pc_hypre_boomeramg_strong_threshold', 0.5)
-                opts.setValue('fieldsplit_ics_pc_hypre_boomeramg_coarsen_type', "HMIS")
-                opts.setValue('fieldsplit_ics_pc_hypre_boomeramg_interp_type', "ext+i")
-                opts.setValue('fieldsplit_ecs_pc_hypre_boomeramg_max_iter', self.max_amg_iter)
-                opts.setValue('fieldsplit_ecs_pc_hypre_boomeramg_strong_threshold', 0.5)
-                opts.setValue('fieldsplit_ecs_pc_hypre_boomeramg_coarsen_type', "HMIS")
-                opts.setValue('fieldsplit_ecs_pc_hypre_boomeramg_interp_type', "ext+i")
-            
             else:
                 # Apply preconditioner options for single-field preconditioner
                 if self.ksp_type=='hypre':
@@ -293,6 +281,7 @@ class SolverKNPEMI:
         nullspace.remove(self.b)
 
         if not self.direct_solver and self.use_P_mat:
+            self.P_.setNullSpace(nullspace)
             self.P_.setNearNullSpace(nullspace)
 
     def solve(self):
@@ -365,7 +354,7 @@ class SolverKNPEMI:
                 # Finalize configuration of PETSc structures
                 if self.direct_solver: 
                     self.ksp.setOperators(self.A)
-                    if not p.dirichlet_bcs:
+                    if not p.dirichlet_bcs and not p.pin_ecs_potential:
                         self.ksp.getPC().setFactorSetUpSolverType()
                         self.ksp.getPC().getFactorMatrix().setMumpsIcntl(icntl=24, ival=1)  # Option to support solving a singular matrix
                         self.ksp.getPC().getFactorMatrix().setMumpsIcntl(icntl=25, ival=0)  # Option to support solving a singular matrix
@@ -373,7 +362,7 @@ class SolverKNPEMI:
                     # Set operators of iterative solver
                     self.ksp.setOperators(self.A, self.P_) if self.use_P_mat else self.ksp.setOperators(self.A)
 
-                if not p.dirichlet_bcs:
+                if not p.dirichlet_bcs and not p.pin_ecs_potential:
                     # Handle the nullspace of the electric potentials in the case of 
                     # pure Neumann boundary conditions
                     self.create_and_set_nullspace()
@@ -626,9 +615,9 @@ class SolverKNPEMI:
 
         if hasattr(self.problem, 'stim_ufl_expr'):
             fig, ax = plt.subplots()
-            ax.plot(times, np.array(self.stim_t).flatten(), label='Stimulus')
+            ax.plot(times, np.array(self.stim_t).flatten()*1e12, label='Stimulus')
             ax.set_xlabel('Time [ms]')
-            ax.set_ylabel('Stimulus [A/m^2]')
+            ax.set_ylabel(f'Stimulus [pA]')
             fig.savefig(self.out_file_prefix + 'stimulus.png')
 
         if hasattr(self.problem, 'gamma_points'):
@@ -814,15 +803,15 @@ class SolverKNPEMI:
         np.save(self.problem.output_dir+"flux_values.npy", self.flux_values)
 
         # Save timings
-        np.save(self.problem.output_dir+"assembly_time.npy", np.array(self.assembly_time))
-        np.save(self.problem.output_dir+"solve_time.npy", np.array(self.solve_time))
+        np.save(self.problem.output_dir+"assembly_time.npy", self.assembly_time)
+        np.save(self.problem.output_dir+"solve_time.npy", self.solve_time)
         if not self.direct_solver:
             # Save iterations
             np.save(self.problem.output_dir+"iterations.npy", np.array(self.iterations))
 
     # Default iterative solver parameters
     ksp_rtol           = 1e-7
-    ksp_max_it         = 100000	
+    ksp_max_it         = 100000
     ksp_type           = 'gmres' 
     pc_type            = 'hypre'
     norm_type          = 'preconditioned'

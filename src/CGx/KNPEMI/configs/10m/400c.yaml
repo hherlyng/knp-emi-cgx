@@ -7,8 +7,8 @@ output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/10m/400c/T_stim=10
 
 # Numerical parameters 
 dt : 0.000025 # Timestep size 
-# time_steps : 10 # Number of timesteps
-T  : 5e-3 # Simulation end time
+time_steps : 200 # Number of timesteps
+# T  : 5e-3 # Simulation end time
 
 # Problem constants (in consistent units)
 physical_constants:
@@ -31,17 +31,13 @@ membrane_tags : !range [2, 402] # Membrane (interface) facet tags
 stimulus_tags : [358] # Membrane facet tags of the cells being stimulated
 membrane_data_tag : 358 # Tag for which membrane data is written to file
 
-# stimulus_region : 
-#   range : [1150, 1250]
-#   direction : "x"
-
 point_evaluation :
-  ics_points : [[1200, 3102, 3497], [1200, 3302, 3476]]
-  ecs_points : [[1200, 3113, 3607], [1200, 1334, 3934]]
+  ics_points : [[3345.33, 6703.67, 7112.84]]
+  ecs_points : [[3345.33, 6413.21, 7412.65]]
 
 stimulus :
   conductance :
-    g_syn_bar : 2.0e-10 # 0.5e-10 # Maximum synaptic conductance
+    g_syn_bar : 2.0e-10 # Maximum synaptic conductance
   a_syn : 5e-4 # Synaptic time constant
   T_stim : 1000e-3 # Stimulus period, high freq = 20 ms, normal freq = 1 s
   scale : True
@@ -50,6 +46,6 @@ solver :
   direct : False
   output :
     save_xdmf : False
-    save_cpoints : True
+    save_cpoints : False
     save_pngs : True
     save_dat : True

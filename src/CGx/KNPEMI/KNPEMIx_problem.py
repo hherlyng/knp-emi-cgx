@@ -9,13 +9,13 @@ from dolfinx.fem import Constant
 
 from ufl      import grad, inner, dot
 from mpi4py   import MPI
-from scifem   import create_real_functionspace
 from petsc4py import PETSc
 from CGx.utils.setup_mms import ExactSolutionsKNPEMI
 from CGx.utils.mixed_dim_problem import MixedDimensionalProblem
 from CGx.utils.membrane_ODE_systems import TwoCompartmentMembraneODESystem, ThreeCompartmentMembraneODESystem
 from CGx.KNPEMI.KNPEMIx_ionic_model import HodgkinHuxley
 
+pprint = print
 print = PETSc.Sys.Print # Automatically flushes output to stream in parallel
 
 class ProblemKNPEMI(MixedDimensionalProblem):
@@ -160,6 +160,40 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                     # Next round in for-loop is for extracellular variables
                     ion_suffix = 'e'
                     init_phi = 0.0
+        elif self.pin_ecs_potential:
+            # Get all gamma points on this rank
+            gamma_facets = np.concatenate(([self.boundaries.find(tag) for tag in self.gamma_tags]))
+            gamma_dofs = dfx.fem.locate_dofs_topological(self.V, self.boundaries.dim, gamma_facets) 
+            gamma_points = self.mesh.geometry.x[gamma_dofs]
+
+            if self.comm.rank==0:
+                # Pick a point
+                point = self.mesh.geometry.x[0]
+                # Check that point is not on the cellular membrane
+                while any(np.isclose(gamma_points, point).all(axis=1)):
+                    point = self.mesh.geometry.x[np.random.randint(0, self.mesh.geometry.x.shape[0])]
+            else:
+                point = None
+
+            # Broadcast point to all processes
+            point = self.comm.bcast(point, root=0)
+
+            # Find closest mesh vertex to the point
+            W_phi_e = We[self.N_ions]
+            vertex_dofs = dfx.fem.locate_dofs_geometrical(W_phi_e, lambda x: np.isclose(x.T, point).all(axis=1))
+
+            if len(vertex_dofs)>1:
+                # Rank owns point, pick first dof
+                vertex_dof = np.array([vertex_dofs[0]])
+            else:
+                # Vertex dofs should be empty on non-root ranks
+                vertex_dof = vertex_dofs
+
+            # Pin extracellular potential at that point to zero
+            zero = dfx.fem.Function(W_phi_e) # By default initialized to zero
+            bcs.append(dfx.fem.dirichletbc(zero, vertex_dof))
+
+            print("Phi_e pinned at (dof, point):", vertex_dof, point)
 
         self.bcs = bcs
 
@@ -953,3 +987,6 @@ class ProblemKNPEMI(MixedDimensionalProblem):
 
     # Boundary condition type 
     dirichlet_bcs   = False
+
+    # Pin extracellular potential
+    pin_ecs_potential = False
