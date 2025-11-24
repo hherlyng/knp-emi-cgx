@@ -90,8 +90,8 @@ if __name__=='__main__':
 
 	# Parse command line arguments
 	parser = argparse.ArgumentParser(formatter_class=CustomParser)
-	parser.add_argument("--config", dest="config_file", default='./test_setup_config.yaml', type=Path, help="Configuration file")
-	parser.add_argument("--view", dest="view_ksp", default=False, type=bool, help="Verbose KSP object log")
+	parser.add_argument("--config", dest="config_file", type=Path, help="Configuration file")
+	parser.add_argument("--view", dest="view_ksp", default=0, type=int, help="Verbose KSP object log")
 	
 	args = parser.parse_args(None)
 	
@@ -99,7 +99,7 @@ if __name__=='__main__':
 	script_time_tic = time.perf_counter()
 
 	# Run main
-	main_yaml(yaml_file=str(args.config_file), view_ksp=args.view_ksp)
+	main_yaml(yaml_file=str(args.config_file), view_ksp=bool(args.view_ksp))
 	
 	# End script timer and print
 	script_time_toc = time.perf_counter()

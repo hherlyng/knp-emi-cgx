@@ -53,6 +53,8 @@ class SolverKNPEMI:
                 self.pc_type  = ksp_settings['pc_type']  # Preconditioner type
             if 'ksp_rtol' in ksp_settings:
                 self.ksp_rtol = float(ksp_settings['ksp_rtol']) # KSP relative tolerance
+            if 'norm_type' in ksp_settings:
+                self.norm_type = ksp_settings['norm_type'] # KSP norm type
 
         # Initialize output files
         if self.save_xdmfs : self.init_xdmf_savefile()
@@ -74,8 +76,8 @@ class SolverKNPEMI:
 
         # Assemble system
         multiphenicsx.fem.petsc.assemble_matrix_block(self.A, p.a, bcs=p.bcs, restriction=(p.restriction, p.restriction)) # Assemble DOLFINx matrix
-        multiphenicsx.fem.petsc.assemble_vector_block(self.b, p.L, p.a, bcs=p.bcs, restriction=p.restriction) # Assemble RHS vector
         self.A.assemble() # Assemble PETSc matrix
+        multiphenicsx.fem.petsc.assemble_vector_block(self.b, p.L, p.a, bcs=p.bcs, restriction=p.restriction) # Assemble RHS vector
 
     def assemble_preconditioner(self):
         """ Assemble the preconditioner matrix. """
@@ -83,11 +85,10 @@ class SolverKNPEMI:
         p = self.problem # For ease of notation
         print("Assembling preconditioner ...")
         if not p.dirichlet_bcs and not p.pin_ecs_potential:
-            P_assembled = multiphenicsx.fem.petsc.assemble_matrix_block(p.P, bcs=[], restriction=(p.restriction, p.restriction))
+            self.P_ = multiphenicsx.fem.petsc.assemble_matrix_block(p.P, bcs=[], restriction=(p.restriction, p.restriction))
         else:
-            P_assembled = multiphenicsx.fem.petsc.assemble_matrix_block(p.P, bcs=p.bcs, restriction=(p.restriction, p.restriction))
-        P_assembled.assemble()
-        self.P_ = P_assembled
+            self.P_ = multiphenicsx.fem.petsc.assemble_matrix_block(p.P, bcs=p.bcs, restriction=(p.restriction, p.restriction))
+        self.P_.assemble()
 
         if self.save_mat:
             if p.MMS_test:
@@ -96,6 +97,21 @@ class SolverKNPEMI:
             else:
                 print("Saving Pmat")
                 dump(self.P_, 'output/Pmat')
+
+    def reassemble_preconditioner(self):
+        """ Re-assemble the preconditioner matrix."""
+        
+        p = self.problem # For ease of notation
+        print("Re-assembling preconditioner ...")
+
+        # Zero out previous entries
+        self.P_.zeroEntries()
+
+        if not p.dirichlet_bcs and not p.pin_ecs_potential:
+            multiphenicsx.fem.petsc.assemble_matrix_block(self.P_, p.P, bcs=[], restriction=(p.restriction, p.restriction))
+        else:
+            multiphenicsx.fem.petsc.assemble_matrix_block(self.P_, p.P, bcs=p.bcs, restriction=(p.restriction, p.restriction))
+        self.P_.assemble()
 
     def setup_solver(self):
         
@@ -209,10 +225,10 @@ class SolverKNPEMI:
                 opts.setValue("fieldsplit_ecs_ksp_rtol", fsplit_ksp_rtol)
 
                 # Hypre tuning options for each split
-                opts.setValue("fieldsplit_ics_pc_hypre_boomeramg_strong_threshold", 0.75)
+                opts.setValue("fieldsplit_ics_pc_hypre_boomeramg_strong_threshold", 0.6)
                 opts.setValue("fieldsplit_ics_pc_hypre_boomeramg_coarsen_type", "HMIS")
                 opts.setValue("fieldsplit_ics_pc_hypre_boomeramg_interp_type", "ext+i")
-                opts.setValue("fieldsplit_ecs_pc_hypre_boomeramg_strong_threshold", 0.75)
+                opts.setValue("fieldsplit_ecs_pc_hypre_boomeramg_strong_threshold", 0.6)
                 opts.setValue("fieldsplit_ecs_pc_hypre_boomeramg_coarsen_type", "HMIS")
                 opts.setValue("fieldsplit_ecs_pc_hypre_boomeramg_interp_type", "ext+i")
 
@@ -224,7 +240,7 @@ class SolverKNPEMI:
                     opts.setValue("pc_hypre_boomeramg_coarsen_type", "HMIS")
                     opts.setValue("pc_hypre_boomeramg_interp_type", "ext+i")
                     if self.problem.mesh.geometry.dim==3:
-                        opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.75)
+                        opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.6)
                     opts.setValue("pc_hypre_boomeramg_nodal_coarsen", 1)
                     opts.setValue("pc_hypre_boomeramg_vec_interp_variant", 2)
             
@@ -323,34 +339,7 @@ class SolverKNPEMI:
 
             # Print timestep and time
             print('\nTime step ', i)
-            print('t (ms) = ', 1000 * float(t.value))               
-    
-            # Update ODE-based ionic models
-            if p.gating_variables:
-                for model in p.ionic_models:
-                    if isinstance(model, HodgkinHuxley):
-                        model.update_t_mod()
-                        model.update_gating_variables()
-                    
-            # Assemble system matrix and RHS vector
-            tic = time.perf_counter()
-            self.assemble()
-
-            # Time the assembly
-            assembly_time     = time.perf_counter() - tic
-            max_assembly_time = self.comm.allreduce(assembly_time, op=MPI.MAX)
-            self.tot_assembly_time += max_assembly_time
-            self.assembly_time.append(max_assembly_time)
-            print(f"Time dependent assembly in {max_assembly_time:0.4f} seconds")
-
-            if self.save_mat:
-                if self.problem.MMS_test:
-                    print("Saving Amat_MMS ...")
-                    dump(self.A, 'output/Amat_MMS')
-                else:
-                    print("Saving Amat ...")
-                    dump(self.A, 'output/Amat')
-                exit()
+            print('t (ms) = ', 1000 * float(t.value))      
 
             # Perform initial timestep setup
             if i==1:
@@ -369,13 +358,47 @@ class SolverKNPEMI:
                 # Finalize PETSc setup
                 self.ksp.setUp()
 
-                if not p.dirichlet_bcs and not p.pin_ecs_potential:
-                    # Handle the nullspace of the electric potentials in the case of 
-                    # pure Neumann boundary conditions
-                    self.create_and_set_nullspace()
+                # Add contribution to setup time
+                setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)         
+    
+            # Update ODE-based ionic models
+            if p.gating_variables:
+                for model in p.ionic_models:
+                    if isinstance(model, HodgkinHuxley):
+                        model.update_t_mod()
+                        model.update_gating_variables()
+                    
+            # Assemble system matrix and RHS vector
+            tic = time.perf_counter()
+            self.assemble()
 
+            if self.reassemble_P and (i % self.reassemble_N == 0) and not self.direct_solver and self.use_P_mat:
+                self.reassemble_preconditioner()
+
+            # Time the assembly
+            assembly_time     = time.perf_counter() - tic
+            max_assembly_time = self.comm.allreduce(assembly_time, op=MPI.MAX)
+            self.tot_assembly_time += max_assembly_time
+            self.assembly_time.append(max_assembly_time)
+            print(f"Time dependent assembly in {max_assembly_time:0.4f} seconds")
+
+            if i==1 and not p.dirichlet_bcs and not p.pin_ecs_potential:
+                tic = time.perf_counter()
+                # Handle the nullspace of the electric potentials in the case of 
+                # pure Neumann boundary conditions
+                self.create_and_set_nullspace()
+                
                 # Add contribution to setup time
                 setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)
+
+            if self.save_mat:
+                if self.problem.MMS_test:
+                    print("Saving Amat_MMS ...")
+                    dump(self.A, 'output/Amat_MMS')
+                else:
+                    print("Saving Amat ...")
+                    dump(self.A, 'output/Amat')
+                exit()
 
             # Solve
             tic = time.perf_counter()
@@ -821,9 +844,11 @@ class SolverKNPEMI:
     ksp_max_it         = 100000
     ksp_type           = 'gmres' 
     pc_type            = 'hypre'
-    norm_type          = 'preconditioned'
+    norm_type          = 'unpreconditioned'
     max_amg_iter       = 1
     use_P_mat          = True # use P as preconditioner?
+    reassemble_P       = False # reassemble P at each Nth timestep?
+    reassemble_N       = 1    # reassemble P every N timesteps if reassemble_P=True
     verbose            = False
     use_block_Jacobi   = True
     nonzero_init_guess = True

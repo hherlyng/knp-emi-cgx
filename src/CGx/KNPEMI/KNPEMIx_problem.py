@@ -540,6 +540,8 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                         
                         I_ch_k_ += stim
 
+                        print(f"Stimulus added on membrane with tag {gamma_tag}.")
+
                         # Store stimulus expression for output
                         self.stim_ufl_expr = stim
 
