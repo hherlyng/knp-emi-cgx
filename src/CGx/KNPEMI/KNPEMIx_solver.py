@@ -229,24 +229,16 @@ class SolverKNPEMI:
                 opts.setValue("fieldsplit_ecs_ksp_rtol", fsplit_ksp_rtol)
 
                 # Hypre tuning options for each split
-                opts.setValue("fieldsplit_ics_pc_hypre_boomeramg_strong_threshold", 0.6)
-                opts.setValue("fieldsplit_ics_pc_hypre_boomeramg_coarsen_type", "HMIS")
-                opts.setValue("fieldsplit_ics_pc_hypre_boomeramg_interp_type", "ext+i")
-                opts.setValue("fieldsplit_ecs_pc_hypre_boomeramg_strong_threshold", 0.6)
-                opts.setValue("fieldsplit_ecs_pc_hypre_boomeramg_coarsen_type", "HMIS")
-                opts.setValue("fieldsplit_ecs_pc_hypre_boomeramg_interp_type", "ext+i")
+                opts.setValue("fieldsplit_ics_pc_hypre_boomeramg_strong_threshold", self.strong_threshold)
+                opts.setValue("fieldsplit_ecs_pc_hypre_boomeramg_strong_threshold", self.strong_threshold)
 
             else:
                 # Apply preconditioner options for single-field preconditioner
                 if self.pc_type=='hypre':
                     opts.setValue('pc_hypre_type', 'boomeramg')
                     opts.setValue('pc_hypre_boomeramg_max_iter', self.max_amg_iter)
-                    opts.setValue("pc_hypre_boomeramg_coarsen_type", "HMIS")
-                    opts.setValue("pc_hypre_boomeramg_interp_type", "ext+i")
                     if self.problem.mesh.geometry.dim==3:
-                        opts.setValue('pc_hypre_boomeramg_strong_threshold', 0.6)
-                    opts.setValue("pc_hypre_boomeramg_nodal_coarsen", 1)
-                    opts.setValue("pc_hypre_boomeramg_vec_interp_variant", 2)
+                        opts.setValue('pc_hypre_boomeramg_strong_threshold', self.strong_threshold)
             
             # Set miscellaneous KSP options
             opts.setValue('ksp_converged_reason', None)
@@ -307,6 +299,8 @@ class SolverKNPEMI:
         self.A.setNullSpace(nullspace)
         self.A.setNearNullSpace(nullspace)
         nullspace.remove(self.b)
+
+        print("Null space set.")
 
     def solve(self):
         """ Solve the KNP-EMI problem. """
@@ -376,7 +370,7 @@ class SolverKNPEMI:
             tic = time.perf_counter()
             self.assemble()
 
-            if self.reassemble_P and (i % self.reassemble_N == 0) and not self.direct_solver and self.use_P_mat:
+            if i>1 and self.reassemble_P and (i % self.reassemble_N == 0) and not self.direct_solver and self.use_P_mat:
                 self.reassemble_preconditioner()
 
             # Time the assembly
@@ -429,9 +423,8 @@ class SolverKNPEMI:
                         component_local[:] = ui_ue_wrapper_local
             
             # Ghost update each component after writing locally owned entries
-            for component in functions:
-                component.x.petsc_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT,
-                                                  mode=PETSc.ScatterMode.FORWARD)
+            for function in functions:
+                function.x.scatter_forward()
 
             # Compute phi_m_prev = phi_i - phi_e
             with wh[0][p.N_ions].x.petsc_vec.localForm() as phi_i_loc, \
@@ -440,8 +433,7 @@ class SolverKNPEMI:
                 phi_m_loc[:] = phi_i_loc - phi_e_loc
 
             # Ghost update phi_m_prev so any neighbor reads are consistent
-            p.phi_m_prev.x.petsc_vec.ghostUpdate(addv=PETSc.InsertMode.INSERT,
-                                                 mode=PETSc.ScatterMode.FORWARD)
+            p.phi_m_prev.x.scatter_forward()
 
             # Write output to file and save png
             if self.save_xdmfs and (i % self.save_interval == 0) : self.save_xdmf()
@@ -582,7 +574,7 @@ class SolverKNPEMI:
                                         dfx.fem.assemble_scalar(self.stim_current_form),
                                         op=MPI.SUM
                                     )
-            print(f"Stimulus current at png point: {stim_current:.2e}")
+            print(f"Total stimulus current: {stim_current:.2e}")
             self.stim_t.append(stim_current)
 
     def init_data(self):
@@ -854,8 +846,8 @@ class SolverKNPEMI:
     pc_type   = 'hypre'
     
     # Default iterative solver parameters
-    ksp_rtol           = 1e-9
-    ksp_max_it         = 5000
+    ksp_rtol           = 1e-8
+    ksp_max_it         = 10000
     use_P_mat          = True  # use P as preconditioner?
     reassemble_P       = False # reassemble P at each Nth timestep?
     reassemble_N       = 1     # reassemble P every N timesteps if reassemble_P=True

@@ -25,3 +25,4 @@ dependencies:
   - adios4dolfinx
   - openpyxl
   - seaborn
+  - pyvista

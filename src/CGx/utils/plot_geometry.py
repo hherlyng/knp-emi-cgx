@@ -5,7 +5,7 @@ import numpy as np
 pyvista.start_xvfb() # Initialize
 
 output_filename = "/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/single_geometry_edges.png"
-input_prefix  = "/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/geometries/GC/"
+input_prefix  = "/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/geometries/GC/"
 EXTRA = 1
 
 # Prepare plotting
@@ -40,12 +40,13 @@ clim = [2, N]
 pl.add_mesh(mesh.threshold(1.5), # Remove the extracellular space
             cmap=cmap,
             clim=clim,
-            scalar_bar_args=sargs.copy(),
+            # scalar_bar_args=sargs.copy(),
+            show_scalar_bar=False,
             show_edges=True,
             edge_color='white',
             edge_opacity=0.35
             )
-pl.scalar_bar.GetTitleTextProperty().SetLineSpacing(2)
+# pl.scalar_bar.GetTitleTextProperty().SetLineSpacing(2)
 pl.camera.azimuth = 180
 pl.camera.elevation = -20
 pl.camera.zoom(zoom)

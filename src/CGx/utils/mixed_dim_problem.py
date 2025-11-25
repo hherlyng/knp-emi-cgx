@@ -275,8 +275,13 @@ class MixedDimensionalProblem(ABC):
             self.point_evaluation = True
             self.ics_points = np.array(config['point_evaluation']['ics_points'])*self.mesh_conversion_factor
             self.ecs_points = np.array(config['point_evaluation']['ecs_points'])*self.mesh_conversion_factor
+            if 'gamma_points' in config['point_evaluation']:
+                self.gamma_points = np.array(config['point_evaluation']['gamma_points'])*self.mesh_conversion_factor
+            else: 
+                self.gamma_points = None
         else:
             self.point_evaluation = False
+            self.gamma_points = None
 
         if 'stimulus' in config:
             try:
@@ -710,46 +715,54 @@ class MixedDimensionalProblem(ABC):
             self.glia_cells = np.concatenate(([self.subdomains.find(tag) for tag in self.glia_tags]))
 
         #-------------------------------------------------#        
-        # Find vertices for evaluating the membrane potential
-        
-        if self.MMS_test:
-            gamma_facets = np.concatenate(([self.boundaries.find(tag) for tag in self.gamma_tags]))
-            self.find_membrane_point_closest_to_centroid(gamma_facets)
+        # Find vertices for evaluating the membrane potential if
+        # membrane point was not provided in the config file
+        if self.gamma_points is not None:
+            # Membrane point provided in config file
+            # Find png point dof
+            self.find_membrane_point_closest_to_centroid(
+                gamma_facets=self.boundaries.find(self.membrane_data_tag)
+            )
         else:
-            gamma_facets = self.boundaries.find(self.membrane_data_tag)
-            self.find_membrane_point_closest_to_centroid(gamma_facets)
-            if self.stimulus_region:
-                # Filter facets within stimulus region
-                gamma_vertices = dfx.mesh.compute_incident_entities(
-                                                                self.mesh.topology,
-                                                                gamma_facets,
-                                                                self.mesh.topology.dim-1,
-                                                                0
-                )
-                num_local_gamma_vertices = self.mesh.topology.index_map(0).size_local
-                gamma_vertices = np.unique(gamma_vertices)[gamma_vertices < num_local_gamma_vertices]
-                gamma_coords = self.mesh.geometry.x[gamma_vertices]
-                stim_dir = self.stimulus_region_direction
-                stim_range = self.stimulus_region_range
-                stimulus_region_mask = np.logical_and(
-                                        gamma_coords[:, stim_dir] > stim_range[0],
-                                        gamma_coords[:, stim_dir] < stim_range[1]
-                                    )
-                # Pick one point within the stimulus region
-                filtered_gamma_coords = gamma_coords[stimulus_region_mask]
-                # Find point local to each process, set None if process
-                # does not own any vertices 
-                local_gamma_point = None
-                if len(filtered_gamma_coords)>0:
-                    local_gamma_point = filtered_gamma_coords[0]
-
-                # Gather all points and filter out Nones
-                global_gamma_points = self.comm.allgather(local_gamma_point)
-                global_gamma_points = [point for point in global_gamma_points if point is not None]
-
-                self.gamma_points = np.array([global_gamma_points[0]])
+            # Membrane point not provided in config file
+            if self.MMS_test:
+                gamma_facets = np.concatenate(([self.boundaries.find(tag) for tag in self.gamma_tags]))
+                self.find_membrane_point_closest_to_centroid(gamma_facets)
             else:
-                self.gamma_points = self.png_point
+                gamma_facets = self.boundaries.find(self.membrane_data_tag)
+                self.find_membrane_point_closest_to_centroid(gamma_facets)
+                if self.stimulus_region:
+                    # Filter facets within stimulus region
+                    gamma_vertices = dfx.mesh.compute_incident_entities(
+                                                                    self.mesh.topology,
+                                                                    gamma_facets,
+                                                                    self.mesh.topology.dim-1,
+                                                                    0
+                    )
+                    num_local_gamma_vertices = self.mesh.topology.index_map(0).size_local
+                    gamma_vertices = np.unique(gamma_vertices)[gamma_vertices < num_local_gamma_vertices]
+                    gamma_coords = self.mesh.geometry.x[gamma_vertices]
+                    stim_dir = self.stimulus_region_direction
+                    stim_range = self.stimulus_region_range
+                    stimulus_region_mask = np.logical_and(
+                                            gamma_coords[:, stim_dir] > stim_range[0],
+                                            gamma_coords[:, stim_dir] < stim_range[1]
+                                        )
+                    # Pick one point within the stimulus region
+                    filtered_gamma_coords = gamma_coords[stimulus_region_mask]
+                    # Find point local to each process, set None if process
+                    # does not own any vertices 
+                    local_gamma_point = None
+                    if len(filtered_gamma_coords)>0:
+                        local_gamma_point = filtered_gamma_coords[0]
+
+                    # Gather all points and filter out Nones
+                    global_gamma_points = self.comm.allgather(local_gamma_point)
+                    global_gamma_points = [point for point in global_gamma_points if point is not None]
+
+                    self.gamma_points = np.array([global_gamma_points[0]])
+                else:
+                    self.gamma_points = self.png_point
                     
         # Initialize injection site properties
         if self.source_terms=="ion_injection":
