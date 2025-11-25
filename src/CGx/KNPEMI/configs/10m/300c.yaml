@@ -6,8 +6,8 @@ input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/'
 output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/10m/300c/T_stim=1000ms_iterative_study/'
 
 # Numerical parameters 
-dt : 0.000025 # Timestep size 
-time_steps : 200 # Number of timesteps
+dt : 0.00001 # Timestep size 
+time_steps : 400 # Number of timesteps
 # T  : 5e-3 # Simulation end time
 
 # Problem constants (in consistent units)
