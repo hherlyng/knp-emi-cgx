@@ -31,13 +31,17 @@ membrane_tags : !range [2, 402] # Membrane (interface) facet tags
 stimulus_tags : [368] # Membrane facet tags of the cells being stimulated
 membrane_data_tag : 368 # Tag for which membrane data is written to file
 
+stimulus_region : 
+  range : [0, 7000]
+  direction : "x"
+
 point_evaluation :
   ics_points : [[4243.66, 11550.9, 5174.67]]
-  ecs_points : [[4237.1, 11925.5, 4688.54]]
+  ecs_points : [[4237.10, 11925.5, 4688.54]]
 
 stimulus :
   conductance :
-    g_syn_bar : 30 # Maximum synaptic conductance [S/m^2]
+    g_syn_bar : 60 # Maximum synaptic conductance [S/m^2]
   a_syn : 5e-4 # Synaptic time constant
   T_stim : 1000e-3 # Stimulus period, high freq = 20 ms, normal freq = 1 s
   scale : False

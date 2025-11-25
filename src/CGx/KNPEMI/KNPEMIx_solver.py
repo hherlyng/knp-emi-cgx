@@ -57,6 +57,8 @@ class SolverKNPEMI:
                 self.norm_type = ksp_settings['norm_type'] # KSP norm type
             if 'strong_threshold' in ksp_settings:
                 self.strong_threshold = float(ksp_settings['strong_threshold']) # Hypre strong threshold
+            if 'reassemble_P' in ksp_settings:
+                self.reassemble_P = ksp_settings['reassemble_P'] # Option to re-assemble preconditioner
 
         # Initialize output files
         if self.save_xdmfs : self.init_xdmf_savefile()
@@ -852,8 +854,8 @@ class SolverKNPEMI:
     pc_type   = 'hypre'
     
     # Default iterative solver parameters
-    ksp_rtol           = 1e-8
-    ksp_max_it         = 100000
+    ksp_rtol           = 1e-9
+    ksp_max_it         = 5000
     use_P_mat          = True  # use P as preconditioner?
     reassemble_P       = False # reassemble P at each Nth timestep?
     reassemble_N       = 1     # reassemble P every N timesteps if reassemble_P=True

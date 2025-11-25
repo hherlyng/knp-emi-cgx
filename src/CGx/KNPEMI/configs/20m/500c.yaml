@@ -41,7 +41,7 @@ point_evaluation :
 
 stimulus :
   conductance :
-    g_syn_bar : 50 # Maximum synaptic conductance [S/m^2]
+    g_syn_bar : 60 # Maximum synaptic conductance [S/m^2]
   a_syn : 5e-4 # Synaptic time constant
   T_stim : 1000e-3 # Stimulus period, high freq = 20 ms, normal freq = 1 s
   scale : False
