@@ -55,6 +55,8 @@ class SolverKNPEMI:
                 self.ksp_rtol = float(ksp_settings['ksp_rtol']) # KSP relative tolerance
             if 'norm_type' in ksp_settings:
                 self.norm_type = ksp_settings['norm_type'] # KSP norm type
+            if 'strong_threshold' in ksp_settings:
+                self.strong_threshold = float(ksp_settings['strong_threshold']) # Hypre strong threshold
 
         # Initialize output files
         if self.save_xdmfs : self.init_xdmf_savefile()
@@ -508,8 +510,14 @@ class SolverKNPEMI:
         else:
             print("Solver type: [" + self.ksp_type + "+" + self.pc_type + "]")
             print(f"Tolerance: {self.ksp_rtol:.2e}")
+            print(f"Norm type: {self.norm_type}")
+            print(f"None-zero initial guess: {self.nonzero_init_guess}")
+            if self.pc_type=="hypre":
+                print(f"Hypre strong coupling threshold: {self.strong_threshold:.2e}")
             
             if self.use_P_mat: print("Preconditioner matrix P enabled.")
+            if self.use_block_Jacobi: print("Using block-Jacobi preconditioner form.")
+            if self.reassemble_P: print(f"Re-assembling preconditioner every {self.reassemble_N} timesteps.")
             
             print('Average iterations: ' + str(sum(self.iterations)/len(self.iterations)))
 
@@ -839,24 +847,29 @@ class SolverKNPEMI:
             # Save iterations
             np.save(self.problem.output_dir+"iterations.npy", np.array(self.iterations))
 
+    # Iterative solver and preconditioner type
+    ksp_type  = 'gmres' 
+    pc_type   = 'hypre'
+    
     # Default iterative solver parameters
-    ksp_rtol           = 1e-7
+    ksp_rtol           = 1e-8
     ksp_max_it         = 100000
-    ksp_type           = 'gmres' 
-    pc_type            = 'hypre'
-    norm_type          = 'unpreconditioned'
-    max_amg_iter       = 1
-    use_P_mat          = True # use P as preconditioner?
+    use_P_mat          = True  # use P as preconditioner?
     reassemble_P       = False # reassemble P at each Nth timestep?
-    reassemble_N       = 1    # reassemble P every N timesteps if reassemble_P=True
+    reassemble_N       = 1     # reassemble P every N timesteps if reassemble_P=True
     verbose            = False
     use_block_Jacobi   = True
     nonzero_init_guess = True
+    norm_type          = 'preconditioned' 
+
+    # BoomerAMG preconditioner parameters
+    max_amg_iter     = 1
+    strong_threshold = 0.5
 
     # Default output save interval
     save_interval     = 20 # save every nth timestep
 
     # Iteration counter and time variables
-    tot_its           = 0
-    tot_assembly_time = 0
-    tot_solver_time   = 0
+    tot_its           = 0.0
+    tot_assembly_time = 0.0
+    tot_solver_time   = 0.0
