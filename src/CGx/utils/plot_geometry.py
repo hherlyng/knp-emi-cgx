@@ -4,7 +4,7 @@ import numpy as np
 
 pyvista.start_xvfb() # Initialize
 
-output_filename = "/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/single_geometry_edges.png"
+output_filename = "/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/single_geometry.png"
 input_prefix  = "/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/geometries/GC/"
 EXTRA = 1
 
@@ -42,7 +42,7 @@ pl.add_mesh(mesh.threshold(1.5), # Remove the extracellular space
             clim=clim,
             # scalar_bar_args=sargs.copy(),
             show_scalar_bar=False,
-            show_edges=True,
+            show_edges=False,
             edge_color='white',
             edge_opacity=0.35
             )

@@ -53,7 +53,7 @@ class IonicModel(ABC):
                 K_min_val: float=3.0,
                 eps: float=1e-6,
                 cap: float=1.0) -> ufl.Coefficient:
-        """ Function that silences the NKCC1 cotransporter at lowK_e and is zero when 
+        """ Function that silences the NKCC1 cotransporter at low K_e and is zero when 
         K_e is not in the interval [K_min, K_e_0]."""
         # Define K_min as a dolfinx.fem.Constant
         K_min = dfx.fem.Constant(self.problem.mesh, K_min_val)

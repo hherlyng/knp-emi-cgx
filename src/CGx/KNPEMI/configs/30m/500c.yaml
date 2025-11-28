@@ -3,7 +3,7 @@ problem_type : "KNP-EMI"
 
 # Input and output directories
 input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/'
-output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/30m/500c/T_stim=1000ms_iterative_study/'
+output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/30m/500c/T_stim=1000ms_iterative_study_strong_threshold=0.85/'
 
 # Numerical parameters 
 dt : 0.000025 # Timestep size 
@@ -44,6 +44,8 @@ stimulus :
 
 solver :
   direct : False
+  ksp_settings:
+    strong_threshold : 0.85
   output :
     save_xdmf : False
     save_cpoints : False

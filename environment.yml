@@ -26,3 +26,5 @@ dependencies:
   - openpyxl
   - seaborn
   - pyvista
+  - colormaps
+  - meshio

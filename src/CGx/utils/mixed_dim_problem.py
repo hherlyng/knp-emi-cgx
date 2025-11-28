@@ -28,7 +28,7 @@ class MixedDimensionalProblem(ABC):
         print("Reading input data from " + config_file)
 
         # Options for the ffcx optimization
-        cache_dir       = '.cache_' + str(config_file)
+        cache_dir       = '.cache_new_new_new_' + str(config_file)
         compile_options = ["-Ofast", "-march=native"]
         self.jit_parameters  = {"cffi_extra_compile_args" : compile_options,
                                 "cache_dir"               : cache_dir,
@@ -313,13 +313,13 @@ class MixedDimensionalProblem(ABC):
             self.g_Cl_leak_val: float   = g_dict.get('g_Cl_leak', 0.25) # Neuronal Cl leak conductivity [S/m**2]
             self.g_Cl_leak_g_val: float = g_dict.get('g_Cl_leak_g', 2.0) # Glial Cl leak conductivity [S/m**2]
         else:
-            # Default stimulus of a single action potential with strength 40 S/m^2,
-            self.g_syn_bar_val = 40.0
-            self.a_syn_val     = 1e-3
-            self.T_stim_val    = 1.0
-            self.scale_stimulus = False
-            self.g_Na_bar_val = 1200 # Na max conductivity [S/m**2]
-            self.g_K_bar_val   = 360 # K max conductivity [S/m**2]
+            # Default stimulus and ion channel parameters
+            self.g_syn_bar_val   = 40.0 # Stimulus max conductance [S/m^2]
+            self.a_syn_val       = 5e-4 # Stimulus time constant [s]
+            self.T_stim_val      = 1.0
+            self.scale_stimulus  = False
+            self.g_Na_bar_val    = 1200 # Na max conductivity [S/m**2]
+            self.g_K_bar_val     = 360 # K max conductivity [S/m**2]
             self.g_Na_leak_val   = 1.0 # Neuronal Na leak conductivity [S/m**2]
             self.g_Na_leak_g_val = 1.0 # Glial Na leak conductivity [S/m**2]
             self.g_K_leak_val    = 4.0 # Neuronal K leak conductivity [S/m**2]

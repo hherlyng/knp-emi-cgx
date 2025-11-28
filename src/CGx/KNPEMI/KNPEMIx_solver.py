@@ -817,6 +817,12 @@ class SolverKNPEMI:
         # Save membrane potential values
         if self.comm.rank==self.problem.owner_rank_membrane_vertex:
             np.save(self.problem.output_dir+"phi_m.npy", np.array(self.v_t))
+
+            # Save gating variable values
+            if hasattr(self.problem, 'n'):
+                np.save(self.problem.output_dir+"n.npy", np.array(self.n_t))
+                np.save(self.problem.output_dir+"m.npy", np.array(self.m_t))
+                np.save(self.problem.output_dir+"h.npy", np.array(self.h_t))
         
         # Save gamma point evaluation values
         if hasattr(self.problem, 'gamma_points'):
@@ -847,7 +853,7 @@ class SolverKNPEMI:
     
     # Default iterative solver parameters
     ksp_rtol           = 1e-8
-    ksp_max_it         = 10000
+    ksp_max_it         = 5000
     use_P_mat          = True  # use P as preconditioner?
     reassemble_P       = False # reassemble P at each Nth timestep?
     reassemble_N       = 1     # reassemble P every N timesteps if reassemble_P=True

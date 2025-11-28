@@ -65,7 +65,7 @@ ct_refined = dfx.mesh.MeshTags(
 ft_refined.name = "ft"
 ct_refined.name = "ct"
 
-with dfx.io.XDMFFile(mesh_refined.comm, mesh_dir + mesh_file + "_refined.xdmf", "w") as xdmf:
+with dfx.io.XDMFFile(mesh_refined.comm, mesh_dir + mesh_file.removesuffix(".xdmf") + "_refined.xdmf", "w") as xdmf:
     xdmf.write_mesh(mesh_refined)
     xdmf.write_meshtags(ct_refined, mesh_refined.geometry)
     xdmf.write_meshtags(ft_refined, mesh_refined.geometry)
