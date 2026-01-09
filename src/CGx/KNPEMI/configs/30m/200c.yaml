@@ -3,7 +3,7 @@ problem_type : "KNP-EMI"
 
 # Input and output directories
 input_dir  : '/home/hherlyng/knp-emi-cgx/src/CGx/KNPEMI/input/'
-output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/30m/200c/T_stim=1000ms_iterative_study_strong_threshold=0.85/'
+output_dir : '/global/D1/homes/hherlyng/knp-emi-cgx/output/GC/30m/200c/T_stim=1000ms_iterative_study_strong_threshold=0.85_ranged/'
 
 # Numerical parameters 
 dt : 0.000025 # Timestep size 
@@ -35,6 +35,11 @@ point_evaluation :
   ics_points : [[15141.1, 21552.1, 15017.1]]
   ecs_points : [[15614.1, 21500.8, 15021.2]]
 
+stimulus_region :
+  multiple : True
+  range : [[0, 23000], [0, 10000]]
+  direction : ["x", "y"]
+  
 stimulus :
   conductance :
     g_syn_bar : 60 # Maximum synaptic conductance [S/m^2]

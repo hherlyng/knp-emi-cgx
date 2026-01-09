@@ -36,19 +36,36 @@ def create_flux_forms(problem: ProblemKNPEMI) -> list[dfx.fem.Form]:
     if not problem.stimulus_region:
         mask = 1.0
     else:
-        # Create mask so that stimulus is zero outside of 
-        # a subregion, but active within the subregion
-        x = ufl.SpatialCoordinate(problem.mesh)
-        coord = x[problem.stimulus_region_direction]
-        coord_min: float = problem.stimulus_region_range[0]
-        coord_max: float = problem.stimulus_region_range[1]
-        mask = ufl.conditional(
+        if not problem.multiple_stimulus_directions:
+            # Create mask so that stimulus is zero outside of 
+            # a subregion, but active within the subregion
+            x = ufl.SpatialCoordinate(problem.mesh)
+            coord = x[problem.stimulus_region_direction]
+            coord_min: float = problem.stimulus_region_range[0]
+            coord_max: float = problem.stimulus_region_range[1]
+            mask = ufl.conditional(
+                        ufl.And(
+                            ufl.gt(coord, coord_min), 
+                            ufl.lt(coord, coord_max)
+                            ), 
+                        1.0, 0.0
+                    )
+        else:
+            # Create mask so that stimulus is zero outside of 
+            # a subregion, but active within the subregion
+            x = ufl.SpatialCoordinate(problem.mesh)
+            mask = 1.0
+            for dir_idx, direction in enumerate(problem.stimulus_region_directions):
+                coord = x[direction]
+                coord_min: float = problem.stimulus_region_range[dir_idx][0]
+                coord_max: float = problem.stimulus_region_range[dir_idx][1]
+                mask = mask * ufl.conditional(
                     ufl.And(
                         ufl.gt(coord, coord_min), 
                         ufl.lt(coord, coord_max)
                         ), 
-                    1.0, 0.0
-                )
+                        1.0, 0.0
+                    )
 
     for space_idx, res in enumerate([i_res, e_res]):  # 0: ICS, 1: ECS
         # Extract electric potential function

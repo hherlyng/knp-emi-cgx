@@ -28,7 +28,7 @@ class MixedDimensionalProblem(ABC):
         print("Reading input data from " + config_file)
 
         # Options for the ffcx optimization
-        cache_dir       = '.cache_new_new_new_' + str(config_file)
+        cache_dir       = '.cache_sunday_' + str(config_file)
         compile_options = ["-Ofast", "-march=native"]
         self.jit_parameters  = {"cffi_extra_compile_args" : compile_options,
                                 "cache_dir"               : cache_dir,
@@ -335,7 +335,19 @@ class MixedDimensionalProblem(ABC):
                 'y' : 1,
                 'z' : 2
             }
-            self.stimulus_region_direction: int = axes[str(config['stimulus_region']['direction'])]
+            if not 'multiple' in config['stimulus_region']:
+                self.multiple_stimulus_directions = False
+                self.stimulus_region_direction: int = axes[str(config['stimulus_region']['direction'])]
+            else:
+                if config['stimulus_region']['multiple']:
+                    # Multiple directions are specified
+                    self.multiple_stimulus_directions = True
+                    self.stimulus_region_directions: list[int] = []
+                    for direction in config['stimulus_region']['direction']:
+                        self.stimulus_region_directions.append(axes[str(direction)])
+                else:
+                    self.multiple_stimulus_directions = False
+                    self.stimulus_region_direction: int = axes[str(config['stimulus_region']['direction'])]
         else:
             self.stimulus_region = False
 
@@ -545,12 +557,23 @@ class MixedDimensionalProblem(ABC):
         if within_stimulus_region:
             assert self.stimulus_region, print("No stimulus region defined.")
             # Pick one point within the stimulus region
-            gamma_coords = gamma_coords[
-                                np.logical_and(
-                                    gamma_coords[:, self.stimulus_region_direction] > self.stimulus_region_range[0],
-                                    gamma_coords[:, self.stimulus_region_direction] < self.stimulus_region_range[1]
-                                )
-                            ]
+            if self.multiple_stimulus_directions:
+                # Multiple directions specified
+                for i, direction in enumerate(self.stimulus_region_directions):
+                    gamma_coords = gamma_coords[
+                        np.logical_and( 
+                            gamma_coords[:, direction] > self.stimulus_region_range[i][0],
+                            gamma_coords[:, direction] < self.stimulus_region_range[i][1]
+                        )
+                    ]
+            else:
+                # Single direction specified
+                gamma_coords = gamma_coords[
+                                    np.logical_and(
+                                        gamma_coords[:, self.stimulus_region_direction] > self.stimulus_region_range[0],
+                                        gamma_coords[:, self.stimulus_region_direction] < self.stimulus_region_range[1]
+                                    )
+                                ]
         
         # Find the vertex that lies closest to the cell's centroid
         distances = np.sum((gamma_coords - mesh_center)**2, axis=1)
@@ -742,12 +765,24 @@ class MixedDimensionalProblem(ABC):
                     num_local_gamma_vertices = self.mesh.topology.index_map(0).size_local
                     gamma_vertices = np.unique(gamma_vertices)[gamma_vertices < num_local_gamma_vertices]
                     gamma_coords = self.mesh.geometry.x[gamma_vertices]
-                    stim_dir = self.stimulus_region_direction
-                    stim_range = self.stimulus_region_range
-                    stimulus_region_mask = np.logical_and(
-                                            gamma_coords[:, stim_dir] > stim_range[0],
-                                            gamma_coords[:, stim_dir] < stim_range[1]
-                                        )
+                    if self.multiple_stimulus_directions:
+                        # Multiple directions specified
+                        stimulus_region_mask = np.ones(len(gamma_coords), dtype=bool)
+                        for i, direction in enumerate(self.stimulus_region_directions):
+                            stimulus_region_mask = np.logical_and(
+                                                        stimulus_region_mask,
+                                                        np.logical_and(
+                                                            gamma_coords[:, direction] > self.stimulus_region_range[i][0],
+                                                            gamma_coords[:, direction] < self.stimulus_region_range[i][1]
+                                                        )
+                                                    )
+                    else:
+                        stim_dir = self.stimulus_region_direction
+                        stim_range = self.stimulus_region_range
+                        stimulus_region_mask = np.logical_and(
+                                                gamma_coords[:, stim_dir] > stim_range[0],
+                                                gamma_coords[:, stim_dir] < stim_range[1]
+                                            )
                     # Pick one point within the stimulus region
                     filtered_gamma_coords = gamma_coords[stimulus_region_mask]
                     # Find point local to each process, set None if process

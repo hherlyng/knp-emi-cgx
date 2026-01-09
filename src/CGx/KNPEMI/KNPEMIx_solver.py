@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from mpi4py         import MPI
 from petsc4py       import PETSc
 from CGx.utils.misc import dump
-from CGx.utils.calc_fluxes import create_flux_forms, compute_fluxes
+# from CGx.utils.calc_fluxes import create_flux_forms, compute_fluxes
 from CGx.KNPEMI.KNPEMIx_problem     import ProblemKNPEMI
 from CGx.KNPEMI.KNPEMIx_ionic_model import HodgkinHuxley
 
@@ -591,8 +591,8 @@ class SolverKNPEMI:
 
         self.gamma_point_values[0] = scifem.evaluate_function(p.phi_m_prev, p.gamma_points).T
 
-        self.flux_forms  = create_flux_forms(p)
-        self.flux_values = np.zeros((self.time_steps+1, 2*p.N_ions)) # Fluxes for each ion
+        # self.flux_forms  = create_flux_forms(p)
+        # self.flux_values = np.zeros((self.time_steps+1, 2*p.N_ions)) # Fluxes for each ion
 
     def save_data(self, i: int):
         """ Save function values evaluated in two points (one in ICS and one in the ECS)
@@ -606,9 +606,9 @@ class SolverKNPEMI:
 
         self.gamma_point_values[i] = scifem.evaluate_function(p.phi_m_prev, p.gamma_points).T
 
-        fluxes: np.ndarray[float] = compute_fluxes(self.flux_forms, self.comm)
-        for idx, val in enumerate(fluxes):
-            self.flux_values[i, idx] = val
+        # fluxes: np.ndarray[float] = compute_fluxes(self.flux_forms, self.comm)
+        # for idx, val in enumerate(fluxes):
+        #     self.flux_values[i, idx] = val
 
     def print_figures(self):
         """ Output .png plot of:
@@ -773,15 +773,9 @@ class SolverKNPEMI:
         a4d.write_meshtags(self.cpoint_filename, p.mesh, meshtags=p.boundaries)
 
         # Write concentrations to file
-        for idx in range(p.N_ions):
+        for idx in range(p.num_variables):
             a4d.write_function(filename=self.cpoint_filename, u=p.u_out_i[idx], time=0)
             a4d.write_function(filename=self.cpoint_filename, u=p.u_out_e[idx], time=0)
-        
-        # Write membrane potential and gating variables to file
-        a4d.write_function(filename=self.cpoint_filename, u=p.phi_m_prev, time=0)
-        a4d.write_function(filename=self.cpoint_filename, u=p.n, time=0)
-        a4d.write_function(filename=self.cpoint_filename, u=p.m, time=0)
-        a4d.write_function(filename=self.cpoint_filename, u=p.h, time=0)
 
         return
     
@@ -790,17 +784,10 @@ class SolverKNPEMI:
         p = self.problem
 
         # Write concentrations to file
-        for idx in range(p.N_ions):
+        for idx in range(p.num_variables):
             a4d.write_function(filename=self.cpoint_filename, u=p.u_out_i[idx], time=i)
             a4d.write_function(filename=self.cpoint_filename, u=p.u_out_e[idx], time=i)
-        
-        # Write membrane potential to file
-        a4d.write_function(filename=self.cpoint_filename, u=p.phi_m_prev, time=i)
-        a4d.write_function(filename=self.cpoint_filename, u=p.n, time=i)
-        a4d.write_function(filename=self.cpoint_filename, u=p.m, time=i)
-        a4d.write_function(filename=self.cpoint_filename, u=p.h, time=i)
 
-        return
 
     def close_xdmf(self):
         """ Close .xdmf files. """
@@ -837,8 +824,8 @@ class SolverKNPEMI:
         if hasattr(self.problem, 'stim_ufl_expr'):
             np.save(self.problem.output_dir+"stimulus.npy", np.array(self.stim_t))
 
-        # Save flux values
-        np.save(self.problem.output_dir+"flux_values.npy", self.flux_values)
+        # # Save flux values
+        # np.save(self.problem.output_dir+"flux_values.npy", self.flux_values)
 
         # Save timings
         np.save(self.problem.output_dir+"assembly_time.npy", self.assembly_time)
@@ -853,7 +840,7 @@ class SolverKNPEMI:
     
     # Default iterative solver parameters
     ksp_rtol           = 1e-8
-    ksp_max_it         = 5000
+    ksp_max_it         = 50000
     use_P_mat          = True  # use P as preconditioner?
     reassemble_P       = False # reassemble P at each Nth timestep?
     reassemble_N       = 1     # reassemble P every N timesteps if reassemble_P=True

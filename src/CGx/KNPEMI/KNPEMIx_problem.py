@@ -534,7 +534,10 @@ class ProblemKNPEMI(MixedDimensionalProblem):
                         ):
                         
                         if self.stimulus_region:
-                            stim: ufl.Coefficient = model._add_stimulus(idx, step=True, range=self.stimulus_region_range, dir=self.stimulus_region_direction)
+                            if not self.multiple_stimulus_directions:
+                                stim: ufl.Coefficient = model._add_stimulus(idx, step=True, range=self.stimulus_region_range, dir=self.stimulus_region_direction)
+                            else:
+                                stim: ufl.Coefficient = model._add_stimulus(idx, step=True, range=self.stimulus_region_range, dir=self.stimulus_region_directions)
                         else:
                             stim: ufl.Coefficient = model._add_stimulus(idx, step=True)
                         

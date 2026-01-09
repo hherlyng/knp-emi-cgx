@@ -518,7 +518,7 @@ class HodgkinHuxley(IonicModel):
                     ion_idx: int,
                     step: bool,
                     range: list | np.ndarray=None,
-                    dir: str=None
+                    dir: str | list[str]=None
                 ) -> ufl.Coefficient:
         """ Evaluate and return the stimulus part of the channel current for ion number 'ion_idx'.
 
@@ -557,19 +557,33 @@ class HodgkinHuxley(IonicModel):
         if range is None:
             mask = 1.0
         else:
-            # Create mask so that stimulus is zero outside of 
-            # a subregion, but active within the subregion
             x = ufl.SpatialCoordinate(p.mesh)
-            coord = x[dir]
-            coord_min: float = range[0]
-            coord_max: float = range[1]
-            mask = ufl.conditional(
-                        ufl.And(
-                            ufl.gt(coord, coord_min), 
-                            ufl.lt(coord, coord_max)
-                            ), 
-                        1.0, 0.0
-                    )
+            if not p.multiple_stimulus_directions:
+                # Create mask so that stimulus is zero outside of 
+                # a subregion, but active within the subregion
+                coord = x[dir]
+                coord_min: float = range[0]
+                coord_max: float = range[1]
+                mask = ufl.conditional(
+                            ufl.And(
+                                ufl.gt(coord, coord_min), 
+                                ufl.lt(coord, coord_max)
+                                ), 
+                            1.0, 0.0
+                        )
+            else:
+                mask = 1.0
+                for i, d in enumerate(dir):
+                    coord = x[d]
+                    coord_min: float = range[i][0]
+                    coord_max: float = range[i][1]
+                    mask *= ufl.conditional(
+                                ufl.And(
+                                    ufl.gt(coord, coord_min), 
+                                    ufl.lt(coord, coord_max)
+                                    ), 
+                                1.0, 0.0
+                            )
         
         # Define the stimulus current [A/m^2]
         stim_current = mask * p.g_syn_bar * exp_factor * (p.phi_m_prev - ion["E"]) 
