@@ -67,7 +67,7 @@ def main():
 
     relative_error_phi_i = abs(computed_phi_i_L2_global - saved_L2_phi_i)/saved_L2_phi_i
     relative_error_phi_e = abs(computed_phi_e_L2_global - saved_L2_phi_e)/saved_L2_phi_e
-    ksp_rtol = problem_square.solver_config['ksp_rtol'] # The relative tolerance used by the iterative solver
+    ksp_rtol = problem_square.solver_config['ksp_settings']['ksp_rtol'] # The relative tolerance used by the iterative solver
     assert np.allclose(
             [relative_error_phi_i, relative_error_phi_e],
             [0.0, 0.0],
