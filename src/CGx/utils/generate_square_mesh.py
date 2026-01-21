@@ -20,7 +20,7 @@ args = parser.parse_args()
 N = args.N
 gm = dfx.mesh.GhostMode.shared_facet
 comm = MPI.COMM_WORLD
-if not os.path.exists(args.output_dir): os.mkdir(args.output_dir)
+if not os.path.exists(args.output_dir): os.makedirs(args.output_dir)
 mesh_filename = args.output_dir / f"square{N}.xdmf"
 ft_filename   = args.output_dir / f"square{N}_facets.xdmf"
 
