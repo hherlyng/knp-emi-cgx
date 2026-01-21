@@ -35,12 +35,17 @@ To test solving the same problem with an iterative solver, run
 python3 ./tests/KNPEMI/electric_potential_norms_iterative_solver.py
 ```
 
-A general `main` file is found in the `src/CGx/KNPEMI` directory.
+A general main file is found in the `src/CGx/KNPEMI` directory.
 This file is used to run simulations using configuration files
 that are located in `src/CGx/KNPEMI/configs`, using the command
 ```
 python main.py --config your_config_file.yaml
 ```
+
+The main file is used to define the membrane mechanisms used
+in the model. Solver settings, model parameters, mesh paths
+and membrane stimulus properties are specified in the configuration
+files.
 
 # Citation and example use cases
 If you use this code, please cite the following paper, which is where
