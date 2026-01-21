@@ -65,10 +65,14 @@ def main():
     print("Saved phi_e:\t", saved_L2_phi_e)
     print("Computed phi_e:\t", computed_phi_e_L2_global)
 
-    percentage_error_i = abs(computed_phi_i_L2_global - saved_L2_phi_i)/saved_L2_phi_i*100
-    percentage_error_e = abs(computed_phi_e_L2_global - saved_L2_phi_e)/saved_L2_phi_e*100
-
-    assert np.allclose([percentage_error_i, percentage_error_e], [0.0, 0.0], atol=1e-8)
+    relative_error_phi_i = abs(computed_phi_i_L2_global - saved_L2_phi_i)/saved_L2_phi_i
+    relative_error_phi_e = abs(computed_phi_e_L2_global - saved_L2_phi_e)/saved_L2_phi_e
+    ksp_rtol = problem_square.solver_config['ksp_rtol'] # The relative tolerance used by the iterative solver
+    assert np.allclose(
+            [relative_error_phi_i, relative_error_phi_e],
+            [0.0, 0.0],
+            atol=ksp_rtol*10 # The solver tolerance sets a limit on the achievable accuracy
+        )
     
     # Check that the iterative solver uses the same number of
     # iterations as previously saved
