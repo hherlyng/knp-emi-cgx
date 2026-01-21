@@ -17,22 +17,34 @@ pip install -e . --no-build-isolation
 ```
 
 # Testing the setup on a unit square mesh
-To test the setup by solving the KNP-EMI problem on a unit square, start by generating a mesh. Navigate to the KNP-EMI directory
+To test the setup by solving the KNP-EMI problem on a unit square, start by generating a mesh
+with the command
 ```
-cd src/CGx/KNPEMI
+python3 ./src/CGx/utils/generate_square_mesh.py -N 32 -o './input/geometries/'
 ```
-and run
+This generates a 32x32 unit square mesh in the directory `'./input/geometries/'`.
+The mesh consists of triangles and the option `-N` specifies the number
+of elements in the $x$ and $y$ directions.
+Test your setup by running 
 ```
-python ../utils/generate_square_mesh.py
+python3 ./tests/KNPEMI/electric_potential_norms_direct_solver.py
 ```
-to generate a 32x32 unit square mesh. The script `generate_square_mesh.py` has an option -N which can be provided to generate an NxN unit square mesh.
-To run a simulation with a test setup config, run
+This solves a KNP-EMI problem on the unit square mesh with a direct solver.
+To test solving the same problem with an iterative solver, run
 ```
-python main.py --config test_setup_config.yaml
+python3 ./tests/KNPEMI/electric_potential_norms_iterative_solver.py
 ```
 
-# Citation
-If you use this code, please cite the following paper
+A general `main` file is found in the `src/CGx/KNPEMI` directory.
+This file is used to run simulations using configuration files
+that are located in `src/CGx/KNPEMI/configs`, using the command
+```
+python main.py --config your_config_file.yaml
+```
+
+# Citation and example use cases
+If you use this code, please cite the following paper, which is where
+the numerical method was developed:
 ```
 @article{benedusi2024scalable,
   author = {Benedusi, Pietro and Ellingsrud, Ada Johanne and Herlyng, Halvor and Rognes, Marie E.},
@@ -43,5 +55,22 @@ If you use this code, please cite the following paper
   pages = {B725-B751},
   year = {2024},
   doi = {10.1137/24M1644717}
+}
+```
+Note that, in the above article, the legacy FEniCS implementation 
+located in [this repository](https://github.com/pietrobe/EMIx/) is used.
+
+For example use cases of the software in the current repository,
+which implements the methodology in the above article in FEniCSx,
+see the following paper:
+```
+@misc{herlyng2025modelingsimulationelectrodiffusiondense,
+  title={Modeling and simulation of electrodiffusion in dense reconstructions of cerebral tissue}, 
+  author={Halvor Herlyng and Marius Causemann and Gaute T. Einevoll and Ada J. Ellingsrud and Geir Halnes and Marie E. Rognes},
+  year={2025},
+  eprint={2512.03224},
+  archivePrefix={arXiv},
+  primaryClass={physics.med-ph},
+  url={https://arxiv.org/abs/2512.03224}, 
 }
 ```
