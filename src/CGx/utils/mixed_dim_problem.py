@@ -26,13 +26,17 @@ class MixedDimensionalProblem(ABC):
 
         self.comm = MPI.COMM_WORLD
         print("Reading input data from " + config_file)
-
-        # Options for the ffcx optimization
-        cache_dir       = '.cache_sunday_' + str(config_file)
-        compile_options = ["-Ofast", "-march=native"]
-        self.jit_parameters  = {"cffi_extra_compile_args" : compile_options,
-                                "cache_dir"               : cache_dir,
-                                "cffi_libraries"          : ["m"]}
+        # Options for FFCx compiler optimization
+        cache_dir = '.cache/' + str(config_file.split('/')[-1]).split('.')[0] + '/'
+        if not os.path.exists(cache_dir):
+            # Create cache directory if it does not already exist
+            os.makedirs(cache_dir)
+        compiler_options = ["-Ofast", "-march=native"]
+        self.jit_parameters = {
+                            "cffi_extra_compile_args" : compiler_options,
+                            "cache_dir"               : cache_dir,
+                            "cffi_libraries"          : ["m"]
+                        }
         
         # Read configuration file and setup mesh
         self.read_config_file(config_file=config_file)

@@ -19,6 +19,36 @@ pprint = print # Allows flushing from arbitrary rank
 print = PETSc.Sys.Print # Automatically flushes output to stream in parallel
 
 class SolverKNPEMI:
+    """ Solver class for the KNP-EMI problem. 
+        Uses PETSc to solve the linear system at each timestep.
+    """
+    ## Default solver parameters
+    # Iterative solver and preconditioner type
+    ksp_type  = 'gmres' 
+    pc_type   = 'hypre'
+    
+    # Default iterative solver parameters
+    ksp_rtol           = 1e-8
+    ksp_max_it         = 5000
+    use_P_mat          = True  # use P as preconditioner?
+    reassemble_P       = False # reassemble P at each Nth timestep?
+    reassemble_N       = 1     # reassemble P every N timesteps if reassemble_P=True
+    verbose            = False
+    use_block_Jacobi   = True
+    nonzero_init_guess = True
+    norm_type          = 'preconditioned' 
+
+    # BoomerAMG preconditioner parameters
+    max_amg_iter     = 1
+    strong_threshold = 0.5
+
+    # Default output save interval
+    save_interval     = 20 # save every nth timestep
+
+    # Iteration counter and time variables
+    tot_its           = 0.0
+    tot_assembly_time = 0.0
+    tot_solver_time   = 0.0
 
     def __init__(self,
                 problem: ProblemKNPEMI,
@@ -58,7 +88,9 @@ class SolverKNPEMI:
             if 'strong_threshold' in ksp_settings:
                 self.strong_threshold = float(ksp_settings['strong_threshold']) # Hypre strong threshold
             if 'reassemble_P' in ksp_settings:
-                self.reassemble_P = ksp_settings['reassemble_P'] # Option to re-assemble preconditioner
+                self.reassemble_P = bool(ksp_settings['reassemble_P']) # Option to re-assemble preconditioner
+            if 'non_zero_init_guess' in ksp_settings:
+                self.nonzero_init_guess = bool(ksp_settings['non_zero_init_guess']) # Non-zero initial guess option
 
         # Initialize output files
         if self.save_xdmfs : self.init_xdmf_savefile()
@@ -353,8 +385,8 @@ class SolverKNPEMI:
                     # Set operators of iterative solver
                     self.ksp.setOperators(self.A, self.P_) if self.use_P_mat else self.ksp.setOperators(self.A)
                 
-                # Finalize PETSc setup
-                self.ksp.setUp()
+                    # Finalize PETSc setup
+                    self.ksp.setUp()
 
                 # Add contribution to setup time
                 setup_timer += self.comm.allreduce(time.perf_counter() - tic, op=MPI.MAX)         
@@ -833,30 +865,3 @@ class SolverKNPEMI:
         if not self.direct_solver:
             # Save iterations
             np.save(self.problem.output_dir+"iterations.npy", np.array(self.iterations))
-
-    # Iterative solver and preconditioner type
-    ksp_type  = 'gmres' 
-    pc_type   = 'hypre'
-    
-    # Default iterative solver parameters
-    ksp_rtol           = 1e-8
-    ksp_max_it         = 50000
-    use_P_mat          = True  # use P as preconditioner?
-    reassemble_P       = False # reassemble P at each Nth timestep?
-    reassemble_N       = 1     # reassemble P every N timesteps if reassemble_P=True
-    verbose            = False
-    use_block_Jacobi   = True
-    nonzero_init_guess = True
-    norm_type          = 'preconditioned' 
-
-    # BoomerAMG preconditioner parameters
-    max_amg_iter     = 1
-    strong_threshold = 0.5
-
-    # Default output save interval
-    save_interval     = 20 # save every nth timestep
-
-    # Iteration counter and time variables
-    tot_its           = 0.0
-    tot_assembly_time = 0.0
-    tot_solver_time   = 0.0
