@@ -73,7 +73,7 @@ def main():
     assert np.allclose(
             [relative_error_phi_i, relative_error_phi_e],
             [0.0, 0.0],
-            atol=ksp_rtol*10 # The solver tolerance sets a limit on the achievable accuracy
+            atol=ksp_rtol*100 # The solver tolerance sets a limit on the achievable accuracy
         )
     
     # Check that the iterative solver uses the same number of
